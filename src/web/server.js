@@ -237,9 +237,12 @@ const routes = {
     const toks = await col('tokens').find({ _id: { $in: entries.map((e) => e.token) } }, { projection: { symbol: 1, launchpad: 1, 'outcome.rugged': 1, 'outcome.peak_multiple': 1, creator: 1 } }).toArray();
     const tmap = new Map(toks.map((t) => [t._id, t]));
     const cluster = w.cluster_id ? await col('clusters').findOne({ _id: w.cluster_id }, { projection: { size: 1, verdict: 1, score: 1, 'ai.label': 1, 'rule.tags': 1 } }) : null;
+    const fundEdges = await col('edges').find({ type: 'fund', to: id }, { projection: { from: 1, hash: 1 } }).toArray();
+    const hashOf = new Map(fundEdges.map((x) => [x.from, x.hash]));
+    for (const f of w.funders || []) f.hash = f.hash || hashOf.get(f.account) || null;
     const { _id, ...rest } = w;
     return { id: _id, ...rest, cluster: cluster ? strip(cluster) : null,
-      entries: entries.map((e) => ({ token: e.token, symbol: tmap.get(e.token)?.symbol || null, launchpad: e.launchpad, rank: e.rank, delay_s: e.delay_s, buy_near: e.buy_near, roi: e.roi, roi_now: e.roi_now, first_buy_ts: e.first_buy_ts, rugged: !!tmap.get(e.token)?.outcome?.rugged, peak_multiple: tmap.get(e.token)?.outcome?.peak_multiple ?? null, is_creator: e.is_creator })) };
+      entries: entries.map((e) => ({ token: e.token, first_buy_hash: e.first_buy_hash || null, symbol: tmap.get(e.token)?.symbol || null, launchpad: e.launchpad, rank: e.rank, delay_s: e.delay_s, buy_near: e.buy_near, roi: e.roi, roi_now: e.roi_now, first_buy_ts: e.first_buy_ts, rugged: !!tmap.get(e.token)?.outcome?.rugged, peak_multiple: tmap.get(e.token)?.outcome?.peak_multiple ?? null, is_creator: e.is_creator })) };
   },
 
   '/api/tokens': async (u) => {
@@ -266,7 +269,7 @@ const routes = {
     const { _id, ...rest } = t;
     const audit = summarizeAudit(await getCachedAudit(id));
     return { id: _id, ...rest, audit, entries: entries.map((e) => { const w = wmap.get(e.wallet), c = w?.cluster_id ? cmap.get(w.cluster_id) : null;
-      return { wallet: e.wallet, rank: e.rank, delay_s: e.delay_s, buy_near: e.buy_near, roi: e.roi, roi_now: e.roi_now, sold_share: e.sold_share, is_creator: e.is_creator, kind: w?.kind || null, funder_kind: w?.funder_kind || null,
+      return { wallet: e.wallet, first_buy_hash: e.first_buy_hash || null, rank: e.rank, delay_s: e.delay_s, buy_near: e.buy_near, roi: e.roi, roi_now: e.roi_now, sold_share: e.sold_share, is_creator: e.is_creator, kind: w?.kind || null, funder_kind: w?.funder_kind || null,
         wallet_age_days: w?.created_ts ? Math.round((e.first_buy_ts - w.created_ts) / 86400e3) : null, cluster: c ? { id: c._id, size: c.size, verdict: c.verdict, label: c.ai?.label || c.rule?.tags?.[0] || null } : null }; }) };
   },
 
@@ -277,6 +280,9 @@ const routes = {
     const rows = await col('events').find(f, { projection: { _id: 0, at: 0 } }).sort({ ts: -1 }).limit(clamp(u.searchParams.get('limit'), 200, 1000)).toArray();
     return { rows };
   },
+
+  // meme.cooking token pages are addressed by meme id: the UI needs token -> id once
+  '/api/meme-ids': async () => ({ ids: Object.fromEntries((await col('tokens').find({ launchpad: 'memecooking', meme_id: { $ne: null } }, { projection: { meme_id: 1 } }).toArray()).map((x) => [x._id, x.meme_id])) }),
 
   '/api/health': async () => { let db = false; try { getDb(); db = true; } catch {} return { ok: true, db, now: Date.now(), ai: { enabled: aiEnabled(), ok: aiStatus.ok }, recent: recentLogs.length, port: config.web.ports }; },
 };

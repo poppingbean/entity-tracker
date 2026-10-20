@@ -3,6 +3,7 @@
 //   node src/cli.js process                            process everything that is pending, then regroup (and review with NEAR AI)
 //   node src/cli.js reprofile                          profile every early wallet again, then regroup
 //   node src/cli.js label <account> "<name>" [type]    name an exchange / service wallet (type: exchange|service|bridge|fund|other)
+//   node src/cli.js rebuild-entries                    recompute early entries from stored trades (no network), then regroup
 //   node src/cli.js audit <account> [--force] [--json]  audit any NEAR contract / token (access keys, code, tax, sell behaviour)
 //   node src/cli.js import-scanner [state.json] [--dry]  copy the live scanner's data (launches, evaluations, blacklist, positions) here
 //   node src/cli.js scan <token> [--features]          run the gates + AI analyst on any stored token (no buying)
@@ -23,6 +24,8 @@ import { buildEntities } from './evaluate/entities.js';
 import { scanDry, blacklistCreator } from './scanner/pipeline.js';
 import { importScanner } from './import/scanner.js';
 import { auditNearContract, summarizeAudit } from './audit/service.js';
+import { buildEntries, buildOutcome } from './collect/analyze.js';
+const buildEntries_done = async () => { await evaluateGroups(); };
 import { resetSim, simBuy, managePositions } from './sim/portfolio.js';
 import { checkAi, aiEnabled, aiStatus } from './ai/nearai.js';
 
@@ -80,6 +83,21 @@ try {
     await col('labels').replaceOne({ _id: account }, { _id: account, label: name, type, ts: Date.now() }, { upsert: true });
     await buildEntities();
     info(`labelled ${account} as "${name}" (${type})`);
+  } else if (cmd === 'rebuild-entries') {
+    // recompute every token's early entries and outcome from the trades already stored (no network): picks up new fields such as the buy tx
+    const toks = await col('tokens').find({ status: { $nin: ['skipped_quote'] }, trades_n: { $gt: 0 } }).toArray();
+    let n = 0;
+    for (const t of toks) {
+      const trades = await col('trades').find({ token: t._id }).sort({ ts: 1 }).toArray();
+      if (!trades.length) continue;
+      const entries = buildEntries(t, trades, Date.now(), { ...config.entry, minutes: config.outcome.minutes });
+      const outcome = buildOutcome(t, trades, Date.now(), config.outcome);
+      for (const e of entries) e.token_rugged = outcome.rugged;
+      if (entries.length) await col('entries').bulkWrite(entries.map((e) => ({ replaceOne: { filter: { _id: e._id }, replacement: e, upsert: true } })), { ordered: false });
+      n += entries.length;
+    }
+    info(`rebuilt ${n} early entries from stored trades`);
+    await buildEntries_done();
   } else if (cmd === 'audit') {
     const doc = await auditNearContract(args[0], { force: args.includes('--force') });
     if (doc.notFound) { console.log(`${doc.address}: no contract on this account`); }

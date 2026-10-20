@@ -99,7 +99,7 @@ export async function profileWallet(account) {
   for (const x of f.funders) {
     const byName = classifyAccount(x.account, null);
     const txc = byName === 'wallet' ? await txCountOf(x.account) : null;
-    fundersOut.push({ account: x.account, kind: byName === 'wallet' ? classifyAccount(x.account, txc) : byName, near: x.near, ts: x.ts, tx_count: txc, creator_only: !!x.creatorOnly, via: x.via || null });
+    fundersOut.push({ account: x.account, kind: byName === 'wallet' ? classifyAccount(x.account, txc) : byName, near: x.near, ts: x.ts, tx_count: txc, creator_only: !!x.creatorOnly, via: x.via || null, hash: x.hash || null });
     edges.push({ _id: `fund|${x.account}|${account}`, type: 'fund', from: x.account, to: account, near: x.near, first_ts: x.ts, hash: x.hash, hop: 1 });
   }
   // follow the first funder up the chain (its funder, and so on) while it is an ordinary wallet

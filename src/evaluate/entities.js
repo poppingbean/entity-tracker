@@ -17,6 +17,8 @@ export async function buildEntities() {
   const tokensOf = new Map();
   for (const e of entries) (tokensOf.get(e.wallet) || tokensOf.set(e.wallet, new Set()).get(e.wallet)).add(e.token);
 
+  const fundEdges = await col('edges').find({ type: 'fund', to: { $in: [...wmap.keys()] } }, { projection: { from: 1, to: 1, hash: 1 } }).toArray();
+  const hashOf = new Map(fundEdges.map((x) => [`${x.from}|${x.to}`, x.hash]));
   const manual = Object.fromEntries((await col('labels').find().toArray()).map((l) => [l._id, l]));
   const ents = new Map();
   const get = (id) => { let e = ents.get(id); if (!e) { e = { _id: id, roles: new Set(), kind: null, tx_count: null, funded: new Map(), sinks: new Map() }; ents.set(id, e); } return e; };
@@ -25,7 +27,7 @@ export async function buildEntities() {
   for (const w of wallets) {
     for (const f of w.funders || []) {
       const e = get(f.account); e.roles.add('funder'); e.kind = e.kind || f.kind; e.tx_count = e.tx_count ?? f.tx_count;
-      const cur = e.funded.get(w._id) || { wallet: w._id, near: 0, ts: f.ts, via: f.via || null, hop: 1 };
+      const cur = e.funded.get(w._id) || { wallet: w._id, near: 0, ts: f.ts, hash: f.hash || hashOf.get(`${f.account}|${w._id}`) || null, via: f.via || null, hop: 1 };
       cur.near += f.near || 0; e.funded.set(w._id, cur);
     }
     for (const c of w.chain || []) {

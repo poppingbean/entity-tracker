@@ -92,7 +92,7 @@ export function buildEntries(token, trades, now, cfg) {
     }
     const vNow = valueAt(now, nowPrice);
     return {
-      _id: `${token._id}|${c.wallet}`, token: token._id, wallet: c.wallet, rank: i + 1, first_buy_ts: c.first, delay_s: Math.round((c.first - live) / 1000),
+      _id: `${token._id}|${c.wallet}`, token: token._id, wallet: c.wallet, rank: i + 1, first_buy_ts: c.first, first_buy_hash: c.wb[0].hash || null, delay_s: Math.round((c.first - live) / 1000),
       buy_near: c.buyNear, buy_tokens: buyTokens, n_buys: c.wb.length, entry_price: buyTokens ? c.buyNear / buyTokens : null,
       is_creator: !!token.creator && c.wallet === token.creator, roi, sold_share: soldShare, taken_out: takenOut,
       roi_now: nowPrice != null ? vNow.value / c.buyNear - 1 : null, sold_share_now: vNow.soldShare,
