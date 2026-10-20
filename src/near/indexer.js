@@ -57,9 +57,12 @@ export function decodeTx(t) {
     if (fc) { let args = null; try { args = JSON.parse(Buffer.from(fc.args, 'base64').toString()); } catch {} calls.push({ method: fc.method_name, args, depositNear: toNear(fc.deposit || '0') }); }
     if (a.Transfer) transfers.push({ to: tx.receiver_id, near: toNear(a.Transfer.deposit || '0') });
   }
-  const events = [], logs = [];
+  const events = [], logs = [], inflows = [];
   let failed = false;
   for (const r of t.receipts) {
+    // NEAR moved by a receipt: predecessor -> receiver (gas refunds come from "system" and are skipped)
+    const rc = r.receipt;
+    if (rc && rc.predecessor_id && rc.predecessor_id !== 'system') for (const a of rc.receipt?.Action?.actions || []) if (a.Transfer) inflows.push({ from: rc.predecessor_id, to: rc.receiver_id, near: toNear(a.Transfer.deposit || '0') });
     const o = r.execution_outcome.outcome;
     if (o.status && o.status.Failure) failed = true;
     for (const l of o.logs) {
@@ -67,7 +70,7 @@ export function decodeTx(t) {
       else logs.push({ executor: o.executor_id, text: l });
     }
   }
-  return { hash: tx.hash, signer: tx.signer_id, receiver: tx.receiver_id, ts: Number(String(t.execution_outcome.block_timestamp).slice(0, 13)), height: t.execution_outcome.block_height, calls, transfers, events, logs, failed };
+  return { hash: tx.hash, signer: tx.signer_id, receiver: tx.receiver_id, ts: Number(String(t.execution_outcome.block_timestamp).slice(0, 13)), height: t.execution_outcome.block_height, calls, transfers, inflows, events, logs, failed };
 }
 
 /** New tx hashes of an account since a block height, oldest first (used to follow launchpad contracts). */

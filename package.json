@@ -13,6 +13,7 @@
     "process": "node src/cli.js process",
     "status": "node src/cli.js status",
     "check-ai": "node src/cli.js check-ai",
+    "reprofile": "node src/cli.js reprofile",
     "test": "node --test test/logic.test.js"
   },
   "dependencies": {

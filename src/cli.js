@@ -1,6 +1,7 @@
 // Command line helpers.
 //   node src/cli.js backfill <launchpad|all> <hours>   replay recent launches into the database
 //   node src/cli.js process                            process everything that is pending, then regroup (and review with NEAR AI)
+//   node src/cli.js reprofile                          profile every early wallet again, then regroup
 //   node src/cli.js evaluate                           only regroup + rule verdicts
 //   node src/cli.js review [n]                         NEAR AI review of up to n groups
 //   node src/cli.js status                             counts
@@ -44,6 +45,18 @@ try {
         }
       }
     }
+    for (let guard = 0; guard < 400; guard++) {
+      try { if (!(await profilePending(60))) break; fails = 0; }
+      catch (e) { if (++fails > 8) throw e; await new Promise((r) => setTimeout(r, fails * 5000)); }
+    }
+    await evaluateGroups();
+    if (aiEnabled()) { let k; do { k = await reviewPending(5); } while (k > 0); }
+  } else if (cmd === 'reprofile') {
+    // forget every funding / flow result and profile all early wallets again (after the profiling logic changed)
+    await col('edges').deleteMany({ type: { $in: ['fund', 'flow'] } });
+    await col('wallets').deleteMany({ is_early: { $ne: true } }); // cached funder nodes
+    await col('wallets').updateMany({ is_early: true }, { $set: { profiled: false }, $unset: { funding_done: '', chain: '', funders: '', flow_out: '' } });
+    let fails = 0;
     for (let guard = 0; guard < 400; guard++) {
       try { if (!(await profilePending(60))) break; fails = 0; }
       catch (e) { if (++fails > 8) throw e; await new Promise((r) => setTimeout(r, fails * 5000)); }

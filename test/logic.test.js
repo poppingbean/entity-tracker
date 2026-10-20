@@ -123,3 +123,12 @@ test('AI reply parsing: plain, fenced, and prose-wrapped JSON; review validation
   assert.equal(r.verdict, 'good'); assert.equal(r.confidence, 1); assert.equal(r.archetype, 'unclear'); assert.deepEqual(r.red_flags, []);
   assert.equal(normaliseReview({ verdict: 'maybe' }), null);
 });
+
+test('groups: an exchange wallet paying the same odd amount to two wallets within the hour links them; round amounts do not', () => {
+  const w = (id, near, ts) => ({ _id: id, chain: [{ account: 'cex', kind: 'hub', hop: 1 }], funders: [{ account: 'cex', kind: 'hub', near, ts }], flow_out: [] });
+  const wallets = [w('a', 17.706, T0), w('b', 17.706, T0 + 20 * MIN), w('c', 10, T0), w('d', 10, T0 + 5 * MIN), w('e', 17.706, T0 + 3 * 3600e3)];
+  const { walletGroup } = buildGroups(wallets, [], new Map(), { cobuySeconds: 15, cobuyMinTokens: 4 });
+  assert.equal(walletGroup.get('a'), walletGroup.get('b'), 'same odd amount, 20 min apart');
+  assert.notEqual(walletGroup.get('c'), walletGroup.get('d'), 'round amounts are everyone');
+  assert.notEqual(walletGroup.get('a'), walletGroup.get('e'), 'hours apart');
+});

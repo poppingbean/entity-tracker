@@ -5,11 +5,13 @@
 //              wallets that fund dozens of unrelated early buyers are ignored: sharing them proves nothing)
 //   flow     - one sent NEAR to the other, or they both sent NEAR to the same non-generic destination
 //   cobuy    - they bought within a few seconds of each other in at least COBUY_MIN_TOKENS different tokens
+//   hub_twin - the same exchange hot wallet paid them the same odd amount (e.g. 17.706 NEAR) within an hour
 //   creator  - a token's creator funded them or they sent NEAR to the creator (insider)
 import { classifyAccount, isGenericKind } from './profile.js';
 
 export const DISTRIBUTOR_MAX_CHILDREN = 40; // a funder of more early wallets than this is a distributor, not an owner
 export const SINK_MAX_SENDERS = 12;         // a destination that many early wallets pay is an exchange deposit or a service, not an owner
+export const HUB_TWIN_MS = 3600e3;         // same odd amount from the same exchange wallet within this time = same person
 export const SINK_MIN_NEAR = 2;             // each wallet must have sent at least this much: dust to a bot / fee address (e.g. a trading bot) is not ownership
 
 class UF {
@@ -33,12 +35,29 @@ export function buildGroups(wallets, entries, tokens, cfg) {
 
   // --- funder links: every non-generic account on a wallet's chain is an anchor; count how many early wallets each anchor reaches
   const reach = new Map(); // anchor -> Set(early wallets)
-  for (const w of wallets) for (const c of w.chain || []) { if (isGenericKind(c.kind)) break; (reach.get(c.account) || reach.set(c.account, new Set()).get(c.account)).add(w._id); }
+  for (const w of wallets) {
+    const anchors = new Set();
+    for (const f of w.funders || []) if (!isGenericKind(f.kind) && !f.creator_only) anchors.add(f.account);  // every meaningful first-level funder
+    for (const c of w.chain || []) { if (isGenericKind(c.kind)) break; anchors.add(c.account); }              // and the first funder's own funders
+    for (const a of anchors) (reach.get(a) || reach.set(a, new Set()).get(a)).add(w._id);
+  }
   for (const [anchor, ws] of reach) {
     if (ws.size < 2 && !early.has(anchor)) continue;            // an anchor reaching one wallet links nothing (unless it is itself an early wallet)
     if (ws.size > DISTRIBUTOR_MAX_CHILDREN) continue;           // distributor
     for (const w of ws) uf.union(w, anchor);
     addLink(early.has(anchor) ? 'funded_by_member' : 'shared_funder', anchor, ...ws);
+  }
+
+  // --- hub twins: an exchange hot wallet pays two early wallets the same odd amount within the hour (one person withdrawing twice)
+  const byHub = new Map();
+  for (const w of wallets) for (const f of w.funders || []) if (f.kind === 'hub' && f.near && f.ts) (byHub.get(f.account) || byHub.set(f.account, []).get(f.account)).push({ w: w._id, near: f.near, ts: f.ts });
+  for (const [hub, list] of byHub) {
+    list.sort((a, b) => a.ts - b.ts);
+    for (let i = 0; i < list.length; i++) for (let j = i + 1; j < list.length; j++) {
+      if (list[j].ts - list[i].ts > HUB_TWIN_MS) break;
+      const a = list[i], b = list[j];
+      if (a.w !== b.w && Math.abs(a.near - b.near) <= 0.0005 && Math.abs(a.near - Math.round(a.near)) > 0.001) { uf.union(a.w, b.w); addLink('hub_twin', `${hub}|${a.near.toFixed(3)}`, a.w, b.w); }
+    }
   }
 
   // --- flow links: between early wallets, and into a shared non-generic destination
