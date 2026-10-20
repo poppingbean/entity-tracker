@@ -14,6 +14,8 @@
     "status": "node src/cli.js status",
     "check-ai": "node src/cli.js check-ai",
     "reprofile": "node src/cli.js reprofile",
+    "scan": "node src/cli.js scan",
+    "sim-reset": "node src/cli.js sim-reset",
     "test": "node --test test/logic.test.js"
   },
   "dependencies": {

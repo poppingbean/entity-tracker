@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>NEAR Entity Tracker</title>
+<title>NEAR Entity Tracker · Scanner</title>
 <style>
   :root { --bg:#0b0f14; --panel:#131a22; --line:#2a3441; --text:#cdd6e0; --muted:#8393a7; --g:#3fb950; --r:#f85149; --a:#d29922; --b:#58a6ff; --p:#bc8cff; }
   * { box-sizing:border-box; }
@@ -66,7 +66,7 @@ const get = async (path, params) => { const q = params ? '?' + new URLSearchPara
 const nb = (a) => `<a href="https://nearblocks.io/address/${encodeURIComponent(a)}" target="_blank" rel="noopener">${esc(short(a, 22))}</a>`;
 const tokLink = (id, lp) => { const e = encodeURIComponent(id); const u = lp === 'nearlytrade' ? `https://nearly.trade/${e}` : lp === 'justhoot' ? `https://justhoot.fun/p/${e}` : `https://nearblocks.io/token/${e}`; return `<a href="${u}" target="_blank" rel="noopener">${esc(short(id, 26))}</a>`; };
 
-const ST = { entities: { type: '', q: '', sort: 'funded', offset: 0 }, groups: { verdict: '', q: '', sort: 'size', offset: 0 }, wallets: { q: '', verdict: '', sort: 'tokens', offset: 0 }, tokens: { q: '', status: '', rugged: '', offset: 0 }, logs: { level: '' } };
+const ST = { scans: { kind: '', pass: '', bought: '', q: '', offset: 0 }, entities: { type: '', q: '', sort: 'funded', offset: 0 }, groups: { verdict: '', q: '', sort: 'size', offset: 0 }, wallets: { q: '', verdict: '', sort: 'tokens', offset: 0 }, tokens: { q: '', status: '', rugged: '', offset: 0 }, logs: { level: '' } };
 const views = {};
 
 // ------------------------------------------------------------------ overview
@@ -159,6 +159,111 @@ function graphSvg(g) {
   return `<svg class="graph" viewBox="0 0 ${W} ${H}">${edgeSvg}${nodeSvg}</svg>`;
 }
 
+// ------------------------------------------------------------------ scanner monitor
+const lineSvg = (pts, { fmt = (v) => n(v, 2), base = null } = {}) => {
+  if (pts.length < 2) return '<p class="muted">not enough data points yet (a point is stored every 5 minutes while the worker runs)</p>';
+  const W = 820, H = 110, xs = pts.map((p) => p.x), ys = pts.map((p) => p.y);
+  const x0 = Math.min(...xs), x1 = Math.max(...xs), lo = Math.min(...ys, base ?? Infinity), hi = Math.max(...ys, base ?? -Infinity);
+  const sx = (x) => 8 + ((x - x0) / (x1 - x0 || 1)) * (W - 16), sy = (y) => H - 10 - ((y - lo) / (hi - lo || 1)) * (H - 20);
+  const d = pts.map((p, i) => `${i ? 'L' : 'M'}${sx(p.x).toFixed(1)},${sy(p.y).toFixed(1)}`).join('');
+  const b = base != null ? `<line x1="0" x2="${W}" y1="${sy(base)}" y2="${sy(base)}" stroke="#2a3441" stroke-dasharray="4 4"/>` : '';
+  return `<svg class="graph" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="height:110px">${b}<path d="${d}" fill="none" stroke="#58a6ff" stroke-width="1.6"/></svg><div class="muted" style="display:flex;justify-content:space-between"><span>${esc(when(x0))}</span><span>min ${fmt(lo)} · max ${fmt(hi)}</span><span>${esc(when(x1))}</span></div>`;
+};
+const scanState = (t, scanCfg) => {
+  if (t.status === 'skipped_quote') return '<span class="muted">skipped (quote not tradable)</span>';
+  const s = t.scan;
+  if (s?.stale) return '<span class="muted">stale</span>';
+  if (s?.error) return '<span class="r">error</span>';
+  if (s?.score != null) return s.bought ? '<span class="g"><b>BOUGHT (sim)</b></span>' : s.pass ? '<span class="a">gates PASS, no buy</span>' : '<span class="r">gates FAIL</span>';
+  const minAge = Math.max(scanCfg.observeSeconds, t.launchpad === 'justhoot' ? scanCfg.justhootMinAgeSeconds : 0) * 1000;
+  const left = minAge - (Date.now() - t.live_ts);
+  return left > 0 ? `<span class="b">observing, check in ${ago(left)}</span>` : '<span class="b">checking…</span>';
+};
+
+views.monitor = async () => {
+  const m = await get('/api/monitor');
+  const W = m.window24h, w = m.worker;
+  $('status').textContent = `worker ${w ? ago(m.now - w.ts) + ' ago' : 'not seen'} · AI ${m.ai.enabled ? (m.ai.ok === false ? 'error' : m.ai.model) : 'off'}`;
+  const kpi = (l, v, c = '') => `<div class="kpi"><span class="muted">${l}</span><b class="${c}">${v}</b></div>`;
+  return `<section><div class="grid">${kpi('Launches (24 h)', W.launches)}${kpi('Checked', W.scanned)}${kpi('Passed the gates', W.passed, 'a')}${kpi('Bought (simulated)', W.bought, 'g')}${kpi('Launches (3 h)', m.launchesLast3h)}</div></section>
+  <section><h2>Launchpad polling</h2><table><tr><th>Launchpad</th><th>Last poll</th><th>Status</th></tr>${m.polls.map((p) => `<tr><td>${esc(p.launchpad)}</td><td>${p.ts ? ago(m.now - p.ts) + ' ago' : '–'}</td><td class="${p.ok === false ? 'r' : 'g'}">${p.ok === false ? esc(p.error || 'failed') : p.ts ? 'ok' : '–'}</td></tr>`).join('')}</table></section>
+  <section><h2>Latest launches <span class="muted">· first check ${m.scan.observeSeconds}s after the pool opens (justhoot ${m.scan.justhootMinAgeSeconds}s) · click a row</span></h2><table>
+    <tr><th>Live</th><th>Symbol</th><th>Token</th><th>Pad</th><th>Age</th><th>State</th><th>Score</th><th>Gate fail</th><th>Decision</th><th>Early</th><th>Peak x</th><th>Now x</th></tr>
+    ${m.rows.map((t) => `<tr class="click" data-id="${esc(t.scan?.id || '')}" data-tok="${esc(t.id)}" onclick="this.dataset.id ? openScan(this.dataset.id) : openToken(this.dataset.tok)"><td>${when(t.live_ts)}</td><td><b>${esc(t.symbol || '')}</b></td><td>${esc(short(t.id, 28))}</td><td>${esc(t.launchpad)}</td><td>${ago(m.now - t.live_ts)}</td>
+      <td>${scanState(t, m.scan)}</td><td class="${t.scan?.score == null ? 'muted' : 'b'}">${t.scan?.score ?? '–'}</td><td class="r wrap">${esc((t.scan?.failed || []).join(', '))}</td><td class="wrap muted">${esc(t.scan?.decision || '')}</td><td>${t.entries_n ?? '–'}</td><td>${n(t.peak_multiple, 1)}</td><td>${n(t.last_multiple, 1)}${t.rugged ? ' <span class="r">RUG</span>' : ''}</td></tr>`).join('')}</table></section>`;
+};
+
+// ------------------------------------------------------------------ simulated investing
+const simAct = async (id, percent) => {
+  if (!confirm(`Simulated sale of ${percent}% of this position (paper money). Continue?`)) return;
+  const r = await fetch('/api/sim/sell', { method: 'POST', headers: { 'content-type': 'application/json', 'x-tracker': '1' }, body: JSON.stringify({ id, percent }) });
+  const j = await r.json();
+  alert(j.status === 'sold' || j.status === 'closed' ? `Simulated sale done: ${n(j.near, 3)} NEAR` : `Not sold: ${j.reason || j.status}`);
+  render();
+};
+views.sim = async () => {
+  const [o, op, cl] = await Promise.all([get('/api/sim/overview'), get('/api/sim/positions', { status: 'open' }), get('/api/sim/positions', { status: 'closed' })]);
+  const a = o.account, pnlCls = o.pnl_near >= 0 ? 'g' : 'r';
+  const kpi = (l, v, c = '') => `<div class="kpi"><span class="muted">${l}</span><b class="${c}">${v}</b></div>`;
+  const sum = (rows, f) => rows.reduce((t, p) => t + (f(p) || 0), 0);
+  const closedPnl = sum(cl.rows, (p) => (p.realized_near || 0) - (p.cost_near || 0));
+  return `<section><div class="grid">${kpi('Equity', n(o.equity, 2) + ' N', pnlCls)}${kpi('P&L', (o.pnl_near >= 0 ? '+' : '') + n(o.pnl_near, 2) + ' N (' + pct(o.pnl_pct, 1) + ')', pnlCls)}${kpi('Cash', n(a.cash_near, 2) + ' N')}${kpi('Open value', n(o.open_value, 2) + ' N')}${kpi('Realized', n(a.realized_near, 2) + ' N')}${kpi('Open / closed', o.open_n + ' / ' + o.closed_n)}${kpi('Buys today', o.buys_today + ' / ' + o.limits.maxBuysPerDay)}</div>
+    <p class="muted">Simulated wallet: started with ${n(a.start_near, 0)} NEAR on ${when(a.created_ts)}. Paper money only: buys and sells are priced with the pool's on-chain quote (price impact and pool fee included), the token's own tax and ${n(0.01 * 100, 0)}% extra slippage; nothing is sent to the chain. Size ${o.limits.buyNear} N (${o.limits.highRiskBuyNear} N when the AI rates the risk high), exposure cap ${o.limits.maxOpenCostNear} N, reserve ${o.limits.minReserveNear} N.</p></section>
+  <section><h2>Equity curve</h2>${lineSvg(o.equity_series.map((e) => ({ x: e.ts, y: e.equity })), { fmt: (v) => n(v, 2) + ' N', base: a.start_near })}</section>
+  <section><h2>Open positions <span class="muted">(${op.rows.length}) · click a row for fills and reviews</span></h2><table><tr><th>Opened</th><th>Token</th><th>Pad</th><th>Cost N</th><th>Value N</th><th>ROI</th><th>Realized N</th><th>AI</th><th>Take profit</th><th>Sell (simulated)</th></tr>
+    ${op.rows.map((p) => `<tr class="click" data-id="${esc(p.id)}" onclick="openSimPosition(this.dataset.id)"><td>${when(p.opened_ts)}</td><td><b>${esc(p.symbol || '')}</b> ${esc(short(p.token, 22))}</td><td>${esc(p.launchpad)}</td><td>${n(p.cost_near)}</td><td>${n(p.value_near, 3)}</td><td class="${roiCls(p.roi)}"><b>${pct(p.roi)}</b></td><td>${n(p.realized_near, 3)}</td>
+      <td class="muted">${p.ai ? esc(p.ai.action) + ' ' + n(p.ai.confidence) + ' ' + esc(p.ai.risk_level) : 'rules'}</td><td class="${p.take_profit ? 'g' : 'muted'}">${p.take_profit ? 'took ' + n(p.take_profit.near, 2) + ' N' : 'waiting for ROI > ' + (o.limits ? '300%' : '')}</td>
+      <td onclick="event.stopPropagation()">${[25, 50, 100].map((x) => `<button data-id="${esc(p.id)}" onclick="simAct(this.dataset.id,${x})">${x === 100 ? 'All' : x + '%'}</button>`).join(' ')}</td></tr>`).join('') || '<tr><td colspan="10" class="muted">no open positions</td></tr>'}</table></section>
+  <section><h2>Closed positions <span class="muted">(${cl.rows.length}) · cost ${n(sum(cl.rows, (p) => p.cost_near))} N · proceeds ${n(sum(cl.rows, (p) => p.realized_near), 2)} N · P&amp;L <span class="${roiCls(closedPnl)}">${n(closedPnl, 2)} N</span></span></h2><table><tr><th>Opened</th><th>Closed</th><th>Token</th><th>Pad</th><th>Cost N</th><th>Proceeds N</th><th>P&amp;L N</th><th>ROI</th><th>Exit</th></tr>
+    ${cl.rows.map((p) => { const pnl = (p.realized_near || 0) - (p.cost_near || 0), roi = p.cost_near ? pnl / p.cost_near : null; return `<tr class="click" data-id="${esc(p.id)}" onclick="openSimPosition(this.dataset.id)"><td>${when(p.opened_ts)}</td><td>${when(p.exit?.ts)}</td><td><b>${esc(p.symbol || '')}</b> ${esc(short(p.token, 22))}</td><td>${esc(p.launchpad)}</td><td>${n(p.cost_near)}</td><td>${n(p.realized_near, 3)}</td><td class="${roiCls(pnl)}">${pnl >= 0 ? '+' : ''}${n(pnl, 3)}</td><td class="${roiCls(roi)}"><b>${pct(roi)}</b></td><td class="muted wrap">${esc(p.exit?.reason || '')}</td></tr>`; }).join('') || '<tr><td colspan="9" class="muted">no closed positions</td></tr>'}</table></section>`;
+};
+
+async function openSimPosition(id) {
+  const p = await get('/api/sim/position', { id });
+  let h = `<h2 style="color:var(--text);font-size:15px">${esc(p.symbol || '')} · simulated position ${p.status === 'open' ? '<span class="v neutral">open</span>' : '<span class="v unknown">closed</span>'}</h2><p>${tokLink(p.token, p.launchpad)} · opened ${when(p.opened_ts)} · ${esc(p.origin || '')} · route ${esc(p.route || '')}</p>`;
+  h += `<p>cost ${n(p.cost_near)} N · value ${n(p.value_near, 3)} N · ROI <b class="${roiCls(p.roi)}">${pct(p.roi)}</b> · realized ${n(p.realized_near, 3)} N · held ${n(p.held_tokens, 0)} tokens${p.exit ? ' · exit: ' + esc(p.exit.reason) : ''}</p>`;
+  if (p.ai) h += `<p class="muted">AI at entry: ${esc(p.ai.action)} ${n(p.ai.confidence)} · risk ${esc(p.ai.risk_level)} · rule score ${p.score ?? '–'} · ${esc(p.size_reason || '')}</p>`;
+  h += '<h3>Fills</h3><table><tr><th>When</th><th>Side</th><th>NEAR</th><th>Tokens</th><th>Reason</th></tr>' + p.fills.map((f) => `<tr><td>${when(f.ts)}</td><td class="${f.side === 'buy' ? 'g' : 'r'}">${f.side}</td><td>${n(f.near, 3)}</td><td>${n(f.tokens, 0)}</td><td class="wrap muted">${esc(f.reason || '')}</td></tr>`).join('') + '</table>';
+  h += '<h3>Reviews of this token</h3><table><tr><th>When</th><th>Kind</th><th>Score</th><th>Rules</th><th>AI</th><th>Decision</th></tr>' + p.scans.map((s) => `<tr class="click" data-id="${esc(s.id)}" onclick="openScan(this.dataset.id)"><td>${when(s.ts)}</td><td>${esc(s.kind)}${s.kind === 'followup' ? ' +' + s.minutes + 'm' : ''}</td><td class="b">${s.score}</td><td class="${s.pass ? 'g' : 'r'}">${s.pass ? 'pass' : 'fail'}</td><td>${s.ai ? esc(s.ai.action) + ' ' + n(s.ai.confidence) : '–'}</td><td class="wrap muted">${esc(s.decision || '')}</td></tr>`).join('') + '</table>';
+  openDrawer(h);
+}
+
+// ------------------------------------------------------------------ evaluations (every gate check + AI review)
+views.scans = async () => {
+  const S = ST.scans, j = await get('/api/scans', { kind: S.kind, pass: S.pass, bought: S.bought, q: S.q, limit: 50, offset: S.offset });
+  const sel = (k, v, l) => `<option value="${v}" ${S[k] === v ? 'selected' : ''}>${l}</option>`;
+  return `<section><div class="bar"><h2 style="margin:0">Evaluations</h2><span class="muted">every gate check and AI analyst review</span>
+    <select onchange="ST.scans.kind=this.value;ST.scans.offset=0;render()">${sel('kind', '', 'all kinds')}${sel('kind', 'first', 'first check')}${sel('kind', 'followup', 'follow-up')}</select>
+    <select onchange="ST.scans.pass=this.value;ST.scans.offset=0;render()">${sel('pass', '', 'pass + fail')}${sel('pass', '1', 'gates pass')}${sel('pass', '0', 'gates fail')}</select>
+    <select onchange="ST.scans.bought=this.value;ST.scans.offset=0;render()">${sel('bought', '', 'all')}${sel('bought', '1', 'bought only')}</select>
+    <input id="sq" type="search" placeholder="symbol / token" value="${esc(S.q)}" onkeydown="if(event.key==='Enter'){ST.scans.q=this.value;ST.scans.offset=0;render()}">
+    <span class="muted">${n(j.total, 0)} rows</span><button ${S.offset ? '' : 'disabled'} onclick="ST.scans.offset=Math.max(0,ST.scans.offset-50);render()">◀</button><button ${S.offset + 50 < j.total ? '' : 'disabled'} onclick="ST.scans.offset+=50;render()">▶</button></div>
+    <table><tr><th>At</th><th>Symbol</th><th>Kind</th><th>Score</th><th>Gates</th><th>Gate fail</th><th>AI</th><th>Decision</th><th>Trade</th></tr>
+    ${j.rows.map((s) => `<tr class="click" data-id="${esc(s.id)}" onclick="openScan(this.dataset.id)"><td>${when(s.ts)}</td><td><b>${esc(s.symbol || '')}</b> <span class="muted">${esc(s.launchpad || '')}</span></td><td>${esc(s.kind)}${s.kind === 'followup' ? ' +' + s.minutes + 'm' : ''}</td><td class="b">${s.score}</td><td class="${s.pass ? 'g' : 'r'}">${s.pass ? 'pass' : 'fail'}</td>
+      <td class="r wrap">${esc((s.failed || []).map((g) => g.id).join(', '))}</td><td>${s.ai ? esc(s.ai.action) + ' ' + n(s.ai.confidence) + ' <span class="muted">' + esc(s.ai.risk_level) + '</span>' : '–'}</td><td class="wrap muted">${esc(s.decision || '')}</td><td class="${s.trade?.status === 'bought' ? 'g' : 'muted'}">${s.trade ? esc(s.trade.status) + (s.trade.near ? ' ' + s.trade.near + ' N' : '') : ''}</td></tr>`).join('') || '<tr><td colspan="9" class="muted">no evaluations yet: tokens are checked a couple of minutes after their pool opens</td></tr>'}</table></section>`;
+};
+
+async function openScan(id) {
+  const s = await get('/api/scan', { id }), f = s.features || {}, ai = s.ai;
+  let h = `<h2 style="color:var(--text);font-size:15px">${esc(s.symbol || '')} · ${esc(s.kind)}${s.kind === 'followup' ? ' +' + s.minutes + ' min' : ''} · score <span class="b">${s.score}</span> · gates <span class="${s.pass ? 'g' : 'r'}">${s.pass ? 'PASS' : 'FAIL'}</span></h2><p>${tokLink(s.token, s.launchpad)} · ${when(s.ts)} · ${esc(s.decision || '')}</p>`;
+  if (s.trade) h += `<p>Simulated trade: <b class="${s.trade.status === 'bought' ? 'g' : ''}">${esc(s.trade.status)}</b> ${s.trade.near ? s.trade.near + ' N' : ''} ${esc(s.trade.reason || '')}</p>`;
+  if ((s.failed || []).length) h += '<h3>Failed gates</h3><ul class="flags">' + s.failed.map((g) => `<li><span class="r">${esc(g.id)}</span> ${esc(g.why)}</li>`).join('') + '</ul>';
+  if (ai) h += `<div class="ai"><b>NEAR AI analyst</b> · ${esc(ai.action)} confidence ${n(ai.confidence)} · risk ${esc(ai.risk_level)} · quality ${ai.quality_score ?? '–'} <span class="muted">(${esc(ai.model)})</span>${(ai.reasons || []).length ? '<ul class="flags">' + ai.reasons.map((x) => `<li>${esc(x)}</li>`).join('') + '</ul>' : ''}${(ai.red_flags || []).length ? '<p class="a">Red flags</p><ul class="flags">' + ai.red_flags.map((x) => `<li>${esc(x)}</li>`).join('') + '</ul>' : ''}</div>`;
+  else h += '<p class="muted">No AI review (the gates failed, NEAR_AI_API_KEY is not set, or the call failed).</p>';
+  const ig = f.intel?.early_buyer_groups;
+  if (ig) h += `<h3>Entity intelligence</h3><p>Early buying by group verdict: <span class="g">good ${pct(ig.good.share)} (${ig.good.wallets} w)</span> · <span class="r">dangerous ${pct(ig.bad.share)} (${ig.bad.wallets} w)</span> · bots/losers ${pct(ig.bots_losers?.share)} · neutral ${pct(ig.neutral.share)} · unknown ${pct(ig.unknown.share)} · creator's earlier rugs: ${f.intel.creator_prior_rugs_or_dumps}/${f.intel.creator_prior_launches}</p>`;
+  h += `<h3>Key numbers</h3><table>${[['Pool', n(f.pool?.nearReserve, 1) + ' N · ' + (f.pool?.quoteSymbol || '') + ' · ' + (f.pool?.route || '')], ['Market cap', '$' + n(f.market?.mcapUsd, 0)], ['Buyers / sellers', `${f.trading?.uniqueBuyers} / ${f.trading?.uniqueSellers}`], ['Bought / sold', `${n(f.trading?.buyNear, 0)} / ${n(f.trading?.sellNear, 0)} N`], ['Price vs first trade', 'x' + f.trading?.priceMultipleSinceFirstTrade], ['Linked buyer share', pct(f.wallets?.linkedBuyerShare)], ['Creator sold', f.trading?.creatorSold ? 'yes' : 'no'], ['Tax', JSON.stringify(f.launch?.tax)], ['Contract matches template', String(f.contract?.matchesTemplate)], ['Top-10 holders', pct(f.holders?.top10ShareExPool, 1)]].map(([k, v]) => `<tr><td class="muted">${k}</td><td>${esc(v)}</td></tr>`).join('')}</table>`;
+  h += `<h3>All features</h3><pre style="white-space:pre-wrap;color:var(--muted)">${esc(JSON.stringify(f, null, 1))}</pre>`;
+  openDrawer(h);
+}
+
+// ------------------------------------------------------------------ configuration (read-only)
+views.config = async () => {
+  const c = await get('/api/config');
+  const block = (title, o) => `<section><h2>${title}</h2><table>${Object.entries(o).map(([k, v]) => `<tr><td class="muted">${esc(k)}</td><td>${esc(JSON.stringify(v))}</td></tr>`).join('')}</table></section>`;
+  return `<section class="muted">Read-only view of the settings in .env (never any secret). AI: ${c.ai.enabled ? 'NEAR AI ' + esc(c.ai.model) : 'off'} · database ${esc(c.db)} · launchpads ${esc(c.launchpads.join(', '))}</section>${block('Scanner timing', c.scan)}${block('Hard gates', c.rules)}${block('AI analyst', c.analyst)}${block('Simulated wallet', c.sim)}${block('Follow-up reviews', c.followUp)}${block('Early-investor tracking', { entry: c.entry, outcome: c.outcome })}`;
+};
+
 // ------------------------------------------------------------------ entities (exchange wallets, services, funders, destinations)
 views.entities = async () => {
   const S = ST.entities, j = await get('/api/entities', { type: S.type, q: S.q, sort: S.sort, limit: 50, offset: S.offset });
@@ -249,11 +354,11 @@ views.logs = async () => {
 // ------------------------------------------------------------------ shell
 function openDrawer(html) { $('drawerBody').innerHTML = html; $('drawer').classList.add('open'); }
 function closeDrawer() { $('drawer').classList.remove('open'); }
-const TABS = ['overview', 'signals', 'groups', 'entities', 'wallets', 'tokens', 'logs'];
+const TABS = ['monitor', 'sim', 'scans', 'overview', 'signals', 'groups', 'entities', 'wallets', 'tokens', 'logs', 'config'];
 let seq = 0;
 async function render() {
-  const v = (location.hash || '#overview').slice(1);
-  const view = views[v] ? v : 'overview';
+  const v = (location.hash || '#monitor').slice(1);
+  const view = views[v] ? v : 'monitor';
   $('nav').innerHTML = TABS.map((t) => `<a href="#${t}" class="${t === view ? 'on' : ''}">${t}</a>`).join('');
   const my = ++seq;
   try { const html = await views[view](); if (my === seq) $('main').innerHTML = html; }

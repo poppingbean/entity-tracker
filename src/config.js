@@ -2,6 +2,7 @@
 import 'dotenv/config';
 
 const num = (v, d) => (v === undefined || v === '' ? d : Number(v));
+const bool = (v, d) => (v === undefined || v === '' ? d : /^(1|true|yes)$/i.test(String(v)));
 const list = (v, d) => (v ? String(v).split(',').map((s) => s.trim()).filter(Boolean) : d);
 const nums = (v, d) => list(v, d.map(String)).map(Number).filter((x) => x > 0).sort((a, b) => a - b);
 
@@ -51,11 +52,57 @@ export const config = {
     reviewMinWallets: num(process.env.REVIEW_MIN_WALLETS, 2),
   },
 
+  // --- scanner mode: watch every new launch, apply the hard gates, ask the AI analyst, and invest in a SIMULATED wallet ---
+  scan: {
+    enabled: bool(process.env.SCAN_ENABLED, true),
+    observeSeconds: num(process.env.OBSERVE_SECONDS, 120),           // wait this long after the pool opens before the first check
+    justhootMinAgeSeconds: num(process.env.JUSTHOOT_MIN_AGE_SECONDS, 240), // justhoot taxes buys in the first ~2 minutes
+    maxTokenAgeMinutes: num(process.env.MAX_TOKEN_AGE_MINUTES, 60),  // a launch not checked within this long is skipped as stale
+  },
+  rules: {
+    minPoolNear: num(process.env.MIN_POOL_NEAR, 50),
+    minUniqueBuyers: num(process.env.MIN_UNIQUE_BUYERS, 11),
+    minMcapUsd: num(process.env.MIN_MCAP_USD, 8500),
+    maxTaxBps: num(process.env.MAX_TAX_BPS, 1000),
+    maxLinkedBuyerShare: num(process.env.MAX_LINKED_BUYER_SHARE, 0.4),
+    maxBadGroupShare: num(process.env.MAX_BAD_GROUP_SHARE, 0.4),
+    maxPriceMultipleSinceLaunch: num(process.env.MAX_PRICE_MULTIPLE, 8),
+    ignoreRunupBelowMcapUsd: num(process.env.IGNORE_RUNUP_BELOW_MCAP_USD, 10000),
+    minScore: num(process.env.MIN_RULE_SCORE, 55),
+  },
+  analyst: {
+    minConfidence: num(process.env.AI_MIN_CONFIDENCE, 0.65),
+    holdBuyMinScore: num(process.env.HOLD_BUY_MIN_SCORE, 75),        // a clean pass with this score is still bought when the AI only says HOLD
+    holdBuyBlockHighRisk: bool(process.env.HOLD_BUY_BLOCK_HIGH_RISK, false),
+    requireAi: bool(process.env.SIM_REQUIRE_AI, true),               // without a NEAR AI verdict nothing is bought (false = rules alone decide)
+  },
+  sim: {
+    enabled: bool(process.env.SIM_ENABLED, true),
+    startNear: num(process.env.SIM_START_NEAR, 100),
+    buyNear: num(process.env.SIM_BUY_NEAR, 5),
+    highRiskBuyNear: num(process.env.SIM_HIGH_RISK_BUY_NEAR, 2),     // smaller size when the AI rates the risk high
+    extraSlippageBps: num(process.env.SIM_EXTRA_SLIPPAGE_BPS, 100),  // on top of the pool's own price impact, to model latency
+    maxOpenCostNear: num(process.env.SIM_MAX_OPEN_COST_NEAR, 50),    // cap on NEAR tied up in open positions
+    maxBuysPerDay: num(process.env.SIM_MAX_BUYS_PER_DAY, 10),
+    minReserveNear: num(process.env.SIM_MIN_RESERVE_NEAR, 3),        // cash that is never spent
+    takeProfitRoi: num(process.env.TAKE_PROFIT_ROI, 3),              // +300 %
+    takeProfitShare: num(process.env.TAKE_PROFIT_PROFIT_SHARE, 0.5), // take out the cost plus this share of the profit, keep the rest
+    positionCheckSeconds: num(process.env.POSITION_CHECK_SECONDS, 60),
+    rugWatch: bool(process.env.SIM_RUG_WATCH, true),                 // creator dumps a held token: blacklist the creator, exit the position
+  },
+  followUp: {
+    enabled: bool(process.env.FOLLOWUP_ENABLED, true),               // re-review tokens that scored well at the first check
+    minScore: num(process.env.FOLLOWUP_MIN_SCORE, 70),
+    minutes: nums(process.env.FOLLOWUP_MINUTES, [15, 90, 180]),
+    canSell: bool(process.env.FOLLOWUP_CAN_SELL, true),              // an AI SELL on a held token sells it (simulated)
+  },
+
   web: {
     port: num(process.env.DASHBOARD_PORT, num(process.env.PORT, 8790)),
     host: process.env.DASHBOARD_HOST || (process.env.PORT ? '0.0.0.0' : '127.0.0.1'),
     password: process.env.DASHBOARD_PASSWORD || '',
   },
+
 };
 
 export function validateConfig({ needWeb = false } = {}) {

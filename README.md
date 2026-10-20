@@ -49,6 +49,21 @@ npm start                # worker + web UI (http://127.0.0.1:8790)
 - **NEAR AI:** create a key at <https://cloud.near.ai> (API Keys). `NEAR_AI_MODEL` can be any chat model from `https://cloud-api.near.ai/v1/models` that supports JSON output (default `z-ai/glm-5.3-flash`). Without a key the tracker still runs with rule-based verdicts.
 - **FastNEAR:** an API key raises rate limits on the transaction indexer and RPC.
 - **Tests:** `npm test` (grouping, ROI, verdict and AI-parsing logic).
+- **Nothing here trades:** there is no wallet or private key; the only "trading" is the simulated wallet in MongoDB.
+
+## Scanner mode: monitor, AI analyst and simulated investing
+
+The tracker also does what the live scanner does, with **paper money instead of live trading**:
+
+1. **Monitor.** Every new launch on the configured launchpads is followed. `OBSERVE_SECONDS` (120; justhoot 240) after the pool opens it gets its first check.
+2. **Hard gates** (ported from the live scanner): tradable quote, standard token contract, locked LP, pool size, market cap, number of independent buyers, creator not selling, tax, no linked / creator-funded buyers (checked with the tracker's funding profiles), not over-extended, executable quote, plus two that only the tracker can apply: the creator has no earlier rugged or dumped launch (or a dev rug seen by the simulated wallet), and early buying is not dominated by groups judged **dangerous** (insiders, rug farmers, sybil snipers).
+3. **AI analyst (NEAR AI).** A token that passes the gates is reviewed by NEAR AI, which sees the features *and the tracker's memory of who the early buyers are* (`features.intel`: share of early NEAR from good / dangerous / bot-or-loser / neutral / unknown groups, and the creator's record). It answers BUY_MORE / HOLD / SELL with confidence, risk and reasons. BUY_MORE at `AI_MIN_CONFIDENCE` or above buys; a clean pass with rule score >= `HOLD_BUY_MIN_SCORE` also buys on HOLD; 5 NEAR (2 NEAR when the AI rates the risk high).
+4. **Simulated wallet.** `SIM_START_NEAR` paper NEAR. A buy or sell is priced with the pool's real on-chain quote (price impact and pool fee included), then the launch's token tax and `SIM_EXTRA_SLIPPAGE_BPS` are applied; caps on exposure, buys per day and a cash reserve apply. Take profit: at ROI above `TAKE_PROFIT_ROI` (+300 %) it takes out the cost plus `TAKE_PROFIT_PROFIT_SHARE` of the profit and keeps the rest. A creator dumping a held token (balance down 20 %) is blacklisted and the position is sold. The UI has simulated **Sell 25 / 50 / All** buttons.
+5. **Follow-up reviews.** Tokens that scored above `FOLLOWUP_MIN_SCORE` are re-reviewed at +15, +90 and +180 minutes (fresh features, gates and AI). A failed review of a token we do not hold cancels the later ones; an AI SELL on a held token sells it.
+
+Everything is stored in MongoDB (`scans`, `followups`, `sim_account`, `sim_positions`, `sim_fills`, `sim_equity`, `blacklist`, `templates`). Useful commands: `node src/cli.js scan <token> [--features] [--buy]` (gates + AI on any stored token; `--buy` makes a simulated buy), `node src/cli.js sim-reset`. With no NEAR AI key nothing is bought unless `SIM_REQUIRE_AI=false`.
+
+**Limits:** the simulation uses the pool quote at decision time, so real fills could be worse in a fast market, and it cannot model another bot buying first. Treat results as a sanity check of the strategy, not a promise.
 
 ## Entities (exchange wallets included)
 
@@ -58,9 +73,9 @@ Names come from built-in patterns (Binance, OKX, Bybit, Meteor, Intear ...), the
 
 ## Web UI
 
-Tabs: **Overview** (counts, top good / bad groups, latest launches) · **Signals** (recent tokens where known good or bad groups were among the early buyers, with a bullish / warning / mixed assessment) · **Groups** (filter, sort, open one for the AI review, metrics, funding / money-flow graph, wallets, tokens and verdict history) · **Entities** (exchange wallets, services, funders, destinations) · **Wallets** · **Tokens** (early buyers with their group verdicts) · **Logs**.
+Tabs: **Monitor** (launches, first-check state, gates, decisions) · **Sim** (simulated wallet: equity curve, open and closed positions, simulated sell buttons) · **Evaluations** (every gate check and AI analyst review, with the AI's reasons) · **Config** (read-only settings) · **Overview** (counts, top good / bad groups, latest launches) · **Signals** (recent tokens where known good or bad groups were among the early buyers, with a bullish / warning / mixed assessment) · **Groups** (filter, sort, open one for the AI review, metrics, funding / money-flow graph, wallets, tokens and verdict history) · **Entities** (exchange wallets, services, funders, destinations) · **Wallets** · **Tokens** (early buyers with their group verdicts) · **Logs**.
 
-The UI and API are GET-only. `npm run web` serves the UI alone, `npm run worker` runs only the background loop, `npm start` runs both in one process.
+The UI and API are read-only except the simulated sell button (`POST /api/sim/sell`, paper positions only, same-origin + header check + Basic auth when exposed). `npm run web` serves the UI alone, `npm run worker` runs only the background loop, `npm start` runs both in one process.
 
 ## Deploying online (e.g. Railway)
 
@@ -71,7 +86,7 @@ The UI and API are GET-only. `npm run web` serves the UI alone, `npm run worker`
 
 ## MongoDB collections
 
-`tokens` (launches, outcome, status) · `trades` (swaps) · `transfers` (token hand-offs between wallets) · `entries` (early wallet × token, with ROI per checkpoint) · `wallets` (profile, funding chain, outflows, track record, group) · `edges` (funding and flow edges) · `entities` (every funder / destination account incl. exchange wallets) · `labels` (hand-set names) · `clusters` (groups: members, links, metrics, tokens, rule + AI verdicts) · `cluster_history` · `events` (30-day log) · `meta` (cursors, worker heartbeat).
+`tokens` (launches, outcome, status) · `trades` (swaps) · `transfers` (token hand-offs between wallets) · `entries` (early wallet × token, with ROI per checkpoint) · `wallets` (profile, funding chain, outflows, track record, group) · `edges` (funding and flow edges) · `scans` (gate checks + AI reviews) · `followups` · `sim_account` / `sim_positions` / `sim_fills` / `sim_equity` (simulated wallet) · `blacklist` · `templates` · `entities` (every funder / destination account incl. exchange wallets) · `labels` (hand-set names) · `clusters` (groups: members, links, metrics, tokens, rule + AI verdicts) · `cluster_history` · `events` (30-day log) · `meta` (cursors, worker heartbeat).
 
 ## Configuration
 

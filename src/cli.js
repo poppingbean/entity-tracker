@@ -3,6 +3,8 @@
 //   node src/cli.js process                            process everything that is pending, then regroup (and review with NEAR AI)
 //   node src/cli.js reprofile                          profile every early wallet again, then regroup
 //   node src/cli.js label <account> "<name>" [type]    name an exchange / service wallet (type: exchange|service|bridge|fund|other)
+//   node src/cli.js scan <token> [--features]          run the gates + AI analyst on any stored token (no buying)
+//   node src/cli.js sim-reset                          reset the simulated wallet
 //   node src/cli.js entities                           rebuild the entity table
 //   node src/cli.js evaluate                           only regroup + rule verdicts
 //   node src/cli.js review [n]                         NEAR AI review of up to n groups
@@ -16,6 +18,8 @@ import { processToken } from './collect/process.js';
 import { profilePending } from './graph/profile.js';
 import { evaluateGroups, reviewPending } from './evaluate/run.js';
 import { buildEntities } from './evaluate/entities.js';
+import { scanDry, blacklistCreator } from './scanner/pipeline.js';
+import { resetSim, simBuy, managePositions } from './sim/portfolio.js';
 import { checkAi, aiEnabled, aiStatus } from './ai/nearai.js';
 
 const [cmd, ...args] = process.argv.slice(2);
@@ -72,6 +76,20 @@ try {
     await col('labels').replaceOne({ _id: account }, { _id: account, label: name, type, ts: Date.now() }, { upsert: true });
     await buildEntities();
     info(`labelled ${account} as "${name}" (${type})`);
+  } else if (cmd === 'scan') {
+    const r = await scanDry(args[0]);
+    console.log(JSON.stringify({ rules: { pass: r.rules.pass, score: r.rules.score, failed: r.rules.failed }, ai: r.ai, decision: r.decision, features: args.includes('--features') ? r.features : undefined }, null, 1));
+    if (args.includes('--buy') && r.decision.buy) { // simulated buy right now (paper money)
+      const t = await col('tokens').findOne({ _id: args[0] });
+      console.log('simulated buy:', JSON.stringify(await simBuy(t, r.decision.near, { ai: r.ai, score: r.rules.score, reason: r.decision.why })));
+    }
+  } else if (cmd === 'sim-check') {
+    await managePositions(blacklistCreator);
+    console.log(JSON.stringify(await col('sim_positions').find().toArray(), null, 1));
+    console.log(JSON.stringify(await col('sim_account').findOne({ _id: 'main' })));
+  } else if (cmd === 'sim-reset') {
+    await resetSim();
+    info(`simulated wallet reset to ${config.sim.startNear} NEAR`);
   } else if (cmd === 'entities') {
     await buildEntities();
   } else if (cmd === 'evaluate') {

@@ -41,3 +41,28 @@ export async function quoteNearPrice(q) {
   priceCache.set(q, { ts: Date.now(), price });
   return price;
 }
+
+/** Raw amount of quote token `q` received for `amountInYocto` NEAR through its bridge pool. */
+export async function bridgeOut(q, amountInYocto) {
+  if (q === WNEAR) return amountInYocto;
+  const b = QUOTES[q]?.bridge;
+  if (!b) return '0';
+  if (b.dex === 'dcl') return (await view(DCL, 'quote', { pool_ids: [b.poolId], input_token: WNEAR, output_token: q, input_amount: amountInYocto }))?.amount || '0';
+  return (await view(REFV2, 'get_return', { pool_id: b.poolId, token_in: WNEAR, amount_in: amountInYocto, token_out: q })) || '0';
+}
+
+const USDC = '17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1';
+let usdCache = { ts: 0, price: null };
+/** NEAR price in USD from the deepest Ref DCL USDC/wNEAR pool, cached 5 min. */
+export async function nearUsdPrice() {
+  if (usdCache.price && Date.now() - usdCache.ts < 300e3) return usdCache.price;
+  try {
+    const q = await view(DCL, 'quote', { pool_ids: [`${USDC}|wrap.near|100`], input_token: WNEAR, output_token: USDC, input_amount: (10n ** 24n).toString() });
+    const price = Number(q?.amount || 0) / 1e6;
+    if (price > 0) usdCache = { ts: Date.now(), price };
+  } catch {}
+  return usdCache.price;
+}
+
+/** NEAR value of a raw amount of quote token q. */
+export async function quoteToNear(q, raw) { return units(raw || '0', await decimals(q)) * (await quoteNearPrice(q)); }

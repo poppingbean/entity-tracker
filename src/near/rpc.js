@@ -48,3 +48,8 @@ export async function txIndexer(pathname, body) {
 }
 
 export const yoctoToNear = (y) => Number(BigInt(y) / 10n ** 18n) / 1e6;
+
+export const viewAccount = (accountId) => rpc('query', { request_type: 'view_account', finality: 'final', account_id: accountId });
+export async function ftBalance(token, accountId) {
+  try { return BigInt(await view(token, 'ft_balance_of', { account_id: accountId })); } catch { return 0n; }
+}

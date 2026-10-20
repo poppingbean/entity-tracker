@@ -1,4 +1,6 @@
-// Web UI + JSON API (GET only, no write endpoints). Read-only on-chain, read-only here: nothing in this process can move funds.
+// Web UI + JSON API. Read-only on-chain and read-only toward any wallet: nothing in this process can move funds.
+// The only write is the SIMULATED sell button (POST /api/sim/sell), which changes paper positions in MongoDB, guarded by Basic auth
+// (when exposed), a same-origin check and a custom header.
 import http from 'node:http';
 import fs from 'node:fs';
 import crypto from 'node:crypto';
@@ -6,6 +8,7 @@ import { col, metaGet } from '../db.js';
 import { config } from '../config.js';
 import { recentLogs, info } from '../log.js';
 import { aiEnabled, aiStatus } from '../ai/nearai.js';
+import { simSell, ensureAccount } from '../sim/portfolio.js';
 
 const page = fs.readFileSync(new URL('./index.html', import.meta.url), 'utf8');
 const clamp = (v, d, max) => Math.min(max, Math.max(1, Number(v) || d));
@@ -126,6 +129,69 @@ const routes = {
     return { id: _id, ...rest };
   },
 
+  // ------------------------------------------------------------ scanner monitor + simulated investing
+  '/api/monitor': async () => {
+    const now = Date.now(), day = now - 24 * 3600e3;
+    const [recent, c24, scanned, passed, bought, polls, newTokens] = await Promise.all([
+      col('tokens').find({}, { projection: { symbol: 1, launchpad: 1, live_ts: 1, status: 1, scan: 1, scan_done: 1, entries_n: 1, 'outcome.rugged': 1, 'outcome.peak_multiple': 1, 'outcome.last_multiple': 1, creator: 1 } }).sort({ live_ts: -1 }).limit(40).toArray(),
+      col('tokens').countDocuments({ live_ts: { $gt: day } }), col('tokens').countDocuments({ live_ts: { $gt: day }, scan_done: true, 'scan.score': { $exists: true } }),
+      col('tokens').countDocuments({ live_ts: { $gt: day }, 'scan.pass': true }), col('sim_positions').countDocuments({ opened_ts: { $gt: day } }),
+      Promise.all(config.launchpads.map(async (p) => ({ launchpad: p, ...(await metaGet(`poll:${p}`)) }))), col('tokens').countDocuments({ live_ts: { $gt: now - 3 * 3600e3 } }),
+    ]);
+    const worker = await metaGet('worker');
+    return { now, scan: config.scan, window24h: { launches: c24, scanned, passed, bought }, launchesLast3h: newTokens, polls, worker, ai: { enabled: aiEnabled(), model: config.ai.model, ...(worker?.ai || {}) },
+      rows: recent.map((t) => ({ id: t._id, symbol: t.symbol, launchpad: t.launchpad, live_ts: t.live_ts, status: t.status, scan: t.scan || null, scan_done: !!t.scan_done, entries_n: t.entries_n ?? null, rugged: !!t.outcome?.rugged, peak_multiple: t.outcome?.peak_multiple ?? null, last_multiple: t.outcome?.last_multiple ?? null })) };
+  },
+
+  '/api/sim/overview': async () => {
+    const a = await ensureAccount();
+    const [open, closed, equity, today] = await Promise.all([
+      col('sim_positions').find({ status: 'open' }, { projection: { value_near: 1, cost_near: 1, realized_near: 1 } }).toArray(), col('sim_positions').countDocuments({ status: 'closed' }),
+      col('sim_equity').find().sort({ ts: -1 }).limit(600).toArray(), col('sim_positions').countDocuments({ opened_ts: { $gt: Date.now() - 86400e3 } }),
+    ]);
+    const openValue = open.reduce((s, p) => s + (p.value_near || 0), 0), openCost = open.reduce((s, p) => s + Math.max(0, p.cost_near - (p.realized_near || 0)), 0);
+    const equityNow = a.cash_near + openValue;
+    return { account: { start_near: a.start_near, cash_near: a.cash_near, realized_near: a.realized_near, created_ts: a.created_ts }, open_n: open.length, closed_n: closed, open_value: openValue, open_cost: openCost,
+      equity: equityNow, pnl_near: equityNow - a.start_near, pnl_pct: (equityNow - a.start_near) / a.start_near, buys_today: today, equity_series: equity.reverse().map((e) => ({ ts: e.ts, equity: e.equity })),
+      limits: { buyNear: config.sim.buyNear, highRiskBuyNear: config.sim.highRiskBuyNear, maxOpenCostNear: config.sim.maxOpenCostNear, maxBuysPerDay: config.sim.maxBuysPerDay, minReserveNear: config.sim.minReserveNear } };
+  },
+
+  '/api/sim/positions': async (u) => {
+    const st = u.searchParams.get('status') || 'open';
+    const rows = await col('sim_positions').find(st === 'all' ? {} : { status: st }).sort(st === 'closed' ? { 'exit.ts': -1 } : { opened_ts: -1 }).limit(300).toArray();
+    return { rows: rows.map(strip) };
+  },
+
+  '/api/sim/position': async (u) => {
+    const id = u.searchParams.get('id');
+    const p = await col('sim_positions').findOne({ _id: id });
+    if (!p) return { error: 'not found' };
+    const fills = await col('sim_fills').find({ position_id: id }).sort({ ts: 1 }).toArray();
+    const scans = await col('scans').find({ token: p.token }, { projection: { features: 0 } }).sort({ ts: 1 }).toArray();
+    const { _id, ...rest } = p;
+    return { id: _id, ...rest, fills: fills.map(({ _id: x, position_id, ...f }) => f), scans: scans.map(strip) };
+  },
+
+  '/api/scans': async (u) => {
+    const f = {};
+    const kind = u.searchParams.get('kind'); if (kind) f.kind = kind;
+    const pass = u.searchParams.get('pass'); if (pass === '1' || pass === '0') f.pass = pass === '1';
+    if (u.searchParams.get('bought') === '1') f['trade.status'] = 'bought';
+    const q = (u.searchParams.get('q') || '').trim(); if (q) f.$or = [{ symbol: rx(q) }, { token: rx(q) }];
+    const limit = clamp(u.searchParams.get('limit'), 50, 200), offset = Math.max(0, Number(u.searchParams.get('offset')) || 0);
+    const [total, rows] = await Promise.all([col('scans').countDocuments(f), col('scans').find(f, { projection: { features: 0, ai: 0 } }).sort({ ts: -1 }).skip(offset).limit(limit).toArray()]);
+    return { total, rows: rows.map(strip) };
+  },
+
+  '/api/scan': async (u) => {
+    const s = await col('scans').findOne({ _id: u.searchParams.get('id') });
+    if (!s) return { error: 'not found' };
+    const { _id, ...rest } = s;
+    return { id: _id, ...rest };
+  },
+
+  '/api/config': async () => ({ scan: config.scan, rules: config.rules, analyst: config.analyst, sim: config.sim, followUp: config.followUp, entry: config.entry, outcome: config.outcome, launchpads: config.launchpads, ai: { enabled: aiEnabled(), model: config.ai.model }, db: config.mongo.dbName }),
+
   '/api/wallets': async (u) => {
     const f = { is_early: true };
     const q = (u.searchParams.get('q') || '').trim(); if (q) f._id = rx(q);
@@ -198,8 +264,20 @@ export function startWeb() {
   const server = http.createServer(async (req, res) => {
     try {
       if (exposed() && !authorized(req)) { res.writeHead(401, { 'www-authenticate': 'Basic realm="entity tracker"' }).end('authentication required'); return; }
-      if (req.method !== 'GET') { res.writeHead(405).end(); return; }
       const u = new URL(req.url, 'http://localhost');
+      if (req.method === 'POST' && u.pathname === '/api/sim/sell') {
+        const origin = req.headers.origin;
+        if (req.headers['x-tracker'] !== '1' || (origin && new URL(origin).host !== req.headers.host)) { res.writeHead(403, { 'content-type': 'application/json' }).end(JSON.stringify({ error: 'forbidden' })); return; }
+        let body = ''; for await (const d of req) { body += d; if (body.length > 5000) break; }
+        const { id, percent } = JSON.parse(body || '{}');
+        const share = Number(percent) / 100;
+        const pos = id && await col('sim_positions').findOne({ _id: String(id) });
+        const tok = pos && await col('tokens').findOne({ _id: pos.token });
+        if (!pos || !tok || !(share > 0 && share <= 1)) { res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ status: 'skipped', reason: 'position and percent (1-100) required' })); return; }
+        res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' }).end(JSON.stringify(await simSell(tok, pos, { share, reason: `manual (UI ${percent}%)` })));
+        return;
+      }
+      if (req.method !== 'GET') { res.writeHead(405).end(); return; }
       if (u.pathname === '/' || u.pathname === '/index.html') { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' }).end(page); return; }
       const route = routes[u.pathname];
       if (!route) { res.writeHead(404).end('not found'); return; }

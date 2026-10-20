@@ -15,6 +15,7 @@ async function saveLaunches(launchpad, txs) {
     for (const l of adapters[launchpad].parse(tx)) {
       const doc = {
         launchpad, creator: l.creator, symbol: l.symbol || null, name: l.name || null, meme_id: l.memeId ?? null, pool: l.pool,
+        dev_buy_near: l.devBuyNear ?? null, dev_buy_quote_raw: l.devBuyQuoteRaw ?? null, lp: l.lp ?? null, tax: l.tax ?? null, liquidity_near: l.liquidityNear ?? null,
         live_ts: tx.ts, live_height: tx.height, live_tx: tx.hash, status: isKnownQuote(l.pool.quote) ? 'new' : 'skipped_quote', // pools quoted in other memecoins cannot be valued in NEAR
          sync_height: null, sync_ts: null, trades_n: 0, created_ts: Date.now(), next_process_ts: 0,
       };

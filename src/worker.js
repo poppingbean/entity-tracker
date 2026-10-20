@@ -7,14 +7,19 @@ import { processDue } from './collect/process.js';
 import { profilePending } from './graph/profile.js';
 import { evaluateGroups, reviewPending } from './evaluate/run.js';
 import { checkAi, aiEnabled, aiStatus } from './ai/nearai.js';
+import { scanTick, followUpTick, blacklistCreator } from './scanner/pipeline.js';
+import { managePositions } from './sim/portfolio.js';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-export const runtime = { startedTs: Date.now(), cycles: 0, lastCycleTs: null, stopping: false, lastEvalTs: 0 };
+export const runtime = { startedTs: Date.now(), cycles: 0, lastCycleTs: null, stopping: false, lastEvalTs: 0, lastPositionCheck: 0 };
 
 /** One pass of the pipeline. Returns what it did, so callers (the CLI) can loop until idle. */
 export async function cycle({ evaluate = true } = {}) {
   const found = await discover();
   const processed = await processDue(8);
+  let scanned = 0, followed = 0;
+  if (config.scan.enabled) { scanned = await scanTick(); followed = await followUpTick(); }
+  if (config.sim.enabled && Date.now() - runtime.lastPositionCheck > config.sim.positionCheckSeconds * 1000) { runtime.lastPositionCheck = Date.now(); await managePositions(blacklistCreator); }
   const profiled = await profilePending(40);
   let groups = null, reviewed = 0;
   const stale = Date.now() - runtime.lastEvalTs > 10 * 60e3;
@@ -22,7 +27,7 @@ export async function cycle({ evaluate = true } = {}) {
     groups = (await evaluateGroups()).groups; runtime.lastEvalTs = Date.now();
   }
   if (evaluate && aiEnabled()) reviewed = await reviewPending(3);
-  return { found, processed, profiled, groups, reviewed };
+  return { found, processed, scanned, followed, profiled, groups, reviewed };
 }
 
 export async function runWorker() {
