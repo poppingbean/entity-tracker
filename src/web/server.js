@@ -10,6 +10,7 @@ import { recentLogs, info, error } from '../log.js';
 import { aiEnabled, aiStatus } from '../ai/nearai.js';
 import { simSell, ensureAccount, positionPnl } from '../sim/portfolio.js';
 import { startFetch, jobStatus } from '../collect/ondemand.js';
+import { redact } from './redact.js';
 import { creatorIndex, creatorBrief, creatorFlag } from '../evaluate/creators.js';
 import { auditNearContract, getCachedAudit, validNearAddress, summarizeAudit } from '../audit/service.js';
 
@@ -420,7 +421,8 @@ export function startWeb() {
       if (HIDDEN_PUBLIC.has(u.pathname) && config.web.hosted && !config.web.password) { res.writeHead(404).end('not found'); return; } // logs and settings are not shown on a public deployment
       const route = routes[u.pathname];
       if (!route) { res.writeHead(404).end('not found'); return; }
-      res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' }).end(JSON.stringify(await route(u, req)));
+      const data = await route(u, req);
+      res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' }).end(JSON.stringify(config.web.hideCriteria ? redact(u.pathname, data) : data));
     } catch (e) { res.writeHead(500, { 'content-type': 'application/json' }).end(JSON.stringify({ error: e.message })); }
   });
   // A host routes its public domain to ONE port (Railway: the service's target port, 8080 by default, or $PORT). Listen on all of them
