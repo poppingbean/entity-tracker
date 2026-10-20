@@ -33,6 +33,8 @@ export const config = {
   outcome: {
     minutes: nums(process.env.OUTCOME_MINUTES, [60, 360, 1440]),
     rugDrawdown: num(process.env.RUG_DRAWDOWN, 0.9),
+    roundTripPeak: num(process.env.ROUND_TRIP_PEAK, 3),          // a token that pumped to this multiple of its launch price ...
+    roundTripBack: num(process.env.ROUND_TRIP_BACK, 1.25),       // ... and is back at or below this multiple of it counts as a rug (round trip)
     softRugDrawdown: num(process.env.SOFT_RUG_DRAWDOWN, 0.7),    // a fall this deep counts as a rug when the creator also sold at least 1 NEAR
     winRoi: num(process.env.WIN_ROI, 0.2),
   },

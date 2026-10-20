@@ -282,3 +282,14 @@ test('simulated position profit split (open with a partial sale, and closed)', (
   const c = positionPnl({ status: 'closed', cost_near: 10, realized_near: 4, value_near: 0 });
   assert.ok(Math.abs(c.realized_pnl + 6) < 1e-9 && c.unrealized_pnl === 0);
 });
+
+test('rugs: a token that pumped and came back to its launch price is a round-trip rug', () => {
+  const lcfg = { minutes: cfg.minutes, rugDrawdown: 0.9, softRugDrawdown: 0.7, roundTripPeak: 3, roundTripBack: 1.25 };
+  // launch 0.01, peak 0.04 (4x), now 0.011 (1.1x): drawdown 72 %, creator did not sell
+  const rt = [trade('a', true, 10, 1000, 1), trade('b', true, 40, 1000, 5), trade('x', false, 11, 1000, 80)];
+  const o = buildOutcome(token, rt, T0 + 120 * MIN, lcfg);
+  assert.deepEqual(o.rug_kinds, ['round_trip']); assert.equal(o.rugged, true);
+  // pumped 2x only, or still well above launch: not a rug
+  assert.equal(buildOutcome(token, [trade('a', true, 10, 1000, 1), trade('b', true, 20, 1000, 5), trade('x', false, 11, 1000, 80)], T0 + 120 * MIN, lcfg).rugged, false);
+  assert.equal(buildOutcome(token, [trade('a', true, 10, 1000, 1), trade('b', true, 40, 1000, 5), trade('x', false, 25, 1000, 80)], T0 + 120 * MIN, lcfg).rugged, false);
+});
