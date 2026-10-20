@@ -1,0 +1,22 @@
+{
+  "name": "near-entity-tracker",
+  "version": "1.0.0",
+  "description": "Online tracker of early investors in NEAR launchpad tokens: groups wallets by on-chain funding and money flow, scores each group, and uses NEAR AI to judge good / bad groups. Read-only on-chain, MongoDB as the main database.",
+  "type": "module",
+  "private": true,
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "start": "node src/main.js",
+    "web": "node src/main.js --web-only",
+    "worker": "node src/main.js --worker-only",
+    "backfill": "node src/cli.js backfill",
+    "process": "node src/cli.js process",
+    "status": "node src/cli.js status",
+    "check-ai": "node src/cli.js check-ai",
+    "test": "node --test test/logic.test.js"
+  },
+  "dependencies": {
+    "dotenv": "^17.2.0",
+    "mongodb": "^7.7.0"
+  }
+}

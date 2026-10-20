@@ -1,0 +1,239 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NEAR Entity Tracker</title>
+<style>
+  :root { --bg:#0b0f14; --panel:#131a22; --line:#2a3441; --text:#cdd6e0; --muted:#8393a7; --g:#3fb950; --r:#f85149; --a:#d29922; --b:#58a6ff; --p:#bc8cff; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:13px/1.45 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; }
+  header { display:flex; flex-wrap:wrap; align-items:center; gap:12px; padding:10px 16px; border-bottom:1px solid var(--line); background:var(--panel); position:sticky; top:0; z-index:5; }
+  h1 { font-size:15px; margin:0; }
+  nav { display:flex; gap:4px; flex-wrap:wrap; }
+  nav a { padding:4px 10px; border:1px solid var(--line); border-radius:6px; color:var(--muted); text-decoration:none; cursor:pointer; }
+  nav a.on { color:var(--text); background:#1d2733; border-color:#8393a7; }
+  main { padding:14px 16px; max-width:1500px; margin:0 auto; }
+  section { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:12px; margin-bottom:14px; overflow-x:auto; }
+  h2 { font-size:13px; margin:0 0 8px; color:var(--muted); font-weight:600; }
+  h3 { font-size:12px; margin:14px 0 6px; color:var(--muted); }
+  table { border-collapse:collapse; width:100%; }
+  th, td { text-align:left; padding:4px 8px; border-bottom:1px solid #1b2430; white-space:nowrap; }
+  th { color:var(--muted); font-weight:600; }
+  tr.click { cursor:pointer; } tr.click:hover td { background:#18212c; }
+  .g { color:var(--g); } .r { color:var(--r); } .a { color:var(--a); } .b { color:var(--b); } .p { color:var(--p); } .muted { color:var(--muted); }
+  .wrap { white-space:normal; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(165px,1fr)); gap:10px; }
+  .kpi { border:1px solid var(--line); border-radius:8px; padding:8px 10px; background:#0b0f14; } .kpi b { display:block; font-size:17px; margin-top:2px; }
+  .bar { display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:8px; }
+  input, select, button { background:#0b0f14; color:var(--text); border:1px solid var(--line); border-radius:6px; padding:4px 8px; font:inherit; }
+  button { cursor:pointer; } button:disabled { opacity:.4; cursor:default; }
+  .v { padding:0 8px; border-radius:9px; border:1px solid var(--line); font-size:12px; }
+  .v.good { color:var(--g); border-color:#245c32; background:#102417; } .v.bad { color:var(--r); border-color:#6b2a27; background:#2a1213; }
+  .v.neutral { color:var(--a); border-color:#5c4a1c; background:#241d0d; } .v.unknown { color:var(--muted); }
+  .tag { padding:0 6px; border:1px solid var(--line); border-radius:8px; font-size:11px; color:var(--muted); margin-right:3px; }
+  #drawer { position:fixed; top:0; right:-880px; width:860px; max-width:100vw; height:100vh; overflow:auto; background:var(--panel); border-left:1px solid var(--line); padding:14px; transition:right .18s; z-index:10; }
+  #drawer.open { right:0; box-shadow:-8px 0 24px #000a; }
+  #drawer p { margin:3px 0; }
+  .ai { border:1px solid #33405a; background:#0f1624; border-radius:8px; padding:10px; margin:8px 0; }
+  ul.flags { margin:2px 0 6px 16px; padding:0; } ul.flags li { margin:1px 0; }
+  svg.graph { width:100%; background:#0b0f14; border:1px solid var(--line); border-radius:6px; }
+  .legend span { margin-right:12px; }
+  a { color:var(--b); }
+</style>
+</head>
+<body>
+<header>
+  <h1>NEAR Entity Tracker</h1>
+  <nav id="nav"></nav>
+  <span class="muted" id="status" style="margin-left:auto"></span>
+</header>
+<main id="main"></main>
+<div id="drawer"><button onclick="closeDrawer()">Close ✕</button><div id="drawerBody"></div></div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const n = (x, d = 2) => (x == null || Number.isNaN(+x) ? '–' : (+x).toLocaleString('en-US', { maximumFractionDigits: d }));
+const pct = (x, d = 0) => (x == null ? '–' : (x * 100).toFixed(d) + '%');
+const when = (ts) => (ts ? new Date(ts).toLocaleString() : '–');
+const ago = (ms) => { if (ms == null) return '–'; const s = Math.max(0, Math.round(ms / 1000)); return s < 60 ? s + 's' : s < 3600 ? Math.floor(s / 60) + 'm' : s < 86400 ? Math.floor(s / 3600) + 'h' : Math.floor(s / 86400) + 'd'; };
+const short = (a, k = 18) => (a && a.length > k ? a.slice(0, k - 2) + '…' : a || '–');
+const roiCls = (r) => (r == null ? 'muted' : r > 0 ? 'g' : r < 0 ? 'r' : 'muted');
+const vb = (v) => `<span class="v ${esc(v || 'unknown')}">${esc(v || 'unknown')}</span>`;
+const tags = (t) => (t || []).map((x) => `<span class="tag">${esc(x)}</span>`).join('');
+const get = async (path, params) => { const q = params ? '?' + new URLSearchParams(Object.entries(params).filter(([, v]) => v !== '' && v != null)) : ''; const r = await fetch(path + q); const j = await r.json(); if (j.error && !j.rows && !j.now && !j.nodes) throw new Error(j.error); return j; };
+const nb = (a) => `<a href="https://nearblocks.io/address/${encodeURIComponent(a)}" target="_blank" rel="noopener">${esc(short(a, 22))}</a>`;
+const tokLink = (id, lp) => { const e = encodeURIComponent(id); const u = lp === 'nearlytrade' ? `https://nearly.trade/${e}` : lp === 'justhoot' ? `https://justhoot.fun/p/${e}` : `https://nearblocks.io/token/${e}`; return `<a href="${u}" target="_blank" rel="noopener">${esc(short(id, 26))}</a>`; };
+
+const ST = { groups: { verdict: '', q: '', sort: 'size', offset: 0 }, wallets: { q: '', verdict: '', sort: 'tokens', offset: 0 }, tokens: { q: '', status: '', rugged: '', offset: 0 }, logs: { level: '' } };
+const views = {};
+
+// ------------------------------------------------------------------ overview
+views.overview = async () => {
+  const o = await get('/api/overview');
+  const W = o.worker, ai = o.ai;
+  $('status').textContent = `worker ${W ? ago(o.now - W.ts) + ' ago' : 'not seen'} · AI ${ai.enabled ? (ai.ok === false ? 'error' : ai.model) : 'off'} · db ${o.db}`;
+  const kpi = (l, v, c = '') => `<div class="kpi"><span class="muted">${l}</span><b class="${c}">${v}</b></div>`;
+  const cv = Object.fromEntries(o.clusterVerdict.map((x) => [x.verdict, x]));
+  const gl = (v) => (cv[v] ? `${cv[v].n} <span class="muted" style="font-size:12px">(${cv[v].wallets} wallets)</span>` : '0');
+  return `<section><div class="grid">
+    ${kpi('Tokens tracked', n(o.tokens, 0))}${kpi('Early entries', n(o.entries, 0))}${kpi('Early wallets', n(o.wallets, 0) + ` <span class="muted" style="font-size:12px">(${n(o.profiled, 0)} profiled)</span>`)}
+    ${kpi('Good groups', gl('good'), 'g')}${kpi('Bad groups', gl('bad'), 'r')}${kpi('Neutral', gl('neutral'), 'a')}${kpi('Unknown (few tokens)', gl('unknown'), 'muted')}
+  </div></section>
+  ${ai.enabled ? '' : '<section class="a">NEAR AI is off (set NEAR_AI_API_KEY). Groups get rule-based verdicts only.</section>'}
+  ${ai.enabled && ai.ok === false ? `<section class="r">NEAR AI error: ${esc(ai.error || '')}</section>` : ''}
+  <section><h2>Top good groups</h2>${groupTable(o.topGood)}</section>
+  <section><h2>Largest bad groups</h2>${groupTable(o.topBad)}</section>
+  <section><h2>Latest launches</h2><table><tr><th>Live</th><th>Token</th><th>Pad</th><th>Status</th><th>Early</th><th>Peak x</th><th>Rug</th></tr>
+    ${o.latest.map((t) => `<tr class="click" data-id="${esc(t.id)}" onclick="openToken(this.dataset.id)"><td>${when(t.live_ts)}</td><td><b>${esc(t.symbol || '')}</b> ${esc(short(t.id, 28))}</td><td>${esc(t.launchpad)}</td><td>${esc(t.status)}</td><td>${t.entries_n ?? '–'}</td><td>${n(t.outcome?.peak_multiple, 1)}</td><td class="${t.outcome?.rugged ? 'r' : 'muted'}">${t.outcome?.rugged ? 'RUG' : '–'}</td></tr>`).join('')}</table></section>`;
+};
+const groupTable = (rows) => `<table><tr><th>Group</th><th>Label</th><th>Wallets</th><th>Score</th><th>Tokens</th><th>Win</th><th>Rug</th><th>P&amp;L N</th></tr>
+  ${rows.map((c) => `<tr class="click" data-id="${esc(c.id)}" onclick="openGroup(this.dataset.id)"><td>${esc(c.id)}</td><td>${esc(c.ai?.label || (c.rule?.tags || []).join(', ') || '–')}</td><td>${c.size}</td><td>${n(c.score, 0)}</td><td>${c.metrics?.tokens_n ?? '–'}</td><td>${pct(c.metrics?.win_rate)}</td><td>${pct(c.metrics?.rug_share)}</td><td class="${roiCls(c.metrics?.pnl_near)}">${n(c.metrics?.pnl_near, 1)}</td></tr>`).join('') || '<tr><td colspan="8" class="muted">none yet</td></tr>'}</table>`;
+
+// ------------------------------------------------------------------ signals
+views.signals = async () => {
+  const j = await get('/api/signals', { hours: 72 });
+  const cls = { bullish: 'g', warning: 'r', mixed: 'a' };
+  return `<section><h2>Signals: recent tokens where known good / bad groups were among the early buyers <span class="muted">(last 72 h)</span></h2><table>
+    <tr><th>Live</th><th>Token</th><th>Pad</th><th>Assessment</th><th>Good</th><th>Bad</th><th>Early wallets</th><th>Groups</th><th>Now</th></tr>
+    ${j.rows.map((s) => `<tr class="click" data-id="${esc(s.token)}" onclick="openToken(this.dataset.id)"><td>${when(s.live_ts)}</td><td><b>${esc(s.symbol || '')}</b> ${esc(short(s.token, 26))}</td><td>${esc(s.launchpad)}</td>
+      <td class="${cls[s.assessment] || ''}"><b>${esc(s.assessment)}</b></td><td class="g">${s.good.w} w · ${n(s.good.near, 0)} N (${pct(s.good_share)})</td><td class="r">${s.bad.w} w · ${n(s.bad.near, 0)} N (${pct(s.bad_share)})</td><td>${s.early_wallets}</td>
+      <td class="wrap">${s.groups.slice(0, 3).map((g) => `${vb(g.verdict)} ${esc(g.label || g.id)} (${g.wallets})`).join(' · ')}</td>
+      <td>${s.outcome ? (s.outcome.rugged ? '<span class="r">RUG</span> ' : '') + 'x' + n(s.outcome.last_multiple, 1) : '–'}</td></tr>`).join('') || '<tr><td colspan="9" class="muted">no signals yet: needs profiled wallets and evaluated groups</td></tr>'}</table></section>`;
+};
+
+// ------------------------------------------------------------------ groups
+views.groups = async () => {
+  const S = ST.groups, j = await get('/api/clusters', { verdict: S.verdict, q: S.q, sort: S.sort, limit: 50, offset: S.offset });
+  const sel = (k, v, l) => `<option value="${v}" ${S[k] === v ? 'selected' : ''}>${l}</option>`;
+  return `<section><div class="bar"><h2 style="margin:0">Groups</h2>
+    <select onchange="ST.groups.verdict=this.value;ST.groups.offset=0;render()">${sel('verdict', '', 'all verdicts')}${['good', 'bad', 'neutral', 'unknown'].map((v) => sel('verdict', v, v)).join('')}</select>
+    <select onchange="ST.groups.sort=this.value;render()">${sel('sort', 'size', 'by size')}${sel('sort', 'score', 'by score')}${sel('sort', 'pnl', 'by P&L')}${sel('sort', 'recent', 'most recent entry')}</select>
+    <input id="gq" type="search" placeholder="wallet / group id / label" value="${esc(S.q)}" onkeydown="if(event.key==='Enter'){ST.groups.q=this.value;ST.groups.offset=0;render()}">
+    <span class="muted">${n(j.total, 0)} groups</span>
+    <button ${S.offset ? '' : 'disabled'} onclick="ST.groups.offset=Math.max(0,ST.groups.offset-50);render()">◀</button><button ${S.offset + 50 < j.total ? '' : 'disabled'} onclick="ST.groups.offset+=50;render()">▶</button></div>
+    <table><tr><th>Group</th><th>Verdict</th><th>Label</th><th>Tags</th><th>Wallets</th><th>Score</th><th>Tokens</th><th>Win</th><th>Rug</th><th>Insider</th><th>ROI</th><th>P&amp;L N</th><th>Last entry</th></tr>
+    ${j.rows.map((c) => `<tr class="click" data-id="${esc(c.id)}" onclick="openGroup(this.dataset.id)"><td>${esc(c.id)}</td><td>${vb(c.verdict)}${c.verdict_source === 'ai' ? ' <span class="tag">AI</span>' : ''}</td><td>${esc(c.ai?.label || '–')}</td><td>${tags(c.rule?.tags)}</td><td>${c.size}</td><td>${n(c.score, 0)}</td>
+      <td>${c.metrics.tokens_n}</td><td>${pct(c.metrics.win_rate)}</td><td>${pct(c.metrics.rug_share)}</td><td>${pct(c.metrics.creator_linked_share)}</td><td class="${roiCls(c.metrics.roi_weighted)}">${pct(c.metrics.roi_weighted)}</td><td class="${roiCls(c.metrics.pnl_near)}">${n(c.metrics.pnl_near, 1)}</td><td>${c.metrics.last_entry_ts ? ago(Date.now() - c.metrics.last_entry_ts) + ' ago' : '–'}</td></tr>`).join('') || '<tr><td colspan="13" class="muted">no groups yet</td></tr>'}</table></section>`;
+};
+
+async function openGroup(id) {
+  const [c, g] = await Promise.all([get('/api/cluster', { id }), get('/api/graph', { id })]);
+  const m = c.metrics, ai = c.ai;
+  let h = `<h2 style="color:var(--text);font-size:15px">${esc(c.id)} ${vb(c.verdict)} ${c.verdict_source === 'ai' ? '<span class="tag">by NEAR AI</span>' : '<span class="tag">by rules</span>'} ${tags(c.rule?.tags)}</h2>`;
+  h += `<p class="muted">${c.size} wallets · rule score ${n(c.rule?.score, 0)} (${esc(c.rule?.verdict)}) · updated ${when(c.updated_ts)}</p>`;
+  if (ai) h += `<div class="ai"><b>${esc(ai.label || 'AI review')}</b> · ${vb(ai.verdict)} confidence ${n(ai.confidence)} · ${esc(ai.archetype)} · advice <b>${esc(ai.follow_advice)}</b> <span class="muted">(${esc(ai.model)}, ${when(ai.ts)})</span>
+      <p>${esc(ai.summary)}</p>${(ai.reasons || []).length ? '<ul class="flags">' + ai.reasons.map((x) => `<li>${esc(x)}</li>`).join('') + '</ul>' : ''}${(ai.red_flags || []).length ? '<p class="a">Caution</p><ul class="flags">' + ai.red_flags.map((x) => `<li>${esc(x)}</li>`).join('') + '</ul>' : ''}</div>`;
+  else h += '<p class="muted">No NEAR AI review yet (needs NEAR_AI_API_KEY and at least the minimum number of judged tokens).</p>';
+  h += '<h3>Track record</h3><table>' + [
+    ['Judged tokens', m.tokens_n], ['Entries', m.entries_n], ['Total bought', n(m.total_buy_near, 1) + ' N'], ['P&L (mark-to-market)', n(m.pnl_near, 1) + ' N'], ['Weighted ROI', pct(m.roi_weighted)], ['Median token ROI', pct(m.median_token_roi)],
+    ['Win rate (tokens)', pct(m.win_rate)], ['Loss rate (≤ -50%)', pct(m.loss_rate)], ['Rugged tokens', `${m.rug_tokens_n} (${pct(m.rug_share)})`], ['Win rate inside rugs', pct(m.win_rate_in_rugs)], ['P&L inside rugs', n(m.pnl_in_rugs, 1) + ' N'],
+    ['Creator-linked entries', pct(m.creator_linked_share)], ['Fresh wallets (<3 d)', pct(m.fresh_share)], ['Synchronised buys', pct(m.sync_share)], ['Avg entry delay', n(m.avg_delay_s, 0) + ' s'], ['First-5 buyer share', pct(m.first_movers_share)],
+  ].map(([k, v]) => `<tr><td class="muted">${k}</td><td>${v}</td></tr>`).join('') + '</table>';
+  h += '<h3>Funding & money-flow graph</h3>' + graphSvg(g) + '<div class="legend muted"><span style="color:#58a6ff">● member wallet</span><span style="color:#d29922">● funder / anchor</span><span style="color:#8393a7">● exchange / relayer / other</span><span style="color:#3fb950">— funded by</span><span style="color:#f85149">— NEAR sent to</span></div>';
+  h += '<h3>Why these wallets are one group</h3><table><tr><th>Link</th><th>Anchor</th><th>Wallets</th></tr>' + (c.links || []).slice(0, 40).map((l) => `<tr><td>${esc(l.type)}</td><td>${esc(short(l.anchor, 40))}</td><td>${l.wallets.length}</td></tr>`).join('') + '</table>';
+  h += '<h3>Wallets</h3><table><tr><th>Wallet</th><th>Funded by</th><th>Kind</th><th>Age</th><th>Txs</th><th>Tokens</th><th>Win</th><th>ROI</th><th>P&amp;L N</th></tr>' + c.wallets.map((w) => `<tr class="click" data-id="${esc(w.id)}" onclick="openWallet(this.dataset.id)"><td>${esc(short(w.id, 24))}</td><td>${esc(short(w.funder, 20))} <span class="muted">${esc(w.funder_kind || '')}</span></td><td>${esc(w.kind || '')}</td><td>${w.created_ts ? ago(Date.now() - w.created_ts) : '–'}</td><td>${w.tx_count ?? '–'}</td><td>${w.stats?.tokens_n ?? '–'}</td><td>${pct(w.stats?.win_rate)}</td><td class="${roiCls(w.stats?.roi_weighted)}">${pct(w.stats?.roi_weighted)}</td><td class="${roiCls(w.stats?.pnl_near)}">${n(w.stats?.pnl_near, 1)}</td></tr>`).join('') + '</table>';
+  h += '<h3>Tokens the group bought early</h3><table><tr><th>Live</th><th>Token</th><th>Wallets</th><th>Bought N</th><th>ROI</th><th>P&amp;L N</th><th>Peak x</th><th>Rug</th><th>Insider</th><th>1st buy</th></tr>' + (c.tokens || []).map((t) => `<tr class="click" data-id="${esc(t.token)}" onclick="openToken(this.dataset.id)"><td>${when(t.live_ts)}</td><td><b>${esc(t.symbol || '')}</b> ${esc(short(t.token, 22))}</td><td>${t.wallets}</td><td>${n(t.buy_near, 1)}</td><td class="${roiCls(t.roi)}">${pct(t.roi)}</td><td class="${roiCls(t.pnl_near)}">${n(t.pnl_near, 1)}</td><td>${n(t.peak_multiple, 1)}</td><td class="${t.rugged ? 'r' : 'muted'}">${t.rugged ? 'RUG' : '–'}</td><td>${t.insider_wallets || '–'}</td><td>${t.first_delay_s}s</td></tr>`).join('') + '</table>';
+  if ((c.history || []).length) h += '<h3>Verdict history</h3><table><tr><th>When</th><th>Verdict</th><th>Score</th><th>AI</th><th>Tokens</th></tr>' + c.history.map((x) => `<tr><td>${when(x.ts)}</td><td>${vb(x.verdict)}</td><td>${n(x.score, 0)}</td><td>${x.ai_verdict ? esc(x.ai_verdict) + ' ' + n(x.ai_confidence) : '–'}</td><td>${x.tokens_n ?? '–'}</td></tr>`).join('') + '</table>';
+  openDrawer(h);
+}
+
+// Layered picture: funders on top, member wallets in the middle, destinations of NEAR at the bottom.
+function graphSvg(g) {
+  if (!g.nodes?.length) return '<p class="muted">no graph data</p>';
+  const nodes = new Map(g.nodes.map((x) => [x.id, { ...x, level: x.member ? 0 : null }]));
+  const fund = g.edges.filter((e) => e.type === 'fund'), flow = g.edges.filter((e) => e.type === 'flow');
+  // funders: one level above whoever they fund
+  for (let pass = 0; pass < 6; pass++) for (const e of fund) { const c = nodes.get(e.to), f = nodes.get(e.from); if (c && f && c.level != null && (f.level == null || f.level > c.level - 1)) f.level = c.level - 1; }
+  for (const e of flow) { const d = nodes.get(e.to); if (d && d.level == null) d.level = 1; }
+  for (const x of nodes.values()) if (x.level == null) x.level = -1;
+  const levels = [...new Set([...nodes.values()].map((x) => x.level))].sort((a, b) => a - b);
+  const W = 820, rowH = 110, H = levels.length * rowH + 30;
+  const pos = new Map();
+  levels.forEach((lv, li) => { const row = [...nodes.values()].filter((x) => x.level === lv); row.forEach((x, i) => pos.set(x.id, { x: 20 + ((i + 0.5) * (W - 40)) / row.length, y: 30 + li * rowH })); });
+  const color = (x) => (x.member ? '#58a6ff' : x.kind === 'wallet' || x.kind == null ? '#d29922' : '#8393a7');
+  const edgeSvg = g.edges.map((e) => { const a = pos.get(e.from), b = pos.get(e.to); if (!a || !b) return ''; const col = e.type === 'fund' ? '#3fb950' : '#f85149';
+    return `<path d="M${a.x},${a.y} C${a.x},${(a.y + b.y) / 2} ${b.x},${(a.y + b.y) / 2} ${b.x},${b.y}" fill="none" stroke="${col}" stroke-opacity=".5" stroke-width="${Math.min(3, 0.6 + Math.log10(1 + (e.near || 0)))}"><title>${esc(e.type)} ${esc(short(e.from, 20))} → ${esc(short(e.to, 20))} ${n(e.near, 2)} N</title></path>`; }).join('');
+  const nodeSvg = [...nodes.values()].map((x) => { const p = pos.get(x.id); return `<g><circle cx="${p.x}" cy="${p.y}" r="${x.member ? 7 : 5}" fill="${color(x)}"><title>${esc(x.id)}${x.kind ? ' · ' + esc(x.kind) : ''}${x.tx_count != null ? ' · ' + x.tx_count + ' txs' : ''}</title></circle>${nodes.size <= 40 ? `<text x="${p.x}" y="${p.y + 18}" fill="#8393a7" font-size="9" text-anchor="middle">${esc(short(x.id, 14))}</text>` : ''}</g>`; }).join('');
+  return `<svg class="graph" viewBox="0 0 ${W} ${H}">${edgeSvg}${nodeSvg}</svg>`;
+}
+
+// ------------------------------------------------------------------ wallets
+views.wallets = async () => {
+  const S = ST.wallets, j = await get('/api/wallets', { q: S.q, verdict: S.verdict, sort: S.sort, limit: 50, offset: S.offset });
+  const sel = (k, v, l) => `<option value="${v}" ${S[k] === v ? 'selected' : ''}>${l}</option>`;
+  return `<section><div class="bar"><h2 style="margin:0">Early wallets</h2>
+    <input id="wq" type="search" placeholder="wallet contains…" value="${esc(S.q)}" onkeydown="if(event.key==='Enter'){ST.wallets.q=this.value;ST.wallets.offset=0;render()}">
+    <select onchange="ST.wallets.verdict=this.value;ST.wallets.offset=0;render()">${sel('verdict', '', 'all groups')}${['good', 'bad', 'neutral', 'unknown'].map((v) => sel('verdict', v, 'group ' + v)).join('')}</select>
+    <select onchange="ST.wallets.sort=this.value;render()">${sel('sort', 'tokens', 'by tokens')}${sel('sort', 'pnl', 'by P&L')}${sel('sort', 'roi', 'by ROI')}${sel('sort', 'recent', 'newest')}</select>
+    <span class="muted">${n(j.total, 0)} wallets</span>
+    <button ${S.offset ? '' : 'disabled'} onclick="ST.wallets.offset=Math.max(0,ST.wallets.offset-50);render()">◀</button><button ${S.offset + 50 < j.total ? '' : 'disabled'} onclick="ST.wallets.offset+=50;render()">▶</button></div>
+    <table><tr><th>Wallet</th><th>Group</th><th>Funded by</th><th>Age</th><th>Txs</th><th>Tokens</th><th>Win</th><th>ROI</th><th>P&amp;L N</th><th>Rug</th></tr>
+    ${j.rows.map((w) => `<tr class="click" data-id="${esc(w.id)}" onclick="openWallet(this.dataset.id)"><td>${esc(short(w.id, 28))}</td><td>${w.cluster_id ? vb(w.cluster_verdict) + ' ' + esc(w.cluster_id) : '<span class="muted">solo</span>'}</td><td>${esc(short(w.funder, 18))} <span class="muted">${esc(w.funder_kind || '')}</span></td>
+      <td>${w.created_ts ? ago(Date.now() - w.created_ts) : '–'}</td><td>${w.tx_count ?? '–'}</td><td>${w.stats?.tokens_n ?? '–'}</td><td>${pct(w.stats?.win_rate)}</td><td class="${roiCls(w.stats?.roi_weighted)}">${pct(w.stats?.roi_weighted)}</td><td class="${roiCls(w.stats?.pnl_near)}">${n(w.stats?.pnl_near, 1)}</td><td>${pct(w.stats?.rug_share)}</td></tr>`).join('')}</table></section>`;
+};
+
+async function openWallet(id) {
+  const w = await get('/api/wallet', { id });
+  let h = `<h2 style="color:var(--text);font-size:15px">${esc(w.id)}</h2><p>${nb(w.id)} · ${esc(w.kind || '')} · ${w.tx_count ?? '–'} txs · created ${when(w.created_ts)}</p>`;
+  if (w.cluster) h += `<p>Group <a href="#" onclick="openGroup('${esc(w.cluster.id)}');return false">${esc(w.cluster.id)}</a> ${vb(w.cluster.verdict)} ${esc(w.cluster.ai?.label || '')} · ${w.cluster.size} wallets ${tags(w.cluster.rule?.tags)}</p>`;
+  h += '<h3>Funding chain</h3><table><tr><th>Hop</th><th>Account</th><th>Kind</th><th>NEAR</th><th>Txs</th></tr>' + (w.chain || []).map((c) => `<tr><td>${c.hop}</td><td>${nb(c.account)}</td><td>${esc(c.kind)}</td><td>${n(c.near, 2)}</td><td>${c.tx_count ?? '–'}</td></tr>`).join('') + '</table>';
+  h += '<h3>Where its NEAR went (recent outflows)</h3><table><tr><th>To</th><th>NEAR</th><th>Transfers</th><th>Last</th></tr>' + (w.flow_out || []).map((f) => `<tr><td>${nb(f.to)}</td><td>${n(f.near, 2)}</td><td>${f.n}</td><td>${when(f.last_ts)}</td></tr>`).join('') + '</table>';
+  h += '<h3>Early entries</h3><table><tr><th>Bought</th><th>Token</th><th>Rank</th><th>Delay</th><th>NEAR in</th><th>ROI 1h</th><th>ROI 6h</th><th>ROI 24h</th><th>Now</th><th>Rug</th></tr>' + w.entries.map((e) => `<tr class="click" data-id="${esc(e.token)}" onclick="openToken(this.dataset.id)"><td>${when(e.first_buy_ts)}</td><td><b>${esc(e.symbol || '')}</b> ${esc(short(e.token, 22))}${e.is_creator ? ' <span class="tag">creator</span>' : ''}</td><td>#${e.rank}</td><td>${e.delay_s}s</td><td>${n(e.buy_near, 1)}</td>
+      ${['60', '360', '1440'].map((m) => `<td class="${roiCls(e.roi?.[m])}">${pct(e.roi?.[m])}</td>`).join('')}<td class="${roiCls(e.roi_now)}">${pct(e.roi_now)}</td><td class="${e.rugged ? 'r' : 'muted'}">${e.rugged ? 'RUG' : '–'}</td></tr>`).join('') + '</table>';
+  openDrawer(h);
+}
+
+// ------------------------------------------------------------------ tokens
+views.tokens = async () => {
+  const S = ST.tokens, j = await get('/api/tokens', { q: S.q, status: S.status, rugged: S.rugged, limit: 50, offset: S.offset });
+  const sel = (k, v, l) => `<option value="${v}" ${S[k] === v ? 'selected' : ''}>${l}</option>`;
+  return `<section><div class="bar"><h2 style="margin:0">Tokens</h2>
+    <input id="tq" type="search" placeholder="symbol / token / creator" value="${esc(S.q)}" onkeydown="if(event.key==='Enter'){ST.tokens.q=this.value;ST.tokens.offset=0;render()}">
+    <select onchange="ST.tokens.status=this.value;ST.tokens.offset=0;render()">${sel('status', '', 'any status')}${['new', 'entries_open', 'tracking', 'done'].map((v) => sel('status', v, v)).join('')}</select>
+    <select onchange="ST.tokens.rugged=this.value;ST.tokens.offset=0;render()">${sel('rugged', '', 'all')}${sel('rugged', '1', 'rugged only')}</select>
+    <span class="muted">${n(j.total, 0)} tokens</span>
+    <button ${S.offset ? '' : 'disabled'} onclick="ST.tokens.offset=Math.max(0,ST.tokens.offset-50);render()">◀</button><button ${S.offset + 50 < j.total ? '' : 'disabled'} onclick="ST.tokens.offset+=50;render()">▶</button></div>
+    <table><tr><th>Live</th><th>Symbol</th><th>Token</th><th>Pad</th><th>Status</th><th>Early</th><th>Buyers</th><th>Peak x</th><th>Now x</th><th>Rug</th><th>Creator sold</th></tr>
+    ${j.rows.map((t) => `<tr class="click" data-id="${esc(t.id)}" onclick="openToken(this.dataset.id)"><td>${when(t.live_ts)}</td><td><b>${esc(t.symbol || '')}</b></td><td>${esc(short(t.id, 30))}</td><td>${esc(t.launchpad)}</td><td>${esc(t.status)}</td><td>${t.entries_n ?? '–'}</td><td>${t.outcome?.buyers ?? '–'}</td>
+      <td>${n(t.outcome?.peak_multiple, 1)}</td><td>${n(t.outcome?.last_multiple, 1)}</td><td class="${t.outcome?.rugged ? 'r' : 'muted'}">${t.outcome?.rugged ? 'RUG' : '–'}</td><td>${t.outcome?.creator_sold ? 'yes' : '–'}</td></tr>`).join('')}</table></section>`;
+};
+
+async function openToken(id) {
+  const t = await get('/api/token', { id }), o = t.outcome || {};
+  let h = `<h2 style="color:var(--text);font-size:15px">${esc(t.symbol || '')} ${esc(t.name || '')} ${o.rugged ? '<span class="v bad">RUG</span>' : ''}</h2><p>${tokLink(t.id, t.launchpad)} · ${esc(t.launchpad)} · creator ${t.creator ? nb(t.creator) : '–'} · live ${when(t.live_ts)}</p>`;
+  h += `<p class="muted">peak x${n(o.peak_multiple, 1)} · now x${n(o.last_multiple, 1)} · drawdown ${pct(o.drawdown)} · buyers ${o.buyers ?? '–'} · bought ${n(o.buy_near, 0)} N · sold ${n(o.sell_near, 0)} N · creator sold ${o.creator_sold ? 'yes (' + n(o.creator_sell_near, 1) + ' N)' : 'no'}</p>`;
+  h += '<h3>Early buyers</h3><table><tr><th>#</th><th>Wallet</th><th>Group</th><th>Delay</th><th>NEAR in</th><th>Wallet age</th><th>Funded by</th><th>ROI 1h</th><th>ROI 24h</th><th>Now</th></tr>' + t.entries.map((e) => `<tr class="click" data-id="${esc(e.wallet)}" onclick="openWallet(this.dataset.id)"><td>${e.rank}</td><td>${esc(short(e.wallet, 24))}${e.is_creator ? ' <span class="tag">creator</span>' : ''}</td>
+    <td>${e.cluster ? `${vb(e.cluster.verdict)} ${esc(e.cluster.label || e.cluster.id)} (${e.cluster.size})` : '<span class="muted">solo / unknown</span>'}</td><td>${e.delay_s}s</td><td>${n(e.buy_near, 1)}</td><td>${e.wallet_age_days != null ? e.wallet_age_days + ' d' : '–'}</td><td>${esc(e.funder_kind || '–')}</td>
+    <td class="${roiCls(e.roi?.['60'])}">${pct(e.roi?.['60'])}</td><td class="${roiCls(e.roi?.['1440'])}">${pct(e.roi?.['1440'])}</td><td class="${roiCls(e.roi_now)}">${pct(e.roi_now)}</td></tr>`).join('') + '</table>';
+  openDrawer(h);
+}
+
+// ------------------------------------------------------------------ logs
+views.logs = async () => {
+  const j = await get('/api/logs', { level: ST.logs.level, limit: 300 });
+  return `<section><div class="bar"><h2 style="margin:0">Log</h2><select onchange="ST.logs.level=this.value;render()"><option value="">all</option>${['INFO', 'WARN', 'ERROR'].map((l) => `<option ${ST.logs.level === l ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
+    <table>${j.rows.map((r) => `<tr class="${r.level === 'ERROR' ? 'r' : r.level === 'WARN' ? 'a' : ''}"><td class="muted">${when(r.ts)}</td><td>${esc(r.level)}</td><td class="wrap">${esc(r.msg)}</td></tr>`).join('')}</table></section>`;
+};
+
+// ------------------------------------------------------------------ shell
+function openDrawer(html) { $('drawerBody').innerHTML = html; $('drawer').classList.add('open'); }
+function closeDrawer() { $('drawer').classList.remove('open'); }
+const TABS = ['overview', 'signals', 'groups', 'wallets', 'tokens', 'logs'];
+let seq = 0;
+async function render() {
+  const v = (location.hash || '#overview').slice(1);
+  const view = views[v] ? v : 'overview';
+  $('nav').innerHTML = TABS.map((t) => `<a href="#${t}" class="${t === view ? 'on' : ''}">${t}</a>`).join('');
+  const my = ++seq;
+  try { const html = await views[view](); if (my === seq) $('main').innerHTML = html; }
+  catch (e) { if (my === seq) $('main').innerHTML = `<section class="r">${esc(e.message)}</section>`; }
+}
+window.addEventListener('hashchange', render);
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeDrawer(); });
+render();
+setInterval(() => { if (!$('drawer').classList.contains('open') && !['INPUT', 'SELECT'].includes(document.activeElement?.tagName)) render(); }, 30000);
+</script>
+</body>
+</html>
