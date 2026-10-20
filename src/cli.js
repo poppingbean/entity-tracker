@@ -45,7 +45,7 @@ try {
   } else if (cmd === 'process') {
     // every unfinished token once (an old token that is not fully read yet is continued until it is), then all pending wallets
     const lastCp = config.outcome.minutes[config.outcome.minutes.length - 1] * 60e3;
-    const ids = (await col('tokens').find({ status: { $nin: ['done', 'skipped_quote'] } }, { projection: { _id: 1 } }).toArray()).map((t) => t._id);
+    const ids = (await col('tokens').find({ status: { $nin: ['done', 'skipped_quote', 'awaiting_pool', 'no_pool'] } }, { projection: { _id: 1 } }).toArray()).map((t) => t._id);
     info(`processing ${ids.length} tokens`);
     let fails = 0;
     for (const id of ids) {
@@ -88,7 +88,7 @@ try {
     info(`labelled ${account} as "${name}" (${type})`);
   } else if (cmd === 'rebuild-entries') {
     // recompute every token's early entries and outcome from the trades already stored (no network): picks up new fields and rug rules
-    const toks = await col('tokens').find({ status: { $nin: ['skipped_quote'] }, trades_n: { $gt: 0 } }).toArray();
+    const toks = await col('tokens').find({ status: { $nin: ['skipped_quote', 'awaiting_pool', 'no_pool'] }, trades_n: { $gt: 0 } }).toArray();
     let n = 0;
     for (const t of toks) n += (await recomputeToken(t)) || 0;
     info(`rebuilt ${n} early entries from stored trades`);

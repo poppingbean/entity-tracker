@@ -8,7 +8,7 @@ import { col, metaGet, getDb } from '../db.js';
 import { config } from '../config.js';
 import { recentLogs, info, error } from '../log.js';
 import { aiEnabled, aiStatus } from '../ai/nearai.js';
-import { simSell, ensureAccount } from '../sim/portfolio.js';
+import { simSell, ensureAccount, positionPnl } from '../sim/portfolio.js';
 import { auditNearContract, getCachedAudit, validNearAddress, summarizeAudit } from '../audit/service.js';
 
 const page = fs.readFileSync(new URL('./index.html', import.meta.url), 'utf8');
@@ -176,12 +176,13 @@ const routes = {
   '/api/sim/overview': async () => {
     const a = await ensureAccount();
     const [open, closed, equity, today] = await Promise.all([
-      col('sim_positions').find({ status: 'open' }, { projection: { value_near: 1, cost_near: 1, realized_near: 1 } }).toArray(), col('sim_positions').countDocuments({ status: 'closed' }),
+      col('sim_positions').find({ status: 'open' }, { projection: { value_near: 1, cost_near: 1, realized_near: 1, held_tokens: 1, entry_price: 1, status: 1 } }).toArray(), col('sim_positions').find({ status: 'closed' }, { projection: { cost_near: 1, realized_near: 1, status: 1 } }).toArray(),
       col('sim_equity').find().sort({ ts: -1 }).limit(600).toArray(), col('sim_positions').countDocuments({ opened_ts: { $gt: Date.now() - 86400e3 } }),
     ]);
     const openValue = open.reduce((s, p) => s + (p.value_near || 0), 0), openCost = open.reduce((s, p) => s + Math.max(0, p.cost_near - (p.realized_near || 0)), 0);
     const equityNow = a.cash_near + openValue;
-    return { account: { start_near: a.start_near, cash_near: a.cash_near, realized_near: a.realized_near, created_ts: a.created_ts }, open_n: open.length, closed_n: closed, open_value: openValue, open_cost: openCost,
+    const pn = [...open, ...closed].map(positionPnl), realizedPnl = pn.reduce((s, x) => s + x.realized_pnl, 0), unrealizedPnl = pn.reduce((s, x) => s + x.unrealized_pnl, 0);
+    return { realized_pnl: realizedPnl, unrealized_pnl: unrealizedPnl, account: { start_near: a.start_near, cash_near: a.cash_near, realized_near: a.realized_near, created_ts: a.created_ts }, open_n: open.length, closed_n: closed.length, open_value: openValue, open_cost: openCost,
       equity: equityNow, pnl_near: equityNow - a.start_near, pnl_pct: (equityNow - a.start_near) / a.start_near, buys_today: today, equity_series: equity.reverse().map((e) => ({ ts: e.ts, equity: e.equity })),
       limits: { buyNear: config.sim.buyNear, highRiskBuyNear: config.sim.highRiskBuyNear, maxOpenCostNear: config.sim.maxOpenCostNear, maxBuysPerDay: config.sim.maxBuysPerDay, minReserveNear: config.sim.minReserveNear } };
   },
@@ -189,7 +190,7 @@ const routes = {
   '/api/sim/positions': async (u) => {
     const st = u.searchParams.get('status') || 'open';
     const rows = await col('sim_positions').find(st === 'all' ? {} : { status: st }).sort(st === 'closed' ? { 'exit.ts': -1 } : { opened_ts: -1 }).limit(300).toArray();
-    return { rows: rows.map(strip) };
+    return { rows: rows.map((p) => ({ ...strip(p), ...positionPnl(p) })) };
   },
 
   '/api/sim/position': async (u) => {
@@ -199,7 +200,7 @@ const routes = {
     const fills = await col('sim_fills').find({ position_id: id }).sort({ ts: 1 }).toArray();
     const scans = await col('scans').find({ token: p.token }, { projection: { features: 0 } }).sort({ ts: 1 }).toArray();
     const { _id, ...rest } = p;
-    return { id: _id, ...rest, fills: fills.map(({ _id: x, position_id, ...f }) => f), scans: scans.map(strip) };
+    return { id: _id, ...rest, ...positionPnl(p), fills: fills.map(({ _id: x, position_id, ...f }) => f), scans: scans.map(strip) };
   },
 
   '/api/scans': async (u) => {
@@ -263,7 +264,7 @@ const routes = {
     for (const f of w.funders || []) f.hash = f.hash || hashOf.get(f.account) || null;
     const { _id, ...rest } = w;
     return { id: _id, ...rest, cluster: cluster ? strip(cluster) : null,
-      entries: entries.map((e) => ({ token: e.token, first_buy_hash: e.first_buy_hash || null, symbol: tmap.get(e.token)?.symbol || null, launchpad: e.launchpad, rank: e.rank, delay_s: e.delay_s, buy_near: e.buy_near, roi: e.roi, roi_now: e.roi_now, first_buy_ts: e.first_buy_ts, rugged: !!tmap.get(e.token)?.outcome?.rugged, peak_multiple: tmap.get(e.token)?.outcome?.peak_multiple ?? null, is_creator: e.is_creator })) };
+      entries: entries.map((e) => ({ token: e.token, first_buy_hash: e.first_buy_hash || null, symbol: tmap.get(e.token)?.symbol || null, launchpad: e.launchpad, rank: e.rank, delay_s: e.delay_s, buy_near: e.buy_near, roi: e.roi, roi_now: e.roi_now, realized_now: e.realized_now ?? null, unrealized_now: e.unrealized_now ?? null, first_buy_ts: e.first_buy_ts, rugged: !!tmap.get(e.token)?.outcome?.rugged, peak_multiple: tmap.get(e.token)?.outcome?.peak_multiple ?? null, is_creator: e.is_creator })) };
   },
 
   '/api/tokens': async (u) => {

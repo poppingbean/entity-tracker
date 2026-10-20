@@ -98,6 +98,10 @@ The UI is organised around two ways in, **tokens** and **wallets / groups**, plu
 | **Wallets & Groups** | `/groups`, `/groups/<id>`: tag, AI review, track record, tokens bought early, members, funding / money-flow graph, the linked wallets within 3 hops, why the wallets are linked, review history. `/wallets`, `/wallets/<id>`: group membership, track record, early entries, funders, funding chain, outflows. `/entities`, `/entities/<id>`: exchange wallets, services, funders and destinations. |
 | **System** | `/logs`, `/config` (read-only settings). |
 
+**Launchpads.** `nearlytrade`, `justhoot` and `memecooking` get the full pipeline. `qlyphs` (migration tokens on a DCL pool quoted in QTC; the token goes live at its first real trade), `tkn` (plain FT factory `<symbol>.tkn.near`; the token waits as `awaiting_pool` until its owner adds liquidity on Ref DCL, found within 7 days) and `gaypad` (bonding curve inside `gaypad.j1-racing.near`; each `token_swap` event is a trade, valued from the change in its wNEAR reserve, with dust thresholds scaled down because a whole curve holds only a couple of NEAR) are tracked for their early investors only: no gates, AI analyst or simulated buys. `node src/cli.js backfill <launchpad> <hours>` replays history.
+
+**Realized vs unrealized profit.** Every P&L is split: *realized* = NEAR already taken out minus the cost of the tokens sold, *unrealized* = tokens still held at the latest price minus their cost. Shown for groups, wallets, each token a group / wallet bought early, and for the simulated wallet and each simulated position.
+
 Every token, wallet, group and entity has its own page at a clean path (History API, no `#`); external links go to the token's launchpad page and NearBlocks. `/` and `/overview` open `/explore`.
 
 The UI and API are read-only except the simulated sell button (`POST /api/sim/sell`, paper positions only, same-origin + header check + Basic auth when exposed). `npm run web` serves the UI alone, `npm run worker` runs only the background loop, `npm start` runs both in one process.

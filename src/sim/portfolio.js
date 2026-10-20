@@ -72,6 +72,17 @@ export async function simBuy(t, nearAmount, meta = {}) {
   return { status: 'bought', position: pos };
 }
 
+/** Profit of a simulated position split in realized (NEAR already sold minus the cost of the tokens sold) and unrealized (what is still held, at today's value, minus its cost). */
+export function positionPnl(p) {
+  const closed = p.status === 'closed';
+  const initial = p.entry_price > 0 ? p.cost_near / p.entry_price : null;
+  const soldFrac = closed ? 1 : initial ? Math.min(1, Math.max(0, 1 - (p.held_tokens || 0) / initial)) : 0;
+  const costSold = p.cost_near * soldFrac;
+  const realized = (p.realized_near || 0) - costSold;
+  const unrealized = closed ? 0 : (p.value_near || 0) - (p.cost_near - costSold);
+  return { realized_pnl: realized, unrealized_pnl: unrealized, pnl: realized + unrealized };
+}
+
 /** NEAR the whole holding would fetch right now (after the token's sell tax), 0 when the pool cannot fill any of it. */
 export async function valueOf(t, heldRaw, tax) {
   const f = await fillable(t, heldRaw);

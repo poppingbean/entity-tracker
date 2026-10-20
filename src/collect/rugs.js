@@ -1,16 +1,17 @@
 // Rugged tokens: recompute a token's outcome and early entries from the trades already stored (no network), and flag tokens known to be
 // rugs from outside the price series: the scanner's dev-rug blacklist (the creator emptied their balance while a position was held).
 import { col } from '../db.js';
-import { config } from '../config.js';
 import { info } from '../log.js';
 import { buildEntries, buildOutcome } from './analyze.js';
+import { cfgFor } from './cfg.js';
 
 /** Rebuild one token's outcome and entries from its stored trades and write them. Returns the entries count, or null when no trades are stored. */
 export async function recomputeToken(t, now = Date.now()) {
   const trades = await col('trades').find({ token: t._id }).sort({ ts: 1 }).toArray();
   if (!trades.length) return null;
-  const outcome = buildOutcome(t, trades, now, config.outcome);
-  const entries = buildEntries(t, trades, now, { ...config.entry, minutes: config.outcome.minutes });
+  const cfg = cfgFor(t);
+  const outcome = buildOutcome(t, trades, now, cfg.outcome);
+  const entries = buildEntries(t, trades, now, cfg.entry);
   for (const e of entries) e.token_rugged = outcome.rugged;
   if (entries.length) await col('entries').bulkWrite(entries.map((e) => ({ replaceOne: { filter: { _id: e._id }, replacement: e, upsert: true } })), { ordered: false });
   await col('tokens').updateOne({ _id: t._id }, { $set: { outcome, entries_n: entries.length } });

@@ -5,6 +5,7 @@ import { buildEntries, buildOutcome, priceAt, priceSeries, evalRoi } from '../sr
 import { buildGroups } from '../src/graph/cluster.js';
 import { computeMetrics, ruleVerdict, winTag } from '../src/evaluate/metrics.js';
 import { extractJson } from '../src/ai/nearai.js';
+import { positionPnl } from '../src/sim/portfolio.js';
 import { normaliseReview } from '../src/ai/review.js';
 
 const MIN = 60e3;
@@ -258,4 +259,26 @@ test('rugs: a deep fall with the creator selling is a rug; so is a token flagged
   assert.equal(noCreator.rugged, false);
   const flagged = buildOutcome({ ...token, rug: { flagged: true, reason: 'creator balance fell 100% while we held' } }, [trade('a', true, 10, 1000, 1)], T0 + 5 * MIN, lcfg);
   assert.equal(flagged.rugged, true); assert.deepEqual(flagged.rug_kinds, ['flagged']); assert.match(flagged.rug_reason, /creator balance/);
+});
+
+test('profit split: realized = NEAR taken out minus the cost of tokens sold; unrealized = the rest', () => {
+  // a buys 1000 tokens for 10 N at 0.01; at 30 min sells 500 for 15 N (price 0.03); at 59 min price is 0.04
+  const trades = [trade('a', true, 10, 1000, 1), trade('x', true, 30, 1000, 29), trade('a', false, 15, 500, 30), trade('x', true, 40, 1000, 59)];
+  const e = buildEntries(token, trades, T0 + 70 * MIN, cfg).find((x) => x.wallet === 'a');
+  // at 60 min: value = 15 taken out + 500 held x 0.04 = 35; pnl 25; realized 15 - 10 x 0.5 = 10; unrealized 15
+  assert.ok(Math.abs(e.roi[60] - 2.5) < 1e-9);
+  const { metrics, tokens: rows } = computeMetrics(['a'], [e], new Map([['tok.near', token]]), new Map([['a', { _id: 'a' }]]), new Set(), { minutes: cfg.minutes, winRoi: 0.2, cobuySeconds: 15, minTokens: 1 });
+  assert.ok(Math.abs(metrics.pnl_near - 25) < 1e-6 && Math.abs(metrics.realized_near - 10) < 1e-6 && Math.abs(metrics.unrealized_near - 15) < 1e-6);
+  assert.ok(Math.abs(rows[0].realized_near + rows[0].unrealized_near - rows[0].pnl_near) < 1e-9);
+  assert.ok(Math.abs(e.realized_now - 10) < 1e-6 && Math.abs(e.pnl_now - 25) < 1e-6 && Math.abs(e.unrealized_now - 15) < 1e-6);
+});
+
+test('simulated position profit split (open with a partial sale, and closed)', () => {
+  const open = { status: 'open', cost_near: 10, entry_price: 0.01, held_tokens: 500, realized_near: 8, value_near: 12 }; // sold half for 8 N, rest worth 12 N
+  const a = positionPnl(open);
+  assert.ok(Math.abs(a.realized_pnl - 3) < 1e-9 && Math.abs(a.unrealized_pnl - 7) < 1e-9 && Math.abs(a.pnl - 10) < 1e-9);
+  const b = positionPnl({ status: 'open', cost_near: 10, entry_price: 0.01, held_tokens: 1000, realized_near: 0, value_near: 6 });
+  assert.ok(b.realized_pnl === 0 && Math.abs(b.unrealized_pnl + 4) < 1e-9);
+  const c = positionPnl({ status: 'closed', cost_near: 10, realized_near: 4, value_near: 0 });
+  assert.ok(Math.abs(c.realized_pnl + 6) < 1e-9 && c.unrealized_pnl === 0);
 });

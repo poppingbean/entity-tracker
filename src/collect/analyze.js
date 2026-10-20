@@ -7,6 +7,7 @@ export { median };
 
 /** Price series (NEAR per token) from trades, ignoring dust that would distort it. */
 export function priceSeries(trades, minNear = 0.02) {
+  minNear = minNear ?? 0.02;
   return trades.filter((t) => t.near >= minNear && t.tokens > 0).map((t) => ({ ts: t.ts, price: t.near / t.tokens })).sort((a, b) => a.ts - b.ts);
 }
 /** Last traded price at or before `ts` (null when nothing traded yet). */
@@ -23,7 +24,7 @@ export function priceAt(series, ts) {
 export function buildOutcome(token, trades, now, cfg) {
   const live = token.live_ts, horizon = live + cfg.minutes[cfg.minutes.length - 1] * MIN;
   const inHorizon = trades.filter((t) => t.ts >= live && t.ts <= horizon);
-  const series = priceSeries(inHorizon);
+  const series = priceSeries(inHorizon, cfg.priceMinNear);
   const cp = {};
   for (const m of cfg.minutes) if (now >= live + m * MIN) cp[m] = priceAt(series, live + m * MIN);
   const first = series[0]?.price ?? null;
@@ -63,7 +64,7 @@ export function buildOutcome(token, trades, now, cfg) {
  */
 export function buildEntries(token, trades, now, cfg) {
   const live = token.live_ts, winEnd = live + cfg.windowMinutes * MIN;
-  const series = priceSeries(trades.filter((t) => t.ts >= live));
+  const series = priceSeries(trades.filter((t) => t.ts >= live), cfg.priceMinNear);
   const byWallet = new Map();
   for (const t of trades) { if (t.ts < live) continue; (byWallet.get(t.trader) || byWallet.set(t.trader, []).get(t.trader)).push(t); }
   const candidates = [];
@@ -98,14 +99,22 @@ export function buildEntries(token, trades, now, cfg) {
       roi[m] = v.value / c.buyNear - 1; soldShare[m] = v.soldShare; takenOut[m] = v.takenOut;
     }
     const vNow = valueAt(now, nowPrice);
+    // profit split: realized = NEAR taken out minus the cost of the tokens sold; unrealized = what is still held, valued at the last price, minus its cost
+    const realizedNow = vNow.takenOut - c.buyNear * vNow.soldShare, pnlNow = nowPrice != null ? vNow.value - c.buyNear : null;
     return {
       _id: `${token._id}|${c.wallet}`, token: token._id, wallet: c.wallet, rank: i + 1, first_buy_ts: c.first, first_buy_hash: c.wb[0].hash || null, delay_s: Math.round((c.first - live) / 1000),
       buy_near: c.buyNear, buy_tokens: buyTokens, n_buys: c.wb.length, entry_price: buyTokens ? c.buyNear / buyTokens : null,
       is_creator: !!token.creator && c.wallet === token.creator, roi, sold_share: soldShare, taken_out: takenOut,
-      roi_now: nowPrice != null ? vNow.value / c.buyNear - 1 : null, sold_share_now: vNow.soldShare,
+      roi_now: nowPrice != null ? vNow.value / c.buyNear - 1 : null, sold_share_now: vNow.soldShare, pnl_now: pnlNow, realized_now: realizedNow, unrealized_now: pnlNow != null ? pnlNow - realizedNow : null,
       first_sell_ts: allSells[0]?.ts ?? null, launchpad: token.launchpad, symbol: token.symbol || null, live_ts: live,
     };
   });
+}
+
+/** The checkpoint (minutes) an entry is judged at: the latest one it has reached, or null. */
+export function evalCp(entry, minutes) {
+  for (const m of [...minutes].reverse()) if (entry.roi?.[m] != null) return m;
+  return null;
 }
 
 /** The ROI an entry is judged by: the latest checkpoint the token has reached (null when it has not reached the first). */

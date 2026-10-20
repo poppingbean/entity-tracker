@@ -1,7 +1,7 @@
 // Pure functions: how a group of wallets performed as early investors, and a rule-based verdict.
 // "Good" = early money that makes money in tokens that hold up (worth watching / following).
 // "Bad"  = insiders, rug farmers, coordinated sybil snipers, or consistent losers (worth avoiding, or treating as a warning sign).
-import { median, evalRoi } from '../collect/analyze.js';
+import { median, evalRoi, evalCp } from '../collect/analyze.js';
 
 const clamp = (x, lo, hi) => Math.max(lo, Math.min(hi, x));
 const DAY = 86400e3;
@@ -36,7 +36,9 @@ export function computeMetrics(members, entries, tokens, wallets, insiderEntries
     const value = es.reduce((s, e) => s + e.buy_near * (1 + evalRoi(e, cfg.minutes)), 0);
     const t = tokens.get(token);
     const insider = es.filter((e) => insiderEntries.has(`${token}|${e.wallet}`)).length;
-    rows.push({
+    // realized = NEAR already taken out minus the cost of the tokens sold; unrealized = the rest of the profit (tokens still held at the checkpoint price)
+    const realized = es.reduce((s, e) => { const k = evalCp(e, cfg.minutes); return s + (e.taken_out?.[k] ?? 0) - e.buy_near * (e.sold_share?.[k] ?? 0); }, 0);
+    rows.push({ realized_near: realized, unrealized_near: value - buy - realized,
       token, symbol: t?.symbol || null, launchpad: t?.launchpad || null, live_ts: t?.live_ts || null, wallets: es.length, buy_near: buy, roi: buy ? value / buy - 1 : 0, pnl_near: value - buy,
       rugged: !!t?.outcome?.rugged, peak_multiple: t?.outcome?.peak_multiple ?? null, insider_wallets: insider, first_delay_s: Math.min(...es.map((e) => e.delay_s)),
       sold_share: es.reduce((s, e) => s + (e.sold_share?.[cfg.minutes[0]] ?? 0), 0) / es.length,
@@ -47,7 +49,7 @@ export function computeMetrics(members, entries, tokens, wallets, insiderEntries
   const n = rows.length;
   const wins = rows.filter((r) => r.roi >= cfg.winRoi), losses = rows.filter((r) => r.roi <= -0.5), rugs = rows.filter((r) => r.rugged);
   const totalBuy = judged.reduce((s, e) => s + e.buy_near, 0);
-  const pnl = rows.reduce((s, r) => s + r.pnl_near, 0);
+  const pnl = rows.reduce((s, r) => s + r.pnl_near, 0), realizedPnl = rows.reduce((s, r) => s + r.realized_near, 0);
   const insiderEntriesN = judged.filter((e) => insiderEntries.has(`${e.token}|${e.wallet}`)).length;
 
   // fresh wallets: created less than 3 days before the entry
@@ -62,7 +64,7 @@ export function computeMetrics(members, entries, tokens, wallets, insiderEntries
 
   const m = {
     wallets_n: members.length, entries_n: entries.length, tokens_n: n, tokens_all: new Set(entries.map((e) => e.token)).size,
-    total_buy_near: totalBuy, avg_buy_near: judged.length ? totalBuy / judged.length : 0, pnl_near: pnl, roi_weighted: totalBuy ? pnl / totalBuy : null,
+    total_buy_near: totalBuy, avg_buy_near: judged.length ? totalBuy / judged.length : 0, pnl_near: pnl, realized_near: realizedPnl, unrealized_near: pnl - realizedPnl, roi_weighted: totalBuy ? pnl / totalBuy : null,
     median_token_roi: median(rows.map((r) => r.roi)), win_rate: n ? wins.length / n : null, profit_tokens_n: rows.filter((r) => r.roi > 0).length, profit_rate: n ? rows.filter((r) => r.roi > 0).length / n : null, loss_rate: n ? losses.length / n : null,
     rug_tokens_n: rugs.length, rug_share: n ? rugs.length / n : null,
     win_rate_in_rugs: rugs.length ? rugs.filter((r) => r.roi >= cfg.winRoi).length / rugs.length : null, pnl_in_rugs: rugs.reduce((s, r) => s + r.pnl_near, 0),

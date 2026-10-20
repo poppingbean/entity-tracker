@@ -77,7 +77,7 @@ export async function evaluateGroups() {
     const es = entriesByWallet.get(w._id) || [];
     const { metrics } = computeMetrics([w._id], es, tokens, walletMap, insiderEntries, cfg);
     const c = cmap.get(w._id);
-    return { updateOne: { filter: { _id: w._id }, update: { $set: { cluster_id: c?._id ?? null, cluster_verdict: c?.verdict ?? null, cluster_tag: c?.tag ?? null, tag: winTag(metrics.profit_rate, metrics.tokens_n, cfg.minTokens), stats: { tokens_n: metrics.tokens_n, entries_n: metrics.entries_n, win_rate: metrics.win_rate, profit_rate: metrics.profit_rate, roi_weighted: metrics.roi_weighted, pnl_near: metrics.pnl_near, rug_share: metrics.rug_share, total_buy_near: metrics.total_buy_near } } } } };
+    return { updateOne: { filter: { _id: w._id }, update: { $set: { cluster_id: c?._id ?? null, cluster_verdict: c?.verdict ?? null, cluster_tag: c?.tag ?? null, tag: winTag(metrics.profit_rate, metrics.tokens_n, cfg.minTokens), stats: { tokens_n: metrics.tokens_n, entries_n: metrics.entries_n, win_rate: metrics.win_rate, profit_rate: metrics.profit_rate, roi_weighted: metrics.roi_weighted, pnl_near: metrics.pnl_near, realized_near: metrics.realized_near, unrealized_near: metrics.unrealized_near, rug_share: metrics.rug_share, total_buy_near: metrics.total_buy_near } } } } };
   });
   for (let i = 0; i < ops.length; i += 500) await col('wallets').bulkWrite(ops.slice(i, i + 500), { ordered: false });
 

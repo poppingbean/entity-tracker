@@ -4,6 +4,7 @@ import { config } from '../config.js';
 import { info, warn } from '../log.js';
 import { syncTokenTrades } from './trades.js';
 import { buildEntries, buildOutcome } from './analyze.js';
+import { cfgFor } from './cfg.js';
 
 const MIN = 60e3;
 
@@ -13,8 +14,14 @@ export async function processToken(t) {
   const sync = await syncTokenTrades(t);
   const fresh = await col('tokens').findOne({ _id: t._id });
   const trades = await col('trades').find({ token: t._id }).sort({ ts: 1 }).toArray();
-  const outcome = buildOutcome(fresh, trades, now, config.outcome);
-  const entries = buildEntries(fresh, trades, now, { ...config.entry, minutes: config.outcome.minutes });
+  // pools that exist before trading opens (qlyphs, tkn): the token goes live at its first trade
+  const cfg = cfgFor(fresh);
+  if (fresh.live_on_first_trade) { // the first real trade (a dust probe does not open trading)
+    const first = trades.find((x) => x.near >= cfg.entry.minNear);
+    if (first && first.ts !== fresh.live_ts) { await col('tokens').updateOne({ _id: t._id }, { $set: { live_ts: first.ts } }); fresh.live_ts = first.ts; }
+  }
+  const outcome = buildOutcome(fresh, trades, now, cfg.outcome);
+  const entries = buildEntries(fresh, trades, now, cfg.entry);
   for (const e of entries) e.token_rugged = outcome.rugged;
 
   if (entries.length) {
@@ -38,7 +45,7 @@ export async function processToken(t) {
 
 /** Process every token that is due, a few at a time. Returns how many were processed. */
 export async function processDue(limit = 8) {
-  const due = await col('tokens').find({ status: { $nin: ['done', 'skipped_quote'] }, next_process_ts: { $lte: Date.now() } }).sort({ next_process_ts: 1 }).limit(limit).toArray();
+  const due = await col('tokens').find({ status: { $nin: ['done', 'skipped_quote', 'awaiting_pool', 'no_pool'] }, next_process_ts: { $lte: Date.now() } }).sort({ next_process_ts: 1 }).limit(limit).toArray();
   let n = 0;
   for (const t of due) {
     try { await processToken(t); n++; }

@@ -45,7 +45,7 @@ export async function runWorker() {
       await metaSet('worker', { ts: Date.now(), cycles: runtime.cycles, startedTs: runtime.startedTs, last: r, ai: { enabled: aiEnabled(), model: config.ai.model, ok: aiStatus.ok, error: aiStatus.error, calls: aiStatus.calls, failures: aiStatus.failures } });
     } catch (e) { error(`cycle failed: ${e.message}`); }
     // sleep in short steps so a shutdown is prompt; work backlog continues without waiting
-    const backlog = await col('tokens').countDocuments({ status: { $nin: ['done', 'skipped_quote'] }, next_process_ts: { $lte: Date.now() } }).catch(() => 0);
+    const backlog = await col('tokens').countDocuments({ status: { $nin: ['done', 'skipped_quote', 'awaiting_pool', 'no_pool'] }, next_process_ts: { $lte: Date.now() } }).catch(() => 0);
     const wait = backlog > 0 ? 2000 : config.pollSeconds * 1000;
     for (let t = 0; t < wait && !runtime.stopping; t += 500) await sleep(500);
   }

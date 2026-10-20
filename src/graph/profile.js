@@ -14,7 +14,7 @@ export function classifyAccount(account, txCount) {
   if (!account) return 'unknown';
   if (account === 'intents.near') return 'intents';
   if (account === 'near') return 'protocol';
-  if (INFRA.test(account) || /\.(nearlytrade|launchpad\.justhoot)\.near$/.test(account)) return 'protocol';
+  if (INFRA.test(account) || /\.(nearlytrade|launchpad\.justhoot|gaypad\.j1-racing|qlyphs|tkn)\.near$/.test(account)) return 'protocol';
   if (/relayer|herewallet|meteor|wallet-relay|intear|registrar|\.tg$|\.user\.|^bridge/.test(account)) return 'relayer';
   if ((txCount ?? 0) >= HUB_TX_COUNT) return 'hub';
   return 'wallet';

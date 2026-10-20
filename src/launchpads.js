@@ -11,6 +11,10 @@ function dclPoolId(tx, token) {
   return e?.data[0].pool_id || null;
 }
 
+// Launchpads that are tracked for their early investors only: no gates, AI analyst or simulated buys (no standard launch lifecycle / no Ref pool to quote).
+const TRACK_ONLY = { trackOnly: true };
+const isQ = (a) => typeof a === 'string' && a.endsWith('.qlyphs.near') && a !== 'liquidity.qlyphs.near' && !/^(registrar|attestor)\./.test(a);
+
 export const adapters = {
   // nearly.trade ("nearpad" events): single-sided DCL pool, quote is whatever the other side of the pool id is
   nearlytrade: {
@@ -45,6 +49,50 @@ export const adapters = {
         out.push({ token, launchpad: 'justhoot', creator: d.creator_id || null, name: args.name, symbol: args.symbol, pool: { dex: 'dcl', poolId, quote: q },
           devBuyNear: q === 'wrap.near' ? yoctoToNear(d.dev_buy_quote || '0') : (d.dev_buy_quote && d.dev_buy_quote !== '0' ? null : 0), devBuyQuoteRaw: q !== 'wrap.near' && d.dev_buy_quote && d.dev_buy_quote !== '0' ? d.dev_buy_quote : null,
           lp: { owner: owners.join(','), locked: owners.length ? owners.every((o) => o === token) : null }, tax: args.transfer_fee_pips ? { transferFeePips: args.transfer_fee_pips } : null });
+      }
+      return out;
+    },
+  },
+
+  // qlyphs ("<name>-<id>.qlyphs.near" tokens; liquidity.qlyphs.near opens a DCL pool quoted in QTC)
+  qlyphs: {
+    account: 'liquidity.qlyphs.near',
+    parse(tx) {
+      const out = [];
+      const nw = tx.calls.find((c) => c.method === 'new');
+      const md = nw && isQ(tx.receiver) ? nw.args?.metadata || {} : {};
+      for (const e of tx.events.filter((x) => x.executor === DCL && x.event === 'create_pool')) {
+        const poolId = e.data?.[0]?.pool_id; if (!poolId) continue;
+        const [a, b] = poolId.split('|');
+        const token = [a, b].find(isQ); if (!token) continue;
+        out.push({ token, launchpad: 'qlyphs', creator: null, name: md.name || null, symbol: md.symbol || null, pool: { dex: 'dcl', poolId, quote: otherSide(poolId, token) }, devBuyNear: 0, lp: { owner: null, locked: null }, tax: null, liveOnFirstTrade: true, ...TRACK_ONLY });
+      }
+      return out;
+    },
+  },
+
+  // tkn.near: plain FT factory ("<symbol>.tkn.near"). The token is minted without a pool; the owner adds liquidity on Ref DCL later, so the
+  // token waits as "awaiting_pool" until discoverTknPools() (collect/launches.js) finds its pool.
+  tkn: {
+    account: 'tkn.near',
+    parse(tx) {
+      if (tx.failed) return [];
+      const c = tx.calls.find((x) => x.method === 'create_token');
+      const md = c?.args?.args?.metadata;
+      if (!md?.symbol) return [];
+      return [{ token: `${String(md.symbol).toLowerCase()}.tkn.near`, launchpad: 'tkn', creator: c.args.args.owner_id || tx.signer, name: md.name || null, symbol: md.symbol, pool: null, awaitingPool: true, liveOnFirstTrade: true, devBuyNear: 0, lp: { owner: null, locked: null }, tax: null, ...TRACK_ONLY }];
+    },
+  },
+
+  // gaypad (bonding curve inside gaypad.j1-racing.near; trades are its token_swap events, see collect/trades.js)
+  gaypad: {
+    account: 'gaypad.j1-racing.near',
+    parse(tx) {
+      const out = [];
+      for (const e of tx.events.filter((x) => x.executor === 'gaypad.j1-racing.near' && x.event === 'token_sale_created')) {
+        const d = Array.isArray(e.data) ? e.data[0] : e.data; if (!d?.token_id) continue;
+        out.push({ token: d.token_id, launchpad: 'gaypad', creator: d.account_id || null, name: d.metadata?.name || null, symbol: d.metadata?.symbol || null,
+          pool: { dex: 'curve', poolId: d.token_id, quote: 'wrap.near' }, devBuyNear: 0, lp: { owner: 'gaypad.j1-racing.near', locked: null }, tax: null, ...TRACK_ONLY });
       }
       return out;
     },
