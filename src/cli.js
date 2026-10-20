@@ -3,6 +3,7 @@
 //   node src/cli.js process                            process everything that is pending, then regroup (and review with NEAR AI)
 //   node src/cli.js reprofile                          profile every early wallet again, then regroup
 //   node src/cli.js label <account> "<name>" [type]    name an exchange / service wallet (type: exchange|service|bridge|fund|other)
+//   node src/cli.js import-scanner [state.json] [--dry]  copy the live scanner's data (launches, evaluations, blacklist, positions) here
 //   node src/cli.js scan <token> [--features]          run the gates + AI analyst on any stored token (no buying)
 //   node src/cli.js sim-reset                          reset the simulated wallet
 //   node src/cli.js entities                           rebuild the entity table
@@ -19,6 +20,7 @@ import { profilePending } from './graph/profile.js';
 import { evaluateGroups, reviewPending } from './evaluate/run.js';
 import { buildEntities } from './evaluate/entities.js';
 import { scanDry, blacklistCreator } from './scanner/pipeline.js';
+import { importScanner } from './import/scanner.js';
 import { resetSim, simBuy, managePositions } from './sim/portfolio.js';
 import { checkAi, aiEnabled, aiStatus } from './ai/nearai.js';
 
@@ -76,6 +78,10 @@ try {
     await col('labels').replaceOne({ _id: account }, { _id: account, label: name, type, ts: Date.now() }, { upsert: true });
     await buildEntities();
     info(`labelled ${account} as "${name}" (${type})`);
+  } else if (cmd === 'import-scanner') {
+    const file = args.find((a) => !a.startsWith('--')) || '../near-launch-scanner/data/state.json';
+    const r = await importScanner(file, { dry: args.includes('--dry') });
+    console.log(JSON.stringify(r, null, 1));
   } else if (cmd === 'scan') {
     const r = await scanDry(args[0]);
     console.log(JSON.stringify({ rules: { pass: r.rules.pass, score: r.rules.score, failed: r.rules.failed }, ai: r.ai, decision: r.decision, features: args.includes('--features') ? r.features : undefined }, null, 1));

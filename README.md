@@ -65,6 +65,10 @@ Everything is stored in MongoDB (`scans`, `followups`, `sim_account`, `sim_posit
 
 **Limits:** the simulation uses the pool quote at decision time, so real fills could be worse in a fast market, and it cannot model another bot buying first. Treat results as a sanity check of the strategy, not a promise.
 
+## Importing the live scanner's data
+
+`node src/cli.js import-scanner [path/to/state.json] [--dry]` (default `../near-launch-scanner/data/state.json`) copies what the scanner already knows: its launches become `tokens` (new ones are queued so the tracker reads their trades and early buyers), its evaluations and follow-up reviews become `scans` (source `scanner`, with gates, scores, AI verdicts and features), its creator blacklist feeds the tracker's creator gate, its code-hash counts merge into `templates`, and its **real** positions and spend go to `scanner_positions` / `scanner_spend`, kept apart so they never touch the simulated wallet. Imported launches are marked scanned, so the simulated wallet never buys them. Safe to re-run; existing tracker data is not overwritten.
+
 ## Entities (exchange wallets included)
 
 A **group** is a set of early investors; an **entity** is any account in their funding and money-flow graph: exchange hot wallets, NEAR Intents accounts, relayers / wallet services, ordinary funder wallets and the destinations their NEAR goes to. The `entities` collection (and the **Entities** tab) records for each one: its kind and label, how many early wallets it funded and how much, which tokens those wallets bought, how they performed, which good / bad groups they belong to, and how much early-investor NEAR it received. An exchange wallet is shown like any other entity, with a note that funding from it links nothing by itself.
