@@ -35,6 +35,9 @@ export const config = {
     rugDrawdown: num(process.env.RUG_DRAWDOWN, 0.9),
     roundTripPeak: num(process.env.ROUND_TRIP_PEAK, 3),          // a token that pumped to this multiple of its launch price ...
     roundTripBack: num(process.env.ROUND_TRIP_BACK, 1.25),       // ... and is back at or below this multiple of it counts as a rug (round trip)
+    creatorExitShare: num(process.env.CREATOR_EXIT_SHARE, 0.8),   // creator sold this share of the dev buy within the first hour AND the price is below launch = rug
+    creatorExitShare: num(process.env.CREATOR_EXIT_SHARE, 0.8),  // creator sold this share of their dev buy within the first hour ...
+    creatorExitBack: num(process.env.CREATOR_EXIT_BACK, 1),      // ... and the price is at or below this multiple of the launch price = rug (creator exit)
     softRugDrawdown: num(process.env.SOFT_RUG_DRAWDOWN, 0.7),    // a fall this deep counts as a rug when the creator also sold at least 1 NEAR
     winRoi: num(process.env.WIN_ROI, 0.2),
   },

@@ -54,6 +54,10 @@ export function buildOutcome(token, trades, now, cfg) {
   // round trip: it pumped (peak at least roundTripPeak x the launch price) and is back near where it started (at most roundTripBack x): everyone who bought after launch is flat or under
   const first0 = series[0]?.price;
   if (settled && first0 && peak && last != null && peak / first0 >= (cfg.roundTripPeak ?? 3) && last / first0 <= (cfg.roundTripBack ?? 1.25) && !rugKinds.length) rugKinds.push('round_trip');
+  // creator exit + price below launch: the creator took (most of) their dev buy out within the hour and the token now trades under its launch price
+  if (creatorExit && creatorExit.share >= (cfg.creatorExitShare ?? 0.8) && first0 && last != null && last / first0 < 1 && !rugKinds.length) rugKinds.push('creator_exit');
+  // creator exit + not above the launch price: the creator took their dev buy out and holders are not in profit
+  if (creatorExit && creatorExit.share >= (cfg.creatorExitShare ?? 0.8) && first0 && last != null && last / first0 <= (cfg.creatorExitBack ?? 1) && !rugKinds.length) rugKinds.push('creator_exit');
   if (token.rug?.flagged) rugKinds.push('flagged');
   return {
     first_price: first, peak_price: peak, peak_ts: peakTs, last_price: last,

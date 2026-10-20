@@ -302,3 +302,28 @@ test('creator exit: share of the dev buy sold in the first hour and how soon, wi
   assert.equal(o.rugged, false);
   assert.equal(buildOutcome(token, tr, T0 + 50 * MIN, lcfg).creator_exit, null, 'no dev buy known: no share');
 });
+
+test('rugs: creator exit (80 %+ of the dev buy sold in the first hour) with the price now below launch is a rug', () => {
+  const lcfg = { minutes: cfg.minutes, rugDrawdown: 0.9, creatorExitShare: 0.8 };
+  const tr = (lastNear) => [trade('a', true, 20, 2000, 0.1), trade('creator.near', false, 19, 1900, 3), trade('b', true, 5, 500, 4), trade('x', false, lastNear, 500, 30)];
+  // launch price 0.01; the last sale at 0.0092 -> below launch
+  const down = buildOutcome({ ...token, dev_buy_near: 20 }, tr(4.6), T0 + 50 * MIN, lcfg);
+  assert.equal(down.rugged, true); assert.deepEqual(down.rug_kinds, ['creator_exit']);
+  // price still above launch: only the warning
+  assert.equal(buildOutcome({ ...token, dev_buy_near: 20 }, tr(5.5), T0 + 50 * MIN, lcfg).rugged, false);
+});
+
+test('rugs: creator exit (80 %+ of the dev buy sold in the first hour) with the price at or below launch is a rug; above launch it is not', () => {
+  const lcfg = { minutes: cfg.minutes, rugDrawdown: 0.9, creatorExitShare: 0.8, creatorExitBack: 1 };
+  const t0 = { ...token, dev_buy_near: 20 };
+  // launch 0.01; creator sells 19 N at minute 3; last trade at 0.0093: price below launch
+  const down = [trade('a', true, 20, 2000, 0.1), trade('creator.near', false, 19, 2000, 3), trade('x', false, 9.3, 1000, 10)];
+  const o = buildOutcome(t0, down, T0 + 20 * MIN, lcfg);
+  assert.deepEqual(o.rug_kinds, ['creator_exit']); assert.equal(o.rugged, true);
+  // same exit but the price is above the launch price: warning only
+  const up = [trade('a', true, 20, 2000, 0.1), trade('creator.near', false, 19, 2000, 3), trade('x', true, 12, 1000, 10)];
+  const o2 = buildOutcome(t0, up, T0 + 20 * MIN, lcfg);
+  assert.equal(o2.rugged, false); assert.ok(o2.creator_exit.share >= 0.8);
+  // a small creator sale is not an exit
+  assert.equal(buildOutcome(t0, [trade('a', true, 20, 2000, 0.1), trade('creator.near', false, 3, 300, 3), trade('x', false, 9.3, 1000, 10)], T0 + 20 * MIN, lcfg).rugged, false);
+});
