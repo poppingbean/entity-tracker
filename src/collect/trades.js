@@ -9,7 +9,7 @@ import { cfgFor } from './cfg.js';
 const GAYPAD = 'gaypad.j1-racing.near';
 const AGGREGATORS = /^(aggregatedex\.near|dex\.intear\.near|router\.aurabot\.near|cosmosnock\.near)$/;
 // Accounts that hold tokens for the venue itself and say nothing about an investor.
-export const INFRA = /^(dclv2\.ref-labs\.near|v2\.ref-finance\.near|aggregatedex\.near|dex\.intear\.near|nearlytrade\.near|lock2\.nearlytrade\.near|meme-cooking\.near|launchpad\.justhoot\.near|gaypad\.j1-racing\.near|liquidity\.qlyphs\.near|tkn\.near|token-locker\.ref-labs\.near|intents\.near|wrap\.near)$/;
+export const INFRA = /^(dclv2\.ref-labs\.near|v2\.ref-finance\.near|aggregatedex\.near|dex\.intear\.near|nearlytrade\.near|lock2\.nearlytrade\.near|meme-cooking\.near|launchpad\.justhoot\.near|gaypad\.j1-racing\.near|liquidity\.qlyphs\.near|tkn\.near|v2-launchpad\.justhoot\.near|v2-pool-creator\.justhoot\.near|token-locker\.ref-labs\.near|intents\.near|wrap\.near)$/;
 
 /** Buys and sells of `token` in a list of decoded transactions, with NEAR values. */
 export async function tradesFromTxs(token, pool, txs) {

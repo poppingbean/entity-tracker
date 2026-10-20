@@ -143,6 +143,21 @@ export async function followUpTick() {
   return started;
 }
 
+/** The analysis of a token fetched on demand: features, gates and the AI analyst, stored like a scan, never buying. */
+export async function analyseOnDemand(tokenId) {
+  const t = await col('tokens').findOne({ _id: tokenId });
+  if (!t || t.track_only || ['awaiting_pool', 'no_pool', 'skipped_quote'].includes(t.status)) return null;
+  const f = await collectFeatures(t, config.sim.buyNear);
+  const rules = applyRules(f);
+  let ai = null;
+  if (aiEnabled()) { try { ai = await analyse(f, rules, { holding: null }); } catch (e) { warn(`AI analyst failed for ${tokenId}: ${e.message}`); } }
+  const decision = { buy: false, action: ai?.action || null, why: ai ? `AI ${ai.action} ${ai.confidence.toFixed(2)} [${ai.risk_level}] (fetched on demand, never buys)` : `${rules.pass ? 'gates pass' : 'gates fail'}, ${aiEnabled() ? 'AI review failed' : 'AI off'} (fetched on demand)` };
+  const scan = await saveScan(t, 'first', Math.round((Date.now() - t.live_ts) / MIN), f, rules, ai, decision, null);
+  await col('scans').updateOne({ _id: scan.id }, { $set: { source: 'on-demand' } });
+  await col('tokens').updateOne({ _id: tokenId }, { $set: { scan: { ts: scan.ts, id: scan.id, score: rules.score, pass: rules.pass, decision: decision.why, bought: false, failed: rules.failed.map((g) => g.id) }, scan_done: true } });
+  return scan;
+}
+
 /** Check any token on demand without buying (CLI `scan <token>`): features, gates and (with a key) the AI analyst. */
 export async function scanDry(tokenId, { withAi = true } = {}) {
   const t = await col('tokens').findOne({ _id: tokenId });

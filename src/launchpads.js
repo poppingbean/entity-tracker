@@ -98,6 +98,26 @@ export const adapters = {
     },
   },
 
+  // justhoot v2 (since 2026-10-19): launches moved to v2-launchpad.justhoot.near, tokens are "<symbol>.v2-launchpad.justhoot.near" ("hoot_launcher_v2" events).
+  // Stored as launchpad "justhoot" like v1 so links, filters and the scanner's justhoot timing apply.
+  justhoot_v2: {
+    account: 'v2-launchpad.justhoot.near',
+    parse(tx) {
+      const out = [];
+      const V2 = (name) => tx.events.filter((x) => x.executor === 'v2-launchpad.justhoot.near' && x.standard === 'hoot_launcher_v2' && x.event === name).map((x) => (Array.isArray(x.data) ? x.data[0] : x.data));
+      for (const d of V2('meme_launched')) {
+        const token = d?.token_id; if (!token) continue;
+        const args = tx.calls.find((c) => c.method === 'launch_meme')?.args?.args || {};
+        const poolId = V2('dcl_pool_created').find((x) => x.token_id === token)?.pool_id || V2('launch_planned').find((x) => x.token_id === token)?.plan?.pool_id || `${[token, d.quote_token_id].sort().join('|')}|10000`;
+        const q = d.quote_token_id || otherSide(poolId, token);
+        out.push({ token, launchpad: 'justhoot', creator: d.creator_id || null, name: args.name || null, symbol: args.symbol || null, pool: { dex: 'dcl', poolId, quote: q },
+          devBuyNear: q === 'wrap.near' ? yoctoToNear(d.dev_buy_quote || '0') : (d.dev_buy_quote && d.dev_buy_quote !== '0' ? null : 0), devBuyQuoteRaw: q !== 'wrap.near' && d.dev_buy_quote && d.dev_buy_quote !== '0' ? d.dev_buy_quote : null,
+          lp: { owner: 'v2-pool-creator.justhoot.near', locked: null }, tax: args.transfer_fee_pips ? { transferFeePips: args.transfer_fee_pips } : null });
+      }
+      return out;
+    },
+  },
+
   // meme.cooking: raise, then a Ref v2 pool paired with wNEAR once the token is created
   memecooking: {
     account: 'meme-cooking.near',

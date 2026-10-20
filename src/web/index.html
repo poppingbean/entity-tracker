@@ -282,7 +282,7 @@ const txl = (h) => (h ? ext(`${NB}/txns/${encodeURIComponent(h)}`, String(h).sli
 // meme.cooking token pages use the meme id, which is not in the token account: the server lists them once
 let MEME = {};
 const loadMemeIds = () => fetch('/api/meme-ids').then((r) => r.json()).then((j) => { MEME = j.ids || {}; }).catch(() => {});
-const padOf = (id) => (/\.nearlytrade\.near$/.test(id) ? 'nearlytrade' : /\.launchpad\.justhoot\.near$/.test(id) ? 'justhoot' : null);
+const padOf = (id) => (/\.nearlytrade\.near$/.test(id) ? 'nearlytrade' : /\.(v2-)?launchpad\.justhoot\.near$/.test(id) ? 'justhoot' : null);
 const tokUrl = (id, lp) => {
   lp = lp || padOf(id);
   const e = encodeURIComponent(id);
@@ -418,8 +418,37 @@ views.signals = async () => {
     ${j.rows.length ? '' : '<div class="card muted">No signals yet: needs profiled wallets and evaluated groups.</div>'}`;
 };
 
+/** A token we have never seen: fetch it from chain (launch, trades, early buyers, audit, analysis) and show the progress. */
+function fetchPage(id) {
+  setTimeout(() => startFetch(id), 0);
+  return `<div class="card">${crumbs([['Tokens', '/tokens'], [short(id, 40)]])}<h2>${esc(id)}</h2>
+    <p class="muted">This token is not in the database yet. Fetching it from the chain: its launch, trades and early buyers, the contract audit and the analysis.</p>
+    <p id="fetchState"><span class="b">starting…</span></p></div>`;
+}
+let fetchTimer = null;
+async function startFetch(id) {
+  const box = () => document.getElementById('fetchState');
+  if (!box()) return;
+  clearTimeout(fetchTimer);
+  const show = (html) => { if (box()) box().innerHTML = html; };
+  try {
+    let j = await get('/api/fetch-token', { id });
+    const poll = async () => {
+      if (location.pathname !== P.tok(id) && decodeURIComponent(location.pathname) !== P.tok(id)) return; // the user went elsewhere
+      if (j.error) { show(`<span class="r">${esc(j.error)}</span>`); return; }
+      if (j.state === 'running') { show(`<span class="b">${esc(j.step || 'working')}…</span>`); fetchTimer = setTimeout(async () => { j = await get('/api/fetch-status', { id }).catch(() => j); if (j.exists && (j.state !== 'running' || /auditing|analysis/.test(j.step || ''))) render(); else poll(); }, 2500); return; }
+      if (j.state === 'error') { show(`<span class="r">Could not fetch it: ${esc(j.message || 'unknown error')}</span> <button onclick="startFetch('${esc(id)}')">Try again</button>`); return; }
+      if (j.exists) { render(); return; }
+      show(`<span class="muted">${esc(j.message || 'Nothing was stored.')}</span>`);
+    };
+    await poll();
+  } catch (e) { show(`<span class="r">${esc(e.message)}</span>`); }
+}
+
 async function tokenPage(id) {
-  const t = await get('/api/token', { id }), o = t.outcome || {}, es = t.entries || [], au = t.audit;
+  let t0;
+  try { t0 = await get('/api/token', { id }); } catch (e) { if (/not found/.test(e.message)) return fetchPage(id); throw e; }
+  const t = t0, o = t.outcome || {}, es = t.entries || [], au = t.audit;
   const mix = Object.fromEntries(MIXV.map(([v]) => [v, { w: 0, near: 0 }])), groups = new Map();
   for (const e of es) {
     const v = tagOk(e.tag);
@@ -789,7 +818,7 @@ function searchHtml(r, q) {
   let h = sec('Tokens', r.tokens.map((t) => item(P.tok(t.id), avatar(t.id, t.symbol, 28), esc(t.symbol || short(t.id, 20)), `<span class="acct">${esc(short(t.id, 36))}</span> · ${esc(t.launchpad)} · ${since(t.live_ts)}${t.outcome?.rugged ? ' · <span class="r">rug</span>' : ''}`)))
     + sec('Wallets', r.wallets.map((w) => item(P.wal(w.id), avatar(w.id, w.id, 28), `<span class="acct">${esc(short(w.id, 40))}</span>`, `${tg(w.tag)} ${w.cluster_id ? 'group ' + esc(short(w.cluster_id, 18)) : 'unlinked'} · ${w.stats?.tokens_n ?? 0} tokens`)))
     + sec('Groups', r.groups.map((c) => item(P.grp(c.id), avatar(c.id, c.ai?.label || c.id, 28), esc(c.ai?.label || c.id), `${tg(c.tag)} ${c.size} wallets · <span class="acct">${esc(short(c.id, 22))}</span>`)));
-  if (ACCT_RE.test(q) && q.includes('.')) h += sec('Contract', [item(P.audit(q), '<span class="av" style="--h:170;width:28px;height:28px;font-size:11px">⛨</span>', 'Audit ' + esc(q), 'access keys, code, tax, sell behaviour')]);
+  if (ACCT_RE.test(q) && q.includes('.')) h += sec('Contract', [item(P.audit(q), '<span class="av" style="--h:170;width:28px;height:28px;font-size:11px">⛨</span>', 'Audit ' + esc(q), 'access keys, code, tax, sell behaviour')].concat(r.tokens.some((t) => t.id === q) ? [] : [item(P.tok(q), avatar(q, q, 28), 'Fetch & analyse ' + esc(short(q, 34)), 'not in the database: read its launch, trades and early buyers from the chain')]));
   return h || `<div class="sr-empty">Nothing found for “${esc(q)}”.</div>`;
 }
 function searchKey(e, el) {

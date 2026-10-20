@@ -9,6 +9,7 @@ import { config } from '../config.js';
 import { recentLogs, info, error } from '../log.js';
 import { aiEnabled, aiStatus } from '../ai/nearai.js';
 import { simSell, ensureAccount, positionPnl } from '../sim/portfolio.js';
+import { startFetch, jobStatus } from '../collect/ondemand.js';
 import { creatorIndex, creatorBrief, creatorFlag } from '../evaluate/creators.js';
 import { auditNearContract, getCachedAudit, validNearAddress, summarizeAudit } from '../audit/service.js';
 
@@ -17,6 +18,12 @@ const page = fs.readFileSync(new URL('./index.html', import.meta.url), 'utf8');
 const UI_VIEWS = new Set(['creators', 'explore', 'audit', 'monitor', 'sim', 'scans', 'overview', 'signals', 'groups', 'entities', 'wallets', 'tokens', 'logs', 'config']);
 const HIDDEN_PUBLIC = new Set(['/api/logs', '/api/config']);
 const auditHits = new Map(); // ip -> [timestamps]
+const fetchHits = new Map();
+function fetchAllowed(ip) {
+  const now = Date.now(), list = (fetchHits.get(ip) || []).filter((t) => now - t < 10 * 60e3);
+  if (list.length >= 10) { fetchHits.set(ip, list); return false; }
+  list.push(now); fetchHits.set(ip, list); return true;
+}
 function auditAllowed(ip) {
   const now = Date.now(), list = (auditHits.get(ip) || []).filter((t) => now - t < 10 * 60e3);
   if (list.length >= 30) { auditHits.set(ip, list); return false; }
@@ -237,6 +244,24 @@ const routes = {
     const doc = await auditNearContract(address, { force });
     const { _id, ...rest } = doc;
     return { id: _id, ...rest, summary: summarizeAudit(doc), cached: !!(fresh && !force) };
+  },
+
+  /** Fetch a token the tracker has not seen: find its launch, read trades and early buyers, audit and analyse it (background job). */
+  '/api/fetch-token': async (u, req) => {
+    const id = (u.searchParams.get('id') || '').trim().toLowerCase();
+    if (!validNearAddress(id)) return { error: 'invalid NEAR account id' };
+    const cur = jobStatus(id);
+    if (!cur || cur.state !== 'running') {
+      if (!fetchAllowed(req.socket.remoteAddress || 'ip')) return { error: 'too many fetches, try again in a few minutes' };
+      return { id, ...startFetch(id) };
+    }
+    return { id, ...cur };
+  },
+  '/api/fetch-status': async (u) => {
+    const id = (u.searchParams.get('id') || '').trim().toLowerCase();
+    const job = jobStatus(id);
+    const exists = !!(await col('tokens').findOne({ _id: id }, { projection: { _id: 1 } }));
+    return { id, exists, ...(job || { state: 'none' }) };
   },
 
   '/api/audits': async (u) => {

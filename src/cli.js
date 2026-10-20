@@ -40,7 +40,7 @@ await connectDb(); enableDbLog();
 try {
   if (cmd === 'backfill') {
     const [pad = 'all', hours = '24'] = args;
-    const pads = pad === 'all' ? config.launchpads : [pad];
+    const pads = pad === 'all' ? config.launchpads : [pad]; // backfill() follows aliases (justhoot also replays justhoot_v2)
     for (const p of pads) await backfill(p, Number(hours));
   } else if (cmd === 'process') {
     // every unfinished token once (an old token that is not fully read yet is continued until it is), then all pending wallets

@@ -10,7 +10,7 @@ import { isKnownQuote } from '../near/quotes.js';
 
 const LOOKBACK_BLOCKS = 300; // re-read a little so a transaction the index listed late is not missed (inserts are idempotent)
 
-async function saveLaunches(launchpad, txs) {
+export async function saveLaunches(launchpad, txs) {
   let added = 0;
   for (const tx of txs) {
     if (tx.failed) continue;
@@ -18,7 +18,7 @@ async function saveLaunches(launchpad, txs) {
       // launches that do not name the token (meme.cooking, qlyphs): ask the token contract
       if (!l.symbol) { try { const md = await view(l.token, 'ft_metadata'); l.symbol = md?.symbol || null; l.name = l.name || md?.name || null; } catch {} }
       const doc = {
-        launchpad, creator: l.creator, symbol: l.symbol || null, name: l.name || null, meme_id: l.memeId ?? null, pool: l.pool,
+        launchpad: l.launchpad || launchpad, creator: l.creator, symbol: l.symbol || null, name: l.name || null, meme_id: l.memeId ?? null, pool: l.pool,
         dev_buy_near: l.devBuyNear ?? null, dev_buy_quote_raw: l.devBuyQuoteRaw ?? null, lp: l.lp ?? null, tax: l.tax ?? null, liquidity_near: l.liquidityNear ?? null,
         live_ts: tx.ts, live_height: tx.height, live_tx: tx.hash, status: l.awaitingPool ? 'awaiting_pool' : isKnownQuote(l.pool.quote) || l.pool.dex === 'curve' ? 'new' : 'skipped_quote', // pools quoted in other memecoins cannot be valued in NEAR
          sync_height: null, sync_ts: null, trades_n: 0, created_ts: Date.now(), next_process_ts: l.awaitingPool ? null : 0,
@@ -64,7 +64,7 @@ export async function discoverTknPools(limit = 12) {
 export async function discover() {
   let total = 0;
   try { total += await discoverTknPools(); } catch (e) { warn(`tkn pool discovery failed: ${e.message}`); }
-  for (const name of config.launchpads) {
+  for (const name of expandPads(config.launchpads)) {
     const a = adapters[name];
     if (!a) { warn(`unknown launchpad ${name}`); continue; }
     try {
@@ -79,8 +79,13 @@ export async function discover() {
   return total;
 }
 
+/** A launchpad that moved to a new contract keeps one name in the config: justhoot also follows its v2 launcher. */
+const ALIASES = { justhoot: ['justhoot_v2'] };
+export const expandPads = (names) => [...new Set(names.flatMap((n) => [n, ...(ALIASES[n] || [])]))];
+
 /** Replay a launchpad's recent history so groups can be evaluated on past launches. */
 export async function backfill(launchpad, hours) {
+  if (ALIASES[launchpad]) { let n = 0; for (const x of [launchpad, ...ALIASES[launchpad]]) n += await backfill(x, hours); return n; }
   const a = adapters[launchpad];
   if (!a) throw new Error(`unknown launchpad ${launchpad}`);
   const since = Date.now() - hours * 3600e3;
