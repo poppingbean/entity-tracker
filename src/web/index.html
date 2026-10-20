@@ -344,6 +344,8 @@ const views = {};
 // ================================================================== EXPLORE
 const ASSESS = { bullish: ['g', 'Winners in'], warning: ['r', 'Loss wallets in'], mixed: ['a', 'Mixed money'] };
 const rugKind = { round_trip: 'round trip', price_crash: 'price crash', creator_dump: 'creator dump', flagged: 'dev rug (blacklist)' };
+/** The creator sold (most of) their dev buy within the first hour: a warning, not a rug by itself. */
+const exitChip = (o) => { const x = o?.creator_exit; return x && x.share >= 0.8 ? `<span class="v neutral" title="sold ${n(x.sold_near, 1)} N of a ${n(x.dev_buy_near, 1)} N dev buy within the first hour; first sale ${x.minutes} min after launch">creator exit · ${x.minutes} min</span>` : ''; };
 const rugChips = (o) => (o?.rugged ? (o.rug_kinds?.length ? o.rug_kinds : ['rug']).map((k) => `<span class="v bad" title="${esc(o.rug_reason || 'rugged')}">${esc(rugKind[k] || 'rug')}</span>`).join(' ') : '');
 const outcomeTxt = (o) => (o ? (o.rugged ? '<span class="r">RUG</span> ' : '') + `<span class="${roiCls((o.last_multiple ?? 1) - 1)}">x${n(o.last_multiple, 1)}</span>` : '–');
 const signalCard = (s) => `<div class="tcard" ${row(P.tok(s.token))}>
@@ -405,7 +407,7 @@ views.tokens = async () => {
       <td>${scanState(t, m.scan)}</td><td class="num ${t.scan?.score == null ? 'muted' : 'b'}">${t.scan?.score ?? '–'}</td>
       <td class="wrap small" style="min-width:170px">${(t.scan?.failed || []).length ? `<span class="r">${esc(t.scan.failed.map((g) => g.id || g).join(', '))}</span><br>` : ''}<span class="muted">${esc(t.scan?.decision || '')}</span>${t.scan?.id ? ' ' + ilink(P.scan(t.scan.id), 'evaluation →') : ''}</td>
       <td class="num">${t.outcome?.buyers ?? '–'}</td><td class="num">x${n(t.outcome?.peak_multiple, 1)}</td><td class="num ${roiCls((t.outcome?.last_multiple ?? 1) - 1)}">x${n(t.outcome?.last_multiple, 1)}</td>
-      <td>${crChip(t.creator_risk)} ${rugChips(t.outcome)} ${t.outcome?.creator_sold ? '<span class="v neutral">creator sold</span>' : ''}${!t.outcome?.rugged && !t.outcome?.creator_sold ? `<span class="chip">${esc(t.status)}</span>` : ''}</td></tr>`).join('') || empty(11, 'no tokens')}</table>
+      <td>${crChip(t.creator_risk)} ${rugChips(t.outcome)} ${exitChip(t.outcome) || (t.outcome?.creator_sold ? '<span class="v neutral">creator sold</span>' : '')}${!t.outcome?.rugged && !t.outcome?.creator_sold ? `<span class="chip">${esc(t.status)}</span>` : ''}</td></tr>`).join('') || empty(11, 'no tokens')}</table>
     <div class="legend">${MIXV.map(([v, l]) => `<span><span class="lg-dot ${v}"></span>${l}</span>`).join('')}<span>· green / red % = early NEAR from win80+win50 / loss wallets</span></div></div>`;
 };
 
@@ -470,7 +472,7 @@ async function tokenPage(id) {
   const total = mixTotal(mix), gl = [...groups.values()].sort((a, b) => b.near - a.near);
   const riskCls = au?.available ? (au.risk_level === 'low' ? 'g' : au.risk_level === 'medium' ? 'a' : 'r') : 'muted';
   let h = `<div class="card">${crumbs([['Tokens', '/tokens'], [t.symbol || short(t.id, 20)]])}
-    <div class="dh-main">${avatar(t.id, t.symbol, 54)}<div style="min-width:0"><h1>${esc(t.symbol || short(t.id, 24))} <span class="muted">${esc(t.name || '')}</span> ${rugChips(o)}</h1>
+    <div class="dh-main">${avatar(t.id, t.symbol, 54)}<div style="min-width:0"><h1>${esc(t.symbol || short(t.id, 24))} <span class="muted">${esc(t.name || '')}</span> ${rugChips(o)} ${exitChip(o)}</h1>
       <div class="meta"><span class="chip">${esc(t.launchpad)}</span><span class="chip">${esc(t.status)}</span><span class="acct">${esc(t.id)}</span><span>live ${when(t.live_ts)} (${since(t.live_ts)})</span></div>
       <div class="meta"><span>creator ${t.creator ? ilink(P.creator(t.creator), esc(short(t.creator, 30)), t.creator) + ' ' + ext(nbAddr(t.creator), '↗', 'NearBlocks') + ' ' + crChip(t.creator_info) : '–'}</span><span>launch tx ${txl(t.live_tx)}</span>${ext(tokUrl(t.id, t.launchpad), 'Launchpad page ↗')}${ext(`${NB}/token/${encodeURIComponent(t.id)}`, 'NearBlocks ↗')}${ilink(P.audit(t.id), 'Full audit →')}</div></div></div>
     <div class="tiles">${tile('Peak', 'x' + n(o.peak_multiple, 1))}${tile('Now', 'x' + n(o.last_multiple, 1), o.drawdown != null ? `drawdown ${pct(o.drawdown)}` : null, roiCls((o.last_multiple ?? 1) - 1))}

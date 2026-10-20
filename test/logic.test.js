@@ -293,3 +293,12 @@ test('rugs: a token that pumped and came back to its launch price is a round-tri
   assert.equal(buildOutcome(token, [trade('a', true, 10, 1000, 1), trade('b', true, 20, 1000, 5), trade('x', false, 11, 1000, 80)], T0 + 120 * MIN, lcfg).rugged, false);
   assert.equal(buildOutcome(token, [trade('a', true, 10, 1000, 1), trade('b', true, 40, 1000, 5), trade('x', false, 25, 1000, 80)], T0 + 120 * MIN, lcfg).rugged, false);
 });
+
+test('creator exit: share of the dev buy sold in the first hour and how soon, without calling it a rug', () => {
+  const lcfg = { minutes: cfg.minutes, rugDrawdown: 0.9 };
+  const tr = [trade('a', true, 20, 2000, 0.1), trade('creator.near', false, 19, 1900, 3), trade('b', true, 5, 500, 4)];
+  const o = buildOutcome({ ...token, dev_buy_near: 20 }, tr, T0 + 50 * MIN, lcfg);
+  assert.ok(o.creator_exit.share > 0.9 && o.creator_exit.minutes === 3);
+  assert.equal(o.rugged, false);
+  assert.equal(buildOutcome(token, tr, T0 + 50 * MIN, lcfg).creator_exit, null, 'no dev buy known: no share');
+});
