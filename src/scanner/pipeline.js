@@ -1,6 +1,7 @@
 // Scanner mode: when a launch is old enough, collect features, apply the hard gates, ask the AI analyst, and (if it approves) buy
 // it in the simulated wallet. Tokens that scored well are re-reviewed later (follow-up reviews). Everything is stored in `scans`.
 import { col } from '../db.js';
+import { flagRug } from '../collect/rugs.js';
 import { config } from '../config.js';
 import { info, warn, error } from '../log.js';
 import { syncTokenTrades } from '../collect/trades.js';
@@ -18,6 +19,7 @@ const running = new Set();
 export async function blacklistCreator(account, info_) {
   if (!account || INFRA_CREATOR.test(account)) return false;
   const r = await col('blacklist').updateOne({ _id: account }, { $setOnInsert: { _id: account, ts: Date.now(), ...info_ } }, { upsert: true });
+  if (info_?.token) await flagRug(info_.token, { source: 'tracker', reason: info_.reason, creator: account }).catch(() => {}); // the token the creator dumped is a rug
   return !!r.upsertedCount;
 }
 

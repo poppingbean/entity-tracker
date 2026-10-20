@@ -3,7 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { buildEntries, buildOutcome, priceAt, priceSeries, evalRoi } from '../src/collect/analyze.js';
 import { buildGroups } from '../src/graph/cluster.js';
-import { computeMetrics, ruleVerdict } from '../src/evaluate/metrics.js';
+import { computeMetrics, ruleVerdict, winTag } from '../src/evaluate/metrics.js';
 import { extractJson } from '../src/ai/nearai.js';
 import { normaliseReview } from '../src/ai/review.js';
 
@@ -197,4 +197,65 @@ test('audit: summary for the gates, and the contract_audit_ok gate', () => {
     trading: { uniqueBuyers: 30, creatorSold: false, priceMultipleSinceFirstTrade: 1, buyNear: 100, sellNear: 10, syncBuyClusters: 0 }, launch: { tax: null }, wallets: { linkedBuyerShare: 0, creatorFundedBuyers: [], creator: null }, intel: null };
   assert.equal(applyRules({ ...base, audit: { available: false } }).gates.find((g) => g.id === 'contract_audit_ok').ok, true, 'no audit: not blocked');
   assert.equal(applyRules({ ...base, audit: sum }).gates.find((g) => g.id === 'contract_audit_ok').ok, false, 'a confirmed backdoor fails the gate');
+});
+
+test('deep links: wallets joined through ordinary wallets up to 3 hops; profiled network wallets make the extra hops visible', () => {
+  const early = [
+    { _id: 'a', chain: [], funders: [], flow_out: [{ to: 'x', near: 5 }] },       // a paid x
+    { _id: 'b', chain: [{ account: 'boss', kind: 'wallet', hop: 1 }], funders: [{ account: 'boss', kind: 'wallet', near: 9 }], flow_out: [] },
+    { _id: 'c', chain: [], funders: [], flow_out: [] },
+  ];
+  const x = { _id: 'x', kind: 'wallet', chain: [{ account: 'boss', kind: 'wallet', hop: 1 }], funders: [{ account: 'boss', kind: 'wallet', near: 6 }], flow_out: [] }; // boss funded x
+  const none = buildGroups(early, [], new Map(), { cobuySeconds: 15, cobuyMinTokens: 4 }, []);
+  assert.notEqual(none.walletGroup.get('a'), none.walletGroup.get('b'), 'without the network wallet the link is invisible');
+  const withNet = buildGroups(early, [], new Map(), { cobuySeconds: 15, cobuyMinTokens: 4 }, [x]);
+  assert.equal(withNet.walletGroup.get('a'), withNet.walletGroup.get('b'), 'a -> x <- boss -> b is 3 hops');
+  assert.notEqual(withNet.walletGroup.get('a'), withNet.walletGroup.get('c'));
+  const g = withNet.groups.find((gr) => gr.members.includes('a'));
+  assert.ok(g.links.some((l) => l.type === 'deep_link'), 'recorded as a deep link');
+  assert.equal(g.nodeDepth.boss, 1, 'boss is one hop from b');
+  assert.equal(g.nodeDepth.x, 1);
+  const shallow = buildGroups(early, [], new Map(), { cobuySeconds: 15, cobuyMinTokens: 4, deepDepth: 1 }, [x]);
+  assert.notEqual(shallow.walletGroup.get('a'), shallow.walletGroup.get('b'), 'depth 1 does not reach');
+});
+
+test('deep links: exchanges / hubs and busy distributors are never walked through', () => {
+  const hubKind = [
+    { _id: 'a', chain: [], funders: [], flow_out: [{ to: 'x', near: 5 }] },
+    { _id: 'b', chain: [], funders: [{ account: 'x', kind: 'wallet', near: 5 }], flow_out: [] },
+  ];
+  const hubX = { _id: 'x', kind: 'hub', chain: [], funders: [], flow_out: [] };
+  const r = buildGroups(hubKind, [], new Map(), { cobuySeconds: 15, cobuyMinTokens: 4 }, [hubX]);
+  assert.notEqual(r.walletGroup.get('a'), r.walletGroup.get('b'), 'a hot wallet in the middle proves nothing');
+  const crowd = Array.from({ length: 20 }, (_, i) => ({ _id: `w${i}`, chain: [], funders: [], flow_out: [{ to: 'svc', near: 5 }] }));
+  const r2 = buildGroups(crowd, [], new Map(), { cobuySeconds: 15, cobuyMinTokens: 4 }, []);
+  assert.equal(new Set(crowd.map((w) => r2.walletGroup.get(w._id))).size, 20, 'an account reached by more than 15 wallets is a service');
+});
+
+test('tags: win80 / win50 / win30 / loss by the share of tokens ended in profit; unrated until enough tokens', () => {
+  assert.equal(winTag(0.9, 5, 3), 'win80'); assert.equal(winTag(0.8, 5, 3), 'win80');
+  assert.equal(winTag(0.6, 5, 3), 'win50'); assert.equal(winTag(0.5, 4, 3), 'win50');
+  assert.equal(winTag(0.35, 6, 3), 'win30'); assert.equal(winTag(0.3, 3, 3), 'win30');
+  assert.equal(winTag(0.2, 5, 3), 'loss'); assert.equal(winTag(0, 3, 3), 'loss');
+  assert.equal(winTag(1, 2, 3), 'unrated'); assert.equal(winTag(null, 0, 3), 'unrated');
+  const rois = [0.5, -0.2, 1.2, 0.1, -0.6];
+  const { entries, tokens } = (function () { const t = new Map(), es = []; rois.forEach((r, i) => { const id = `p${i}`; t.set(id, { symbol: id, live_ts: T0 + i, creator: 'c', outcome: { rugged: false } }); es.push({ token: id, wallet: 'w1', rank: 2, delay_s: 20, buy_near: 10, roi: { 60: r }, sold_share: { 60: 0 }, first_buy_ts: T0 + i, token_rugged: false }); }); return { entries: es, tokens: t }; })();
+  const { metrics } = computeMetrics(['w1'], entries, tokens, new Map([['w1', { _id: 'w1' }]]), new Set(), { minutes: [60], winRoi: 0.2, cobuySeconds: 15, minTokens: 3 });
+  assert.equal(metrics.profit_rate, 0.6); assert.equal(winTag(metrics.profit_rate, metrics.tokens_n, 3), 'win50');
+});
+
+test('rugs: a deep fall with the creator selling is a rug; so is a token flagged from the creator blacklist', () => {
+  const lcfg = { minutes: cfg.minutes, rugDrawdown: 0.9, softRugDrawdown: 0.7 };
+  const mk = (extra = []) => [trade('a', true, 10, 1000, 1), trade('b', true, 20, 1000, 5), ...extra, trade('x', false, 5, 1000, 40), trade('x', false, 1, 1000, 70)];
+  // peak price 0.02, ends at 0.001 -> collapse >= 0.9 without the creator selling
+  assert.equal(buildOutcome(token, mk(), T0 + 120 * MIN, lcfg).rug_kinds[0], 'price_crash');
+  // peak 0.02, ends at 0.0035 (-82 %): not a crash by itself, a rug once the creator also sold
+  const soft = [trade('creator.near', false, 3, 100, 50), trade('x', false, 3.5, 1000, 80)];
+  const base = [trade('a', true, 10, 1000, 1), trade('b', true, 20, 1000, 5), ...soft];
+  const withCreator = buildOutcome(token, base, T0 + 120 * MIN, lcfg);
+  assert.ok(withCreator.drawdown >= 0.7 && withCreator.drawdown < 0.9); assert.deepEqual(withCreator.rug_kinds, ['creator_dump']); assert.equal(withCreator.rugged, true);
+  const noCreator = buildOutcome(token, [trade('a', true, 10, 1000, 1), trade('b', true, 20, 1000, 5), trade('x', false, 3.5, 1000, 80)], T0 + 120 * MIN, lcfg);
+  assert.equal(noCreator.rugged, false);
+  const flagged = buildOutcome({ ...token, rug: { flagged: true, reason: 'creator balance fell 100% while we held' } }, [trade('a', true, 10, 1000, 1)], T0 + 5 * MIN, lcfg);
+  assert.equal(flagged.rugged, true); assert.deepEqual(flagged.rug_kinds, ['flagged']); assert.match(flagged.rug_reason, /creator balance/);
 });

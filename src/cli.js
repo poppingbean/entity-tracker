@@ -4,6 +4,8 @@
 //   node src/cli.js reprofile                          profile every early wallet again, then regroup
 //   node src/cli.js label <account> "<name>" [type]    name an exchange / service wallet (type: exchange|service|bridge|fund|other)
 //   node src/cli.js rebuild-entries                    recompute early entries from stored trades (no network), then regroup
+//   node src/cli.js rugs                               flag known rugs (creator blacklist), re-apply the rug rules to every token, regroup
+//   node src/cli.js expand [batches]                   profile the wallets linked to the groups (3 hops out), then regroup
 //   node src/cli.js audit <account> [--force] [--json]  audit any NEAR contract / token (access keys, code, tax, sell behaviour)
 //   node src/cli.js import-scanner [state.json] [--dry]  copy the live scanner's data (launches, evaluations, blacklist, positions) here
 //   node src/cli.js scan <token> [--features]          run the gates + AI analyst on any stored token (no buying)
@@ -24,7 +26,8 @@ import { buildEntities } from './evaluate/entities.js';
 import { scanDry, blacklistCreator } from './scanner/pipeline.js';
 import { importScanner } from './import/scanner.js';
 import { auditNearContract, summarizeAudit } from './audit/service.js';
-import { buildEntries, buildOutcome } from './collect/analyze.js';
+import { recomputeToken, flagRugs } from './collect/rugs.js';
+import { expandNetworks } from './graph/expand.js';
 const buildEntries_done = async () => { await evaluateGroups(); };
 import { resetSim, simBuy, managePositions } from './sim/portfolio.js';
 import { checkAi, aiEnabled, aiStatus } from './ai/nearai.js';
@@ -84,20 +87,25 @@ try {
     await buildEntities();
     info(`labelled ${account} as "${name}" (${type})`);
   } else if (cmd === 'rebuild-entries') {
-    // recompute every token's early entries and outcome from the trades already stored (no network): picks up new fields such as the buy tx
+    // recompute every token's early entries and outcome from the trades already stored (no network): picks up new fields and rug rules
     const toks = await col('tokens').find({ status: { $nin: ['skipped_quote'] }, trades_n: { $gt: 0 } }).toArray();
     let n = 0;
-    for (const t of toks) {
-      const trades = await col('trades').find({ token: t._id }).sort({ ts: 1 }).toArray();
-      if (!trades.length) continue;
-      const entries = buildEntries(t, trades, Date.now(), { ...config.entry, minutes: config.outcome.minutes });
-      const outcome = buildOutcome(t, trades, Date.now(), config.outcome);
-      for (const e of entries) e.token_rugged = outcome.rugged;
-      if (entries.length) await col('entries').bulkWrite(entries.map((e) => ({ replaceOne: { filter: { _id: e._id }, replacement: e, upsert: true } })), { ordered: false });
-      n += entries.length;
-    }
+    for (const t of toks) n += (await recomputeToken(t)) || 0;
     info(`rebuilt ${n} early entries from stored trades`);
     await buildEntries_done();
+  } else if (cmd === 'rugs') {
+    // flag tokens named in the creator blacklist as rugged, re-apply the rug rules to every stored token, regroup, and list what is rugged
+    info(`flagged ${await flagRugs()} tokens from the blacklist`);
+    const toks = await col('tokens').find({ trades_n: { $gt: 0 } }).toArray();
+    for (const t of toks) await recomputeToken(t);
+    await evaluateGroups();
+    const rows = await col('tokens').aggregate([{ $match: { 'outcome.rugged': true } }, { $unwind: { path: '$outcome.rug_kinds', preserveNullAndEmptyArrays: true } }, { $group: { _id: '$outcome.rug_kinds', n: { $sum: 1 } } }]).toArray();
+    console.log(JSON.stringify({ rugged: await col('tokens').countDocuments({ 'outcome.rugged': true }), by_kind: Object.fromEntries(rows.map((r) => [r._id || 'n/a', r.n])), flagged: await col('tokens').countDocuments({ 'rug.flagged': true }) }));
+  } else if (cmd === 'expand') {
+    // profile the wallets linked to the groups (up to 3 hops out), n batches, then regroup
+    let k = 0; for (let i = 0; i < (Number(args[0]) || 5); i++) k += await expandNetworks();
+    info(`expanded ${k} linked wallets`);
+    await evaluateGroups();
   } else if (cmd === 'audit') {
     const doc = await auditNearContract(args[0], { force: args.includes('--force') });
     if (doc.notFound) { console.log(`${doc.address}: no contract on this account`); }

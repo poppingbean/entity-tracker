@@ -10,7 +10,7 @@ import { describe } from '../labels.js';
 const CAP = 80; // wallets listed per entity
 
 export async function buildEntities() {
-  const wallets = await col('wallets').find({ is_early: true, profiled: true }, { projection: { funders: 1, chain: 1, cluster_id: 1, cluster_verdict: 1, stats: 1, first_seen_ts: 1 } }).toArray();
+  const wallets = await col('wallets').find({ is_early: true, profiled: true }, { projection: { funders: 1, chain: 1, cluster_id: 1, cluster_verdict: 1, tag: 1, stats: 1, first_seen_ts: 1 } }).toArray();
   if (!wallets.length) return { entities: 0 };
   const wmap = new Map(wallets.map((w) => [w._id, w]));
   const entries = await col('entries').find({ wallet: { $in: [...wmap.keys()] } }, { projection: { wallet: 1, token: 1, symbol: 1 } }).toArray();
@@ -49,19 +49,19 @@ export async function buildEntities() {
     const kind = e.kind || classifyAccount(e._id, null);
     if (e.roles.size === 1 && e.roles.has('sink') && e.sinks.size < 2 && isGenericKind(kind) === false) continue; // a destination one wallet paid once is noise
     const funded = [...e.funded.values()], sinkers = [...e.sinks.values()];
-    const verdicts = { good: 0, bad: 0, neutral: 0, unknown: 0, solo: 0 };
+    const verdicts = { win80: 0, win50: 0, win30: 0, loss: 0, unrated: 0 };
     const tokens = new Set();
     let pnl = 0, buy = 0, wins = 0, judged = 0;
     for (const f of funded) {
       const w = wmap.get(f.wallet); if (!w) continue;
-      verdicts[w.cluster_verdict || 'solo']++;
+      verdicts[w.tag in verdicts ? w.tag : 'unrated']++;
       for (const t of tokensOf.get(w._id) || []) tokens.add(t);
       if (w.stats?.tokens_n) { pnl += w.stats.pnl_near || 0; buy += w.stats.total_buy_near || 0; judged++; if ((w.stats.win_rate ?? 0) >= 0.5) wins++; }
     }
     const d = describe(e._id, kind, manual);
     docs.push({
       _id: e._id, kind, label: d.label, type: d.type, label_source: d.source, roles: [...e.roles], tx_count: e.tx_count,
-      funded_n: funded.length, funded_near: funded.reduce((s, f) => s + (f.near || 0), 0), funded_wallets: funded.sort((a, b) => (b.near || 0) - (a.near || 0)).slice(0, CAP).map((f) => ({ ...f, cluster_id: wmap.get(f.wallet)?.cluster_id ?? null, verdict: wmap.get(f.wallet)?.cluster_verdict ?? null })),
+      funded_n: funded.length, funded_near: funded.reduce((s, f) => s + (f.near || 0), 0), funded_wallets: funded.sort((a, b) => (b.near || 0) - (a.near || 0)).slice(0, CAP).map((f) => ({ ...f, cluster_id: wmap.get(f.wallet)?.cluster_id ?? null, tag: wmap.get(f.wallet)?.tag ?? null })),
       funded_verdicts: verdicts, tokens_n: tokens.size, funded_pnl_near: pnl, funded_buy_near: buy, funded_roi: buy ? pnl / buy : null, funded_winners: wins, funded_judged: judged,
       sink_senders_n: sinkers.length, sink_near: sinkers.reduce((s, x) => s + x.near, 0), sink_wallets: sinkers.sort((a, b) => b.near - a.near).slice(0, CAP),
       updated_ts: Date.now(),

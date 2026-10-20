@@ -5,13 +5,15 @@ import { info, warn, error } from './log.js';
 import { discover } from './collect/launches.js';
 import { processDue } from './collect/process.js';
 import { profilePending } from './graph/profile.js';
+import { expandNetworks } from './graph/expand.js';
+import { flagRugs } from './collect/rugs.js';
 import { evaluateGroups, reviewPending } from './evaluate/run.js';
 import { checkAi, aiEnabled, aiStatus } from './ai/nearai.js';
 import { scanTick, followUpTick, blacklistCreator } from './scanner/pipeline.js';
 import { managePositions } from './sim/portfolio.js';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-export const runtime = { startedTs: Date.now(), cycles: 0, lastCycleTs: null, stopping: false, lastEvalTs: 0, lastPositionCheck: 0 };
+export const runtime = { startedTs: Date.now(), cycles: 0, lastCycleTs: null, stopping: false, lastEvalTs: 0, lastPositionCheck: 0, lastRugCheck: 0 };
 
 /** One pass of the pipeline. Returns what it did, so callers (the CLI) can loop until idle. */
 export async function cycle({ evaluate = true } = {}) {
@@ -20,14 +22,16 @@ export async function cycle({ evaluate = true } = {}) {
   let scanned = 0, followed = 0;
   if (config.scan.enabled) { scanned = await scanTick(); followed = await followUpTick(); }
   if (config.sim.enabled && Date.now() - runtime.lastPositionCheck > config.sim.positionCheckSeconds * 1000) { runtime.lastPositionCheck = Date.now(); await managePositions(blacklistCreator); }
+  if (Date.now() - runtime.lastRugCheck > 10 * 60e3) { runtime.lastRugCheck = Date.now(); await flagRugs().catch((e) => warn(`rug flagging failed: ${e.message}`)); } // creators blacklisted for dumping: their token is a rug
   const profiled = await profilePending(40);
+  const expanded = evaluate ? await expandNetworks().catch((e) => { warn(`network expansion failed: ${e.message}`); return 0; }) : 0; // linked wallets around the groups, up to 3 hops
   let groups = null, reviewed = 0;
   const stale = Date.now() - runtime.lastEvalTs > 10 * 60e3;
-  if (evaluate && (profiled > 0 || stale && processed > 0 || stale && runtime.lastEvalTs === 0)) {
+  if (evaluate && (profiled > 0 || expanded > 0 && Date.now() - runtime.lastEvalTs > 2 * 60e3 || stale && processed > 0 || stale && runtime.lastEvalTs === 0)) {
     groups = (await evaluateGroups()).groups; runtime.lastEvalTs = Date.now();
   }
   if (evaluate && aiEnabled()) reviewed = await reviewPending(3);
-  return { found, processed, scanned, followed, profiled, groups, reviewed };
+  return { found, processed, scanned, followed, profiled, expanded, groups, reviewed };
 }
 
 export async function runWorker() {

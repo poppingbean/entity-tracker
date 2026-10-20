@@ -1,0 +1,36 @@
+// Rugged tokens: recompute a token's outcome and early entries from the trades already stored (no network), and flag tokens known to be
+// rugs from outside the price series: the scanner's dev-rug blacklist (the creator emptied their balance while a position was held).
+import { col } from '../db.js';
+import { config } from '../config.js';
+import { info } from '../log.js';
+import { buildEntries, buildOutcome } from './analyze.js';
+
+/** Rebuild one token's outcome and entries from its stored trades and write them. Returns the entries count, or null when no trades are stored. */
+export async function recomputeToken(t, now = Date.now()) {
+  const trades = await col('trades').find({ token: t._id }).sort({ ts: 1 }).toArray();
+  if (!trades.length) return null;
+  const outcome = buildOutcome(t, trades, now, config.outcome);
+  const entries = buildEntries(t, trades, now, { ...config.entry, minutes: config.outcome.minutes });
+  for (const e of entries) e.token_rugged = outcome.rugged;
+  if (entries.length) await col('entries').bulkWrite(entries.map((e) => ({ replaceOne: { filter: { _id: e._id }, replacement: e, upsert: true } })), { ordered: false });
+  await col('tokens').updateOne({ _id: t._id }, { $set: { outcome, entries_n: entries.length } });
+  return entries.length;
+}
+
+/** Mark one token as a known rug (e.g. a creator was just blacklisted for dumping it) and refresh its outcome. */
+export async function flagRug(tokenId, { source, reason, creator = null, ts = Date.now() }) {
+  const r = await col('tokens').updateOne({ _id: tokenId, 'rug.flagged': { $ne: true } }, { $set: { rug: { flagged: true, source, reason: reason || null, creator, ts } } });
+  if (!r.modifiedCount) return false;
+  const t = await col('tokens').findOne({ _id: tokenId });
+  await recomputeToken(t).catch(() => {}); // a token without stored trades picks the flag up when it is processed
+  return true;
+}
+
+/** Flag every token named in the blacklist that is not flagged yet. Returns the number newly flagged. */
+export async function flagRugs() {
+  const bl = await col('blacklist').find({ token: { $ne: null } }).toArray();
+  let n = 0;
+  for (const b of bl) if (await flagRug(b.token, { source: b.source || 'tracker', reason: b.reason, creator: b._id, ts: b.ts })) n++;
+  if (n) info(`RUGS flagged ${n} tokens from the creator blacklist`);
+  return n;
+}

@@ -7,7 +7,10 @@
 //   cobuy    - they bought within a few seconds of each other in at least COBUY_MIN_TOKENS different tokens
 //   hub_twin - the same exchange hot wallet paid them the same odd amount (e.g. 17.706 NEAR) within an hour
 //   creator  - a token's creator funded them or they sent NEAR to the creator (insider)
+//   deep     - up to DEEP_DEPTH (3) hops of funding / flow through ordinary wallets lead both to the same account (see graph/deep.js);
+//              this also uses the "network" wallets the expander profiled around each group
 import { classifyAccount, isGenericKind } from './profile.js';
+import { deepAnchors, DEEP_DEPTH } from './deep.js';
 
 export const DISTRIBUTOR_MAX_CHILDREN = 40; // a funder of more early wallets than this is a distributor, not an owner
 export const SINK_MAX_SENDERS = 12;         // a destination that many early wallets pay is an exchange deposit or a service, not an owner
@@ -23,15 +26,15 @@ class UF {
 /**
  * wallets: [{ _id, chain:[{account, kind, hop}], flow_out:[{to, near}] }]   (early, profiled wallets)
  * entries: [{ token, wallet, first_buy_ts }]      tokens: Map token -> { creator }
- * cfg: { cobuySeconds, cobuyMinTokens }
- * Returns { groups: [{ members, nodes, links }], walletGroup: Map }, members = early wallets only.
+ * cfg: { cobuySeconds, cobuyMinTokens, deepDepth }      extra: profiled non-early "network" wallets, used only to find deeper links
+ * Returns { groups: [{ members, nodes, links, nodeDepth }], walletGroup: Map }, members = early wallets only.
  */
-export function buildGroups(wallets, entries, tokens, cfg) {
+export function buildGroups(wallets, entries, tokens, cfg, extra = []) {
   const uf = new UF();
   const early = new Set(wallets.map((w) => w._id));
   for (const w of wallets) uf.find(w._id);
   const links = new Map(); // key -> { type, anchor, wallets:Set }
-  const addLink = (type, anchor, ...ws) => { const k = `${type}|${anchor}`; const l = links.get(k) || { type, anchor, wallets: new Set() }; ws.forEach((x) => l.wallets.add(x)); links.set(k, l); };
+  const addLink = (type, anchor, ...ws) => { const k = `${type}|${anchor}`; const l = links.get(k) || { type, anchor, wallets: new Set() }; ws.forEach((x) => l.wallets.add(x)); links.set(k, l); return l; };
 
   // --- funder links: every non-generic account on a wallet's chain is an anchor; count how many early wallets each anchor reaches
   const reach = new Map(); // anchor -> Set(early wallets)
@@ -104,6 +107,16 @@ export function buildGroups(wallets, entries, tokens, cfg) {
     const [a, b] = k.split('|'); uf.union(a, b); cobuyPairs++; addLink('cobuy', k, a, b);
   }
 
+  // --- deep links: up to 3 hops of funding / flow lead two or more early wallets to the same ordinary account
+  const deep = deepAnchors([...early], [...wallets, ...extra], { maxDepth: cfg.deepDepth ?? DEEP_DEPTH });
+  let deepLinks = 0;
+  for (const a of deep.anchors) {
+    if (new Set(a.wallets.map((w) => uf.find(w))).size < 2) continue; // already one group through a direct link: nothing new
+    for (const w of a.wallets) for (const n of a.paths[w]) uf.union(w, n);
+    addLink('deep_link', a.anchor, ...a.wallets).depth = a.depth;
+    deepLinks++;
+  }
+
   // --- collect groups
   const groups = new Map();
   for (const x of uf.p.keys()) {
@@ -118,10 +131,13 @@ export function buildGroups(wallets, entries, tokens, cfg) {
     if (!g.members.length) continue;
     const memberSet = new Set(g.members);
     const gl = [];
-    for (const l of links.values()) { const ws = [...l.wallets].filter((x) => memberSet.has(x)); if (ws.length) gl.push({ type: l.type, anchor: l.anchor, wallets: ws }); }
+    for (const l of links.values()) { const ws = [...l.wallets].filter((x) => memberSet.has(x)); if (ws.length) gl.push({ type: l.type, anchor: l.anchor, wallets: ws, ...(l.depth ? { depth: l.depth } : {}) }); }
     g.members.sort(); g.nodes.sort();
-    out.push({ members: g.members, nodes: g.nodes, links: gl });
+    // how far each non-member node is from the nearest member (1 = direct funder / destination, up to DEEP_DEPTH)
+    const nodeDepth = {};
+    for (const n of g.nodes) if (!memberSet.has(n)) { let best = null; for (const m of g.members) { const d = deep.reaches.get(m)?.get(n)?.d; if (d && (best == null || d < best)) best = d; } nodeDepth[n] = best ?? 1; }
+    out.push({ members: g.members, nodes: g.nodes, links: gl, nodeDepth });
   }
   out.forEach((g, i) => g.members.forEach((m) => walletGroup.set(m, i)));
-  return { groups: out, walletGroup, insiderEntries, cobuyPairs };
+  return { groups: out, walletGroup, insiderEntries, cobuyPairs, deepLinks };
 }

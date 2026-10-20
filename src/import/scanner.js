@@ -12,6 +12,7 @@ import fs from 'node:fs';
 import { col } from '../db.js';
 import { config } from '../config.js';
 import { isKnownQuote } from '../near/quotes.js';
+import { flagRugs } from '../collect/rugs.js';
 
 const MIN = 60e3;
 
@@ -71,6 +72,7 @@ export async function importScanner(file, { dry = false } = {}) {
   await batches('tokens', tokenOps); await batches('scans', scanOps); await batches('scanner_positions', posOps); await batches('scanner_spend', spendOps);
   for (const [account, v] of bl) await col('blacklist').updateOne({ _id: account }, { $setOnInsert: { _id: account, ts: v.ts, token: v.token || null, symbol: v.symbol || null, reason: v.reason || null, source: 'scanner' } }, { upsert: true });
   for (const [launchpad, hashes] of Object.entries(s.templates || {})) if (Object.keys(hashes).length) await col('templates').updateOne({ _id: launchpad }, { $max: Object.fromEntries(Object.entries(hashes).map(([h, n]) => [`counts.${h}`, n])) }, { upsert: true });
+  stat.rugs = await flagRugs(); // tokens whose creator was blacklisted are rugs
   const after = await col('tokens').estimatedDocumentCount();
   stat.tokens.new = Math.max(0, after - before); stat.tokens.existing = stat.tokens.seen - stat.tokens.new;
   return { dry: false, ...stat };

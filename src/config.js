@@ -33,6 +33,7 @@ export const config = {
   outcome: {
     minutes: nums(process.env.OUTCOME_MINUTES, [60, 360, 1440]),
     rugDrawdown: num(process.env.RUG_DRAWDOWN, 0.9),
+    softRugDrawdown: num(process.env.SOFT_RUG_DRAWDOWN, 0.7),    // a fall this deep counts as a rug when the creator also sold at least 1 NEAR
     winRoi: num(process.env.WIN_ROI, 0.2),
   },
 
@@ -42,6 +43,9 @@ export const config = {
     cobuyMinTokens: num(process.env.COBUY_MIN_TOKENS, 4),
     cobuySeconds: num(process.env.COBUY_SECONDS, 15),
     profileConcurrency: num(process.env.PROFILE_CONCURRENCY, 4),
+    deepDepth: num(process.env.DEEP_DEPTH, 3),                     // hops of funding / flow followed from each early wallet to find shared accounts
+    expandBatch: num(process.env.NETWORK_EXPAND_BATCH, 20),        // linked (non-early) wallets profiled per cycle; 0 turns the expansion off
+    networkMaxNodes: num(process.env.NETWORK_MAX_NODES, 5000),     // cap on stored network wallets
   },
 
   evaluate: {

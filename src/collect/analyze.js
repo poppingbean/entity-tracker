@@ -39,10 +39,17 @@ export function buildOutcome(token, trades, now, cfg) {
   const creatorBuys = creator ? buys.filter((t) => t.trader === creator) : [];
   const sum = (a, f) => a.reduce((s, x) => s + f(x), 0);
   const finalM = [...cfg.minutes].reverse().find((m) => cp[m] != null) ?? null;
+  // Why a token counts as rugged: its price collapsed from the peak, its creator dumped into a deep fall, or it was flagged from outside
+  // (the scanner's dev-rug blacklist: the creator emptied their balance while a position was held).
+  const creatorSellNear = sum(creatorSells, (t) => t.near);
+  const rugKinds = [];
+  if (settled && drawdown != null && drawdown >= cfg.rugDrawdown) rugKinds.push('price_crash');
+  else if (settled && drawdown != null && drawdown >= (cfg.softRugDrawdown ?? 0.7) && creatorSellNear >= 1) rugKinds.push('creator_dump');
+  if (token.rug?.flagged) rugKinds.push('flagged');
   return {
     first_price: first, peak_price: peak, peak_ts: peakTs, last_price: last,
     peak_multiple: first && peak ? peak / first : null, last_multiple: first && last != null ? last / first : null,
-    drawdown, rugged: settled && drawdown != null && drawdown >= cfg.rugDrawdown, cp, final_cp: finalM,
+    drawdown, rugged: rugKinds.length > 0, rug_kinds: rugKinds, rug_reason: token.rug?.reason || null, cp, final_cp: finalM,
     buy_near: sum(buys, (t) => t.near), sell_near: sum(sells, (t) => t.near), buyers: new Set(buys.map((t) => t.trader)).size, sellers: new Set(sells.map((t) => t.trader)).size,
     trades: inHorizon.length, creator_buy_near: sum(creatorBuys, (t) => t.near), creator_sell_near: sum(creatorSells, (t) => t.near), creator_sold: creatorSells.length > 0,
     age_min: Math.round(ageMin), complete: ageMin >= cfg.minutes[cfg.minutes.length - 1],

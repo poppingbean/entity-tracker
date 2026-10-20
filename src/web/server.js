@@ -24,29 +24,31 @@ const clamp = (v, d, max) => Math.min(max, Math.max(1, Number(v) || d));
 const rx = (s) => ({ $regex: String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), $options: 'i' });
 const strip = ({ _id, ...r }) => ({ id: _id, ...r });
 
-const VERDICTS = ['good', 'bad', 'neutral', 'unknown', 'solo'];
-/** For each token: how its early NEAR splits across groups judged good / bad / neutral / unknown and solo wallets, plus the groups involved. */
+// win-rate tags: win80 / win50 / win30 = profitable in 80 / 50 / 30 %+ of the tokens bought early, loss = below 30 %, unrated = too few tokens judged yet
+const TAGS = ['win80', 'win50', 'win30', 'loss', 'unrated'];
+const tagOf = (t) => (TAGS.includes(t) ? t : 'unrated');
+/** For each token: how its early NEAR splits across win-rate tags (a wallet counts with its group's tag, or its own when it has no group), plus the groups involved. */
 async function earlyMix(tokenIds) {
   const out = new Map();
   if (!tokenIds.length) return out;
   const entries = await col('entries').find({ token: { $in: tokenIds } }, { projection: { token: 1, wallet: 1, buy_near: 1 } }).toArray();
-  const wallets = await col('wallets').find({ _id: { $in: [...new Set(entries.map((e) => e.wallet))] } }, { projection: { cluster_id: 1 } }).toArray();
+  const wallets = await col('wallets').find({ _id: { $in: [...new Set(entries.map((e) => e.wallet))] } }, { projection: { cluster_id: 1, tag: 1 } }).toArray();
   const wmap = new Map(wallets.map((w) => [w._id, w]));
   const cids = [...new Set(wallets.map((w) => w.cluster_id).filter(Boolean))];
-  const clusters = await col('clusters').find({ _id: { $in: cids } }, { projection: { verdict: 1, size: 1, 'ai.label': 1, 'rule.tags': 1 } }).toArray();
+  const clusters = await col('clusters').find({ _id: { $in: cids } }, { projection: { tag: 1, size: 1, 'ai.label': 1, 'rule.tags': 1 } }).toArray();
   const cmap = new Map(clusters.map((c) => [c._id, c]));
-  for (const t of tokenIds) out.set(t, { wallets: 0, total_near: 0, ...Object.fromEntries(VERDICTS.map((v) => [v, { w: 0, near: 0 }])), groups: new Map() });
+  for (const t of tokenIds) out.set(t, { wallets: 0, total_near: 0, ...Object.fromEntries(TAGS.map((v) => [v, { w: 0, near: 0 }])), groups: new Map() });
   for (const e of entries) {
     const m = out.get(e.token), w = wmap.get(e.wallet), c = w?.cluster_id ? cmap.get(w.cluster_id) : null;
-    const v = c ? (VERDICTS.includes(c.verdict) ? c.verdict : 'unknown') : 'solo';
+    const v = tagOf(c ? c.tag : w?.tag);
     m.wallets++; m.total_near += e.buy_near; m[v].w++; m[v].near += e.buy_near;
-    if (c) { const g = m.groups.get(c._id) || { id: c._id, verdict: c.verdict, label: c.ai?.label || c.rule?.tags?.[0] || null, size: c.size, wallets: 0, near: 0 }; g.wallets++; g.near += e.buy_near; m.groups.set(c._id, g); }
+    if (c) { const g = m.groups.get(c._id) || { id: c._id, tag: tagOf(c.tag), label: c.ai?.label || c.rule?.tags?.[0] || null, size: c.size, wallets: 0, near: 0 }; g.wallets++; g.near += e.buy_near; m.groups.set(c._id, g); }
   }
   for (const m of out.values()) m.groups = [...m.groups.values()].sort((a, b) => b.near - a.near);
   return out;
 }
 
-/** For each recent token: who among its early buyers belongs to groups judged good / bad. */
+/** For each recent token: how much of its early money comes from winners (win80 / win50) and from loss wallets. */
 async function buildSignals(hours = 72, limit = 60) {
   const since = Date.now() - hours * 3600e3;
   const tokens = await col('tokens').find({ live_ts: { $gt: since }, entries_n: { $gt: 0 } }).sort({ live_ts: -1 }).limit(limit).toArray();
@@ -54,44 +56,44 @@ async function buildSignals(hours = 72, limit = 60) {
   const out = [];
   for (const t of tokens) {
     const m = mix.get(t._id), total = m.total_near || 1;
-    const other = { w: m.neutral.w + m.unknown.w + m.solo.w, near: m.neutral.near + m.unknown.near + m.solo.near };
-    const badShare = m.bad.near / total, goodShare = m.good.near / total;
-    const assessment = badShare >= 0.25 ? 'warning' : m.good.w >= 2 && badShare < 0.1 ? 'bullish' : m.good.w + m.bad.w ? 'mixed' : 'no-known-groups';
+    const win = { w: m.win80.w + m.win50.w, near: m.win80.near + m.win50.near }, loss = m.loss;
+    const lossShare = loss.near / total, winShare = win.near / total;
+    const assessment = lossShare >= 0.25 ? 'warning' : win.w >= 2 && lossShare < 0.1 ? 'bullish' : win.w + loss.w + m.win30.w ? 'mixed' : 'no-known-groups';
     if (assessment === 'no-known-groups') continue;
-    out.push({ token: t._id, symbol: t.symbol, launchpad: t.launchpad, live_ts: t.live_ts, status: t.status, early_wallets: m.wallets, total_near: total, good: m.good, bad: m.bad, other, good_share: goodShare, bad_share: badShare, assessment,
-      mix: Object.fromEntries(VERDICTS.map((v) => [v, m[v]])), groups: m.groups.filter((g) => g.verdict === 'good' || g.verdict === 'bad'),
-      outcome: t.outcome ? { rugged: t.outcome.rugged, peak_multiple: t.outcome.peak_multiple, last_multiple: t.outcome.last_multiple, age_min: t.outcome.age_min } : null });
+    out.push({ token: t._id, symbol: t.symbol, launchpad: t.launchpad, live_ts: t.live_ts, status: t.status, early_wallets: m.wallets, total_near: total, win, loss, win_share: winShare, loss_share: lossShare, assessment,
+      mix: Object.fromEntries(TAGS.map((v) => [v, m[v]])), groups: m.groups.filter((g) => g.tag !== 'unrated'),
+      outcome: t.outcome ? { rugged: t.outcome.rugged, rug_kinds: t.outcome.rug_kinds || [], peak_multiple: t.outcome.peak_multiple, last_multiple: t.outcome.last_multiple, age_min: t.outcome.age_min } : null });
   }
   return out;
 }
 
 const routes = {
   '/api/overview': async () => {
-    const [tokStatus, clusterVerdict, wallets, profiled, entries, worker, latest, topGood, topBad, tokens] = await Promise.all([
+    const [tokStatus, clusterTag, wallets, profiled, entries, worker, latest, topWin, topLoss, tokens, rugged, netWallets] = await Promise.all([
       col('tokens').aggregate([{ $group: { _id: '$status', n: { $sum: 1 } } }]).toArray(),
-      col('clusters').aggregate([{ $group: { _id: '$verdict', n: { $sum: 1 }, wallets: { $sum: '$size' } } }]).toArray(),
+      col('clusters').aggregate([{ $group: { _id: '$tag', n: { $sum: 1 }, wallets: { $sum: '$size' } } }]).toArray(),
       col('wallets').countDocuments({ is_early: true }), col('wallets').countDocuments({ is_early: true, profiled: true }), col('entries').estimatedDocumentCount(),
       metaGet('worker'), col('tokens').find({}, { projection: { symbol: 1, launchpad: 1, live_ts: 1, status: 1, entries_n: 1, 'outcome.rugged': 1, 'outcome.peak_multiple': 1 } }).sort({ live_ts: -1 }).limit(10).toArray(),
-      col('clusters').find({ verdict: 'good' }, { projection: { size: 1, score: 1, 'metrics.tokens_n': 1, 'metrics.win_rate': 1, 'metrics.pnl_near': 1, 'ai.label': 1 } }).sort({ score: -1 }).limit(5).toArray(),
-      col('clusters').find({ verdict: 'bad' }, { projection: { size: 1, score: 1, 'metrics.tokens_n': 1, 'metrics.rug_share': 1, 'rule.tags': 1, 'ai.label': 1 } }).sort({ size: -1 }).limit(5).toArray(),
-      col('tokens').estimatedDocumentCount(),
+      col('clusters').find({ tag: { $in: ['win80', 'win50'] } }, { projection: { tag: 1, size: 1, score: 1, 'metrics.tokens_n': 1, 'metrics.profit_rate': 1, 'metrics.pnl_near': 1, 'ai.label': 1 } }).sort({ 'metrics.profit_rate': -1, 'metrics.pnl_near': -1 }).limit(5).toArray(),
+      col('clusters').find({ tag: 'loss' }, { projection: { tag: 1, size: 1, score: 1, 'metrics.tokens_n': 1, 'metrics.profit_rate': 1, 'metrics.pnl_near': 1, 'metrics.rug_share': 1, 'rule.tags': 1, 'ai.label': 1 } }).sort({ size: -1, 'metrics.pnl_near': 1 }).limit(5).toArray(),
+      col('tokens').estimatedDocumentCount(), col('tokens').countDocuments({ 'outcome.rugged': true }), col('wallets').countDocuments({ net: true, profiled: true }),
     ]);
     return {
-      now: Date.now(), tokens, tokenStatus: tokStatus.map((r) => ({ status: r._id, n: r.n })), clusterVerdict: clusterVerdict.map((r) => ({ verdict: r._id, n: r.n, wallets: r.wallets })),
-      wallets, profiled, entries, worker, latest: latest.map(strip), topGood: topGood.map(strip), topBad: topBad.map(strip),
+      now: Date.now(), tokens, tokenStatus: tokStatus.map((r) => ({ status: r._id, n: r.n })), clusterTag: clusterTag.map((r) => ({ tag: tagOf(r._id), n: r.n, wallets: r.wallets })), rugged, netWallets,
+      wallets, profiled, entries, worker, latest: latest.map(strip), topWin: topWin.map(strip), topLoss: topLoss.map(strip),
       ai: { enabled: aiEnabled(), model: config.ai.model, ...(worker?.ai || {}) }, db: config.mongo.dbName,
     };
   },
 
   '/api/clusters': async (u) => {
     const f = {};
-    const v = u.searchParams.get('verdict'); if (v) f.verdict = v;
-    const q = (u.searchParams.get('q') || '').trim(); if (q) f.$or = [{ members: q }, { _id: rx(q) }, { 'ai.label': rx(q) }];
+    const v = u.searchParams.get('tag'); if (v) f.tag = v === 'unrated' ? { $nin: ['win80', 'win50', 'win30', 'loss'] } : v;
+    const q = (u.searchParams.get('q') || '').trim(); if (q) f.$or = [{ members: q }, { 'network.account': q }, { _id: rx(q) }, { 'ai.label': rx(q) }];
     const minSize = Number(u.searchParams.get('minSize')); if (minSize) f.size = { $gte: minSize };
-    const sort = { score: { score: -1 }, size: { size: -1 }, pnl: { 'metrics.pnl_near': -1 }, recent: { 'metrics.last_entry_ts': -1 } }[u.searchParams.get('sort')] || { size: -1 };
+    const sort = { score: { score: -1 }, size: { size: -1 }, pnl: { 'metrics.pnl_near': -1 }, winrate: { 'metrics.profit_rate': -1, 'metrics.tokens_n': -1 }, recent: { 'metrics.last_entry_ts': -1 } }[u.searchParams.get('sort')] || { size: -1 };
     const limit = clamp(u.searchParams.get('limit'), 50, 200), offset = Math.max(0, Number(u.searchParams.get('offset')) || 0);
     const [total, rows] = await Promise.all([col('clusters').countDocuments(f),
-      col('clusters').find(f, { projection: { nodes: 0, links: 0, tokens: 0, members: 0, 'ai.reasons': 0, 'ai.red_flags': 0, 'ai.usage': 0 } }).sort(sort).skip(offset).limit(limit).toArray()]);
+      col('clusters').find(f, { projection: { nodes: 0, links: 0, tokens: 0, members: 0, network: 0, 'ai.reasons': 0, 'ai.red_flags': 0, 'ai.usage': 0 } }).sort(sort).skip(offset).limit(limit).toArray()]);
     return { total, rows: rows.map(strip) };
   },
 
@@ -102,7 +104,15 @@ const routes = {
     wallets.sort((a, b) => (b.stats?.total_buy_near || 0) - (a.stats?.total_buy_near || 0));
     const history = await col('cluster_history').find({ cluster_id: c._id }).sort({ ts: -1 }).limit(30).toArray();
     const { _id, ...rest } = c;
-    return { id: _id, ...rest, wallets: wallets.map((w) => ({ id: w._id, kind: w.kind, tx_count: w.tx_count, created_ts: w.created_ts, funder: w.funder, funder_kind: w.funder_kind, funding_near: w.funding_near, chain: w.chain, stats: w.stats, flow_out_total: w.flow_out_total })), history: history.map(({ _id: x, ...h }) => h) };
+    // the linked wallets around the group (up to 3 hops): which kind they are and whether they trade launch tokens themselves
+    const netIds = (c.network || []).map((x) => x.account);
+    const [netDocs, netTrades] = netIds.length ? await Promise.all([
+      col('wallets').find({ _id: { $in: netIds } }, { projection: { kind: 1, profiled: 1, is_early: 1, tx_count: 1 } }).toArray(),
+      col('trades').aggregate([{ $match: { trader: { $in: netIds } } }, { $group: { _id: '$trader', tokens: { $addToSet: '$token' }, near: { $sum: '$near' } } }]).toArray(),
+    ]) : [[], []];
+    const nd = new Map(netDocs.map((x) => [x._id, x])), nt = new Map(netTrades.map((x) => [x._id, x]));
+    const network = (c.network || []).map((x) => ({ ...x, kind: nd.get(x.account)?.kind || null, profiled: !!nd.get(x.account)?.profiled, tx_count: nd.get(x.account)?.tx_count ?? null, tokens_traded: nt.get(x.account)?.tokens.length || 0, traded_near: nt.get(x.account)?.near || 0 }));
+    return { id: _id, ...rest, network, wallets: wallets.map((w) => ({ id: w._id, kind: w.kind, tx_count: w.tx_count, created_ts: w.created_ts, funder: w.funder, funder_kind: w.funder_kind, funding_near: w.funding_near, chain: w.chain, stats: w.stats, flow_out_total: w.flow_out_total })), history: history.map(({ _id: x, ...h }) => h) };
   },
 
   /** Nodes and edges for the funding / flow picture of one group. */
@@ -110,11 +120,12 @@ const routes = {
     const c = await col('clusters').findOne({ _id: u.searchParams.get('id') }, { projection: { members: 1, nodes: 1 } });
     if (!c) return { error: 'not found' };
     const members = new Set(c.members), nodeList = c.nodes?.length ? c.nodes : c.members;
-    const edges = await col('edges').find({ $or: [{ type: 'fund', to: { $in: nodeList } }, { type: 'flow', from: { $in: c.members } }] }).limit(3000).toArray();
+    const edges = await col('edges').find({ $or: [{ type: 'fund', to: { $in: nodeList } }, { type: 'flow', from: { $in: nodeList } }] }).limit(3000).toArray();
     // flows only matter when they reach another member or a destination that more than one member pays
     const payers = new Map();
     for (const e of edges) if (e.type === 'flow') (payers.get(e.to) || payers.set(e.to, new Set()).get(e.to)).add(e.from);
-    const keep = edges.filter((e) => e.type === 'fund' || members.has(e.to) || (payers.get(e.to)?.size || 0) >= 2).slice(0, 500);
+    const nodeSet = new Set(nodeList);
+    const keep = edges.filter((e) => e.type === 'fund' || members.has(e.to) || nodeSet.has(e.to) || (payers.get(e.to)?.size || 0) >= 2).slice(0, 500);
     const used = new Set(c.members);
     for (const e of keep) { used.add(e.from); used.add(e.to); }
     const ids = [...used].slice(0, 250);
@@ -150,14 +161,15 @@ const routes = {
   // ------------------------------------------------------------ scanner monitor + simulated investing
   '/api/monitor': async () => {
     const now = Date.now(), day = now - 24 * 3600e3;
-    const [recent, c24, scanned, passed, bought, polls, newTokens] = await Promise.all([
+    const [recent, c24, scanned, passed, bought, polls, newTokens, ruggedTotal, tokensTotal] = await Promise.all([
       col('tokens').find({}, { projection: { symbol: 1, launchpad: 1, live_ts: 1, status: 1, scan: 1, scan_done: 1, entries_n: 1, 'outcome.rugged': 1, 'outcome.peak_multiple': 1, 'outcome.last_multiple': 1, creator: 1 } }).sort({ live_ts: -1 }).limit(40).toArray(),
       col('tokens').countDocuments({ live_ts: { $gt: day } }), col('tokens').countDocuments({ live_ts: { $gt: day }, scan_done: true, 'scan.score': { $exists: true } }),
       col('tokens').countDocuments({ live_ts: { $gt: day }, 'scan.pass': true }), col('sim_positions').countDocuments({ opened_ts: { $gt: day } }),
       Promise.all(config.launchpads.map(async (p) => ({ launchpad: p, ...(await metaGet(`poll:${p}`)) }))), col('tokens').countDocuments({ live_ts: { $gt: now - 3 * 3600e3 } }),
+      col('tokens').countDocuments({ 'outcome.rugged': true }), col('tokens').estimatedDocumentCount(),
     ]);
     const worker = await metaGet('worker');
-    return { now, scan: config.scan, window24h: { launches: c24, scanned, passed, bought }, launchesLast3h: newTokens, polls, worker, ai: { enabled: aiEnabled(), model: config.ai.model, ...(worker?.ai || {}) },
+    return { now, scan: config.scan, window24h: { launches: c24, scanned, passed, bought }, launchesLast3h: newTokens, ruggedTotal, tokensTotal, polls, worker, ai: { enabled: aiEnabled(), model: config.ai.model, ...(worker?.ai || {}) },
       rows: recent.map((t) => ({ id: t._id, symbol: t.symbol, launchpad: t.launchpad, live_ts: t.live_ts, status: t.status, scan: t.scan || null, scan_done: !!t.scan_done, entries_n: t.entries_n ?? null, rugged: !!t.outcome?.rugged, peak_multiple: t.outcome?.peak_multiple ?? null, last_multiple: t.outcome?.last_multiple ?? null })) };
   },
 
@@ -231,8 +243,8 @@ const routes = {
   '/api/wallets': async (u) => {
     const f = { is_early: true };
     const q = (u.searchParams.get('q') || '').trim(); if (q) f._id = rx(q);
-    const v = u.searchParams.get('verdict'); if (v) f.cluster_verdict = v;
-    const sort = { pnl: { 'stats.pnl_near': -1 }, tokens: { 'stats.tokens_n': -1 }, roi: { 'stats.roi_weighted': -1 }, recent: { first_seen_ts: -1 } }[u.searchParams.get('sort')] || { 'stats.tokens_n': -1 };
+    const v = u.searchParams.get('tag'); if (v) f.tag = v === 'unrated' ? { $nin: ['win80', 'win50', 'win30', 'loss'] } : v;
+    const sort = { pnl: { 'stats.pnl_near': -1 }, winrate: { 'stats.profit_rate': -1, 'stats.tokens_n': -1 }, tokens: { 'stats.tokens_n': -1 }, roi: { 'stats.roi_weighted': -1 }, recent: { first_seen_ts: -1 } }[u.searchParams.get('sort')] || { 'stats.tokens_n': -1 };
     const limit = clamp(u.searchParams.get('limit'), 50, 200), offset = Math.max(0, Number(u.searchParams.get('offset')) || 0);
     const [total, rows] = await Promise.all([col('wallets').countDocuments(f), col('wallets').find(f, { projection: { chain: 0, flow_out: 0 } }).sort(sort).skip(offset).limit(limit).toArray()]);
     return { total, rows: rows.map(strip) };
@@ -245,7 +257,7 @@ const routes = {
     const entries = await col('entries').find({ wallet: id }).sort({ first_buy_ts: -1 }).limit(100).toArray();
     const toks = await col('tokens').find({ _id: { $in: entries.map((e) => e.token) } }, { projection: { symbol: 1, launchpad: 1, 'outcome.rugged': 1, 'outcome.peak_multiple': 1, creator: 1 } }).toArray();
     const tmap = new Map(toks.map((t) => [t._id, t]));
-    const cluster = w.cluster_id ? await col('clusters').findOne({ _id: w.cluster_id }, { projection: { size: 1, verdict: 1, score: 1, 'ai.label': 1, 'rule.tags': 1 } }) : null;
+    const cluster = w.cluster_id ? await col('clusters').findOne({ _id: w.cluster_id }, { projection: { size: 1, tag: 1, verdict: 1, score: 1, 'ai.label': 1, 'rule.tags': 1 } }) : null;
     const fundEdges = await col('edges').find({ type: 'fund', to: id }, { projection: { from: 1, hash: 1 } }).toArray();
     const hashOf = new Map(fundEdges.map((x) => [x.from, x.hash]));
     for (const f of w.funders || []) f.hash = f.hash || hashOf.get(f.account) || null;
@@ -260,10 +272,17 @@ const routes = {
     const s = u.searchParams.get('status'); if (s) f.status = s;
     const lp = u.searchParams.get('launchpad'); if (lp) f.launchpad = lp;
     if (u.searchParams.get('rugged') === '1') f['outcome.rugged'] = true;
+    // tabs of the merged tokens + scanner page
+    const tab = u.searchParams.get('tab');
+    if (tab === 'new') f.live_ts = { $gt: Date.now() - 24 * 3600e3 };
+    else if (tab === 'checked') f['scan.score'] = { $exists: true };
+    else if (tab === 'passed') f['scan.pass'] = true;
+    else if (tab === 'bought') f['scan.bought'] = true;
+    else if (tab === 'rugged') f['outcome.rugged'] = true;
     const limit = clamp(u.searchParams.get('limit'), 50, 200), offset = Math.max(0, Number(u.searchParams.get('offset')) || 0);
     const [total, rows] = await Promise.all([col('tokens').countDocuments(f), col('tokens').find(f, { projection: { pool: 0 } }).sort({ live_ts: -1 }).skip(offset).limit(limit).toArray()]);
     const mix = await earlyMix(rows.map((t) => t._id));
-    return { total, rows: rows.map((t) => { const m = mix.get(t._id); return { ...strip(t), mix: Object.fromEntries(VERDICTS.map((v) => [v, m[v]])), groups: m.groups.slice(0, 3) }; }) };
+    return { total, rows: rows.map((t) => { const m = mix.get(t._id); return { ...strip(t), mix: Object.fromEntries(TAGS.map((v) => [v, m[v]])), groups: m.groups.filter((g) => g.tag !== 'unrated').slice(0, 3) }; }) };
   },
 
   '/api/token': async (u) => {
@@ -271,16 +290,16 @@ const routes = {
     const t = await col('tokens').findOne({ _id: id });
     if (!t) return { error: 'not found' };
     const entries = await col('entries').find({ token: id }).sort({ rank: 1 }).toArray();
-    const wallets = await col('wallets').find({ _id: { $in: entries.map((e) => e.wallet) } }, { projection: { cluster_id: 1, cluster_verdict: 1, kind: 1, funder_kind: 1, created_ts: 1, 'stats.tokens_n': 1, 'stats.win_rate': 1 } }).toArray();
+    const wallets = await col('wallets').find({ _id: { $in: entries.map((e) => e.wallet) } }, { projection: { cluster_id: 1, tag: 1, kind: 1, funder_kind: 1, created_ts: 1, 'stats.tokens_n': 1, 'stats.win_rate': 1, 'stats.profit_rate': 1 } }).toArray();
     const wmap = new Map(wallets.map((w) => [w._id, w]));
     const cids = [...new Set(wallets.map((w) => w.cluster_id).filter(Boolean))];
-    const clusters = await col('clusters').find({ _id: { $in: cids } }, { projection: { size: 1, verdict: 1, 'ai.label': 1, 'rule.tags': 1 } }).toArray();
+    const clusters = await col('clusters').find({ _id: { $in: cids } }, { projection: { size: 1, tag: 1, 'ai.label': 1, 'rule.tags': 1 } }).toArray();
     const cmap = new Map(clusters.map((c) => [c._id, c]));
     const { _id, ...rest } = t;
     const audit = summarizeAudit(await getCachedAudit(id));
     return { id: _id, ...rest, audit, entries: entries.map((e) => { const w = wmap.get(e.wallet), c = w?.cluster_id ? cmap.get(w.cluster_id) : null;
       return { wallet: e.wallet, first_buy_hash: e.first_buy_hash || null, rank: e.rank, delay_s: e.delay_s, buy_near: e.buy_near, roi: e.roi, roi_now: e.roi_now, sold_share: e.sold_share, is_creator: e.is_creator, kind: w?.kind || null, funder_kind: w?.funder_kind || null,
-        wallet_age_days: w?.created_ts ? Math.round((e.first_buy_ts - w.created_ts) / 86400e3) : null, cluster: c ? { id: c._id, size: c.size, verdict: c.verdict, label: c.ai?.label || c.rule?.tags?.[0] || null } : null }; }) };
+        wallet_age_days: w?.created_ts ? Math.round((e.first_buy_ts - w.created_ts) / 86400e3) : null, wallet_tag: tagOf(w?.tag), wallet_profit_rate: w?.stats?.profit_rate ?? null, tag: tagOf(c ? c.tag : w?.tag), cluster: c ? { id: c._id, size: c.size, tag: tagOf(c.tag), label: c.ai?.label || c.rule?.tags?.[0] || null } : null }; }) };
   },
 
   /** One box for everything: tokens by symbol / account, wallets by account, groups by id / AI label. */
@@ -289,8 +308,8 @@ const routes = {
     if (q.length < 2) return { tokens: [], wallets: [], groups: [] };
     const [tokens, wallets, groups] = await Promise.all([
       col('tokens').find({ $or: [{ symbol: rx(q) }, { _id: rx(q) }] }, { projection: { symbol: 1, launchpad: 1, live_ts: 1, 'outcome.rugged': 1 } }).sort({ live_ts: -1 }).limit(6).toArray(),
-      col('wallets').find({ _id: rx(q), is_early: true }, { projection: { cluster_id: 1, cluster_verdict: 1, 'stats.tokens_n': 1 } }).limit(6).toArray(),
-      col('clusters').find({ $or: [{ _id: rx(q) }, { 'ai.label': rx(q) }, { members: q }] }, { projection: { verdict: 1, size: 1, 'ai.label': 1 } }).sort({ size: -1 }).limit(6).toArray(),
+      col('wallets').find({ _id: rx(q), is_early: true }, { projection: { cluster_id: 1, tag: 1, 'stats.tokens_n': 1 } }).limit(6).toArray(),
+      col('clusters').find({ $or: [{ _id: rx(q) }, { 'ai.label': rx(q) }, { members: q }] }, { projection: { tag: 1, size: 1, 'ai.label': 1 } }).sort({ size: -1 }).limit(6).toArray(),
     ]);
     return { tokens: tokens.map(strip), wallets: wallets.map(strip), groups: groups.map(strip) };
   },

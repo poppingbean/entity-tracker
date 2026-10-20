@@ -7,6 +7,19 @@ const clamp = (x, lo, hi) => Math.max(lo, Math.min(hi, x));
 const DAY = 86400e3;
 
 /**
+ * Win-rate tag of a wallet or group: the share of the tokens it bought early where it ended in profit (ROI > 0 at the latest checkpoint).
+ * win80 = profitable in 80 %+ of its tokens, win50 = 50 %+, win30 = 30 %+, loss = below 30 %. "unrated" until it has `minTokens` judged tokens.
+ */
+export const WIN_TAGS = ['win80', 'win50', 'win30', 'loss'];
+export function winTag(profitRate, tokensN, minTokens) {
+  if (profitRate == null || tokensN < minTokens) return 'unrated';
+  if (profitRate >= 0.8) return 'win80';
+  if (profitRate >= 0.5) return 'win50';
+  if (profitRate >= 0.3) return 'win30';
+  return 'loss';
+}
+
+/**
  * members: [wallet ids]; entries: all early entries of those wallets (with roi/sold_share/token_rugged)
  * tokens: Map token -> token doc (outcome, creator, symbol, launchpad); wallets: Map id -> wallet doc
  * insiderEntries: Set of "token|wallet" for entries linked to the token's creator
@@ -50,7 +63,7 @@ export function computeMetrics(members, entries, tokens, wallets, insiderEntries
   const m = {
     wallets_n: members.length, entries_n: entries.length, tokens_n: n, tokens_all: new Set(entries.map((e) => e.token)).size,
     total_buy_near: totalBuy, avg_buy_near: judged.length ? totalBuy / judged.length : 0, pnl_near: pnl, roi_weighted: totalBuy ? pnl / totalBuy : null,
-    median_token_roi: median(rows.map((r) => r.roi)), win_rate: n ? wins.length / n : null, loss_rate: n ? losses.length / n : null,
+    median_token_roi: median(rows.map((r) => r.roi)), win_rate: n ? wins.length / n : null, profit_tokens_n: rows.filter((r) => r.roi > 0).length, profit_rate: n ? rows.filter((r) => r.roi > 0).length / n : null, loss_rate: n ? losses.length / n : null,
     rug_tokens_n: rugs.length, rug_share: n ? rugs.length / n : null,
     win_rate_in_rugs: rugs.length ? rugs.filter((r) => r.roi >= cfg.winRoi).length / rugs.length : null, pnl_in_rugs: rugs.reduce((s, r) => s + r.pnl_near, 0),
     creator_linked_share: judged.length ? insiderEntriesN / judged.length : 0, creator_linked_tokens: rows.filter((r) => r.insider_wallets > 0).length,
