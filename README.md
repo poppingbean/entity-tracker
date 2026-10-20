@@ -85,10 +85,11 @@ The UI and API are read-only except the simulated sell button (`POST /api/sim/se
 
 ## Deploying online (e.g. Railway)
 
-1. Create a service from this folder (root directory `entity-tracker`), start command `npm start`.
-2. Variables: `MONGODB_URI`, `MONGODB_DB`, `NEAR_AI_API_KEY`, `FASTNEAR_API_KEY`, `DASHBOARD_PASSWORD` (required: when the host sets `PORT` the UI listens publicly and demands HTTP Basic auth, any username).
-3. In MongoDB Atlas allow the service's IP under Network Access.
-4. Run **one** worker only (two workers would duplicate work). The web UI can be scaled separately with `npm run web` if needed.
+1. Create a service from this repository, start command `npm start` (the default).
+2. Variables: `MONGODB_URI`, `MONGODB_DB`, `NEAR_AI_API_KEY`, `FASTNEAR_API_KEY` (plus any threshold you want to change). On Railway the UI listens on `0.0.0.0` and port **8080** (or `PORT` when the host sets it); point the service's public domain at port 8080.
+3. `DASHBOARD_PASSWORD` is **optional**. Without it the UI is public and read-only: the simulated-sell button is disabled (otherwise anyone could sell the paper positions). Set it to require HTTP Basic auth (any username) and re-enable the button.
+4. In MongoDB Atlas allow the service's IP under Network Access.
+5. Run **one** worker only (two workers would duplicate work). `npm run web` serves the UI alone if you want to scale it separately.
 
 ## MongoDB collections
 

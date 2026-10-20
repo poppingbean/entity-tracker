@@ -66,6 +66,7 @@ export const config = {
     maxTaxBps: num(process.env.MAX_TAX_BPS, 1000),
     maxLinkedBuyerShare: num(process.env.MAX_LINKED_BUYER_SHARE, 0.4),
     maxBadGroupShare: num(process.env.MAX_BAD_GROUP_SHARE, 0.4),
+    auditMaxRisk: num(process.env.AUDIT_MAX_RISK, 70),
     maxPriceMultipleSinceLaunch: num(process.env.MAX_PRICE_MULTIPLE, 8),
     ignoreRunupBelowMcapUsd: num(process.env.IGNORE_RUNUP_BELOW_MCAP_USD, 10000),
     minScore: num(process.env.MIN_RULE_SCORE, 55),
@@ -90,6 +91,12 @@ export const config = {
     positionCheckSeconds: num(process.env.POSITION_CHECK_SECONDS, 60),
     rugWatch: bool(process.env.SIM_RUG_WATCH, true),                 // creator dumps a held token: blacklist the creator, exit the position
   },
+  // contract audit (ported from the TrustFlow backend): access keys, code, tax and sell behaviour of the token contract
+  audit: {
+    enabled: bool(process.env.AUDIT_ENABLED, true),
+    maxRisk: num(process.env.AUDIT_MAX_RISK, 70),                    // a risk score at or above this fails the gate (70 = "critical")
+    timeoutSeconds: num(process.env.AUDIT_TIMEOUT_SECONDS, 60),
+  },
   followUp: {
     enabled: bool(process.env.FOLLOWUP_ENABLED, true),               // re-review tokens that scored well at the first check
     minScore: num(process.env.FOLLOWUP_MIN_SCORE, 70),
@@ -98,9 +105,11 @@ export const config = {
   },
 
   web: {
-    port: num(process.env.DASHBOARD_PORT, num(process.env.PORT, 8790)),
-    host: process.env.DASHBOARD_HOST || (process.env.PORT ? '0.0.0.0' : '127.0.0.1'),
-    password: process.env.DASHBOARD_PASSWORD || '',
+    // On a host (Railway sets PORT / RAILWAY_*) the UI listens publicly on 8080 unless PORT says otherwise; locally it stays on 127.0.0.1:8790.
+    hosted: !!(process.env.PORT || process.env.RAILWAY_ENVIRONMENT || process.env.RAILWAY_PROJECT_ID),
+    port: num(process.env.DASHBOARD_PORT, num(process.env.PORT, process.env.RAILWAY_ENVIRONMENT || process.env.RAILWAY_PROJECT_ID ? 8080 : 8790)),
+    host: process.env.DASHBOARD_HOST || (process.env.PORT || process.env.RAILWAY_ENVIRONMENT || process.env.RAILWAY_PROJECT_ID ? '0.0.0.0' : '127.0.0.1'),
+    password: process.env.DASHBOARD_PASSWORD || '', // optional: when set, the UI asks for it (HTTP Basic auth, any username)
   },
 
 };
@@ -108,7 +117,6 @@ export const config = {
 export function validateConfig({ needWeb = false } = {}) {
   const errs = [];
   if (!config.mongo.uri) errs.push('MONGODB_URI is required (MongoDB is the main database)');
-  if (needWeb && !['127.0.0.1', 'localhost', '::1'].includes(config.web.host) && !config.web.password) errs.push(`DASHBOARD_PASSWORD is required when the UI listens on ${config.web.host}`);
   if (config.outcome.minutes.length === 0) errs.push('OUTCOME_MINUTES must list at least one age in minutes');
   return errs;
 }

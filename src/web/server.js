@@ -265,9 +265,10 @@ function authorized(req) {
 export function startWeb() {
   const server = http.createServer(async (req, res) => {
     try {
-      if (exposed() && !authorized(req)) { res.writeHead(401, { 'www-authenticate': 'Basic realm="entity tracker"' }).end('authentication required'); return; }
+      if (exposed() && config.web.password && !authorized(req)) { res.writeHead(401, { 'www-authenticate': 'Basic realm="entity tracker"' }).end('authentication required'); return; }
       const u = new URL(req.url, 'http://localhost');
       if (req.method === 'POST' && u.pathname === '/api/sim/sell') {
+        if (exposed() && !config.web.password) { res.writeHead(403, { 'content-type': 'application/json' }).end(JSON.stringify({ error: 'simulated sells are disabled on a public deployment without DASHBOARD_PASSWORD' })); return; }
         const origin = req.headers.origin;
         if (req.headers['x-tracker'] !== '1' || (origin && new URL(origin).host !== req.headers.host)) { res.writeHead(403, { 'content-type': 'application/json' }).end(JSON.stringify({ error: 'forbidden' })); return; }
         let body = ''; for await (const d of req) { body += d; if (body.length > 5000) break; }
@@ -287,6 +288,6 @@ export function startWeb() {
       res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' }).end(JSON.stringify(await route(u)));
     } catch (e) { res.writeHead(500, { 'content-type': 'application/json' }).end(JSON.stringify({ error: e.message })); }
   });
-  server.listen(config.web.port, config.web.host, () => info(`web UI: http://${exposed() ? config.web.host : 'localhost'}:${config.web.port}${exposed() ? ' (password protected)' : ''}`));
+  server.listen(config.web.port, config.web.host, () => info(`web UI: http://${exposed() ? config.web.host : 'localhost'}:${config.web.port}${exposed() ? (config.web.password ? ' (password protected)' : ' (public, no password: read-only, simulated sells disabled)') : ''}`));
   return server;
 }
