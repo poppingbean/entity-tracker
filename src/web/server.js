@@ -9,11 +9,13 @@ import { config } from '../config.js';
 import { recentLogs, info, error } from '../log.js';
 import { aiEnabled, aiStatus } from '../ai/nearai.js';
 import { simSell, ensureAccount, positionPnl } from '../sim/portfolio.js';
+import { creatorIndex, creatorBrief, creatorFlag } from '../evaluate/creators.js';
 import { auditNearContract, getCachedAudit, validNearAddress, summarizeAudit } from '../audit/service.js';
 
 const page = fs.readFileSync(new URL('./index.html', import.meta.url), 'utf8');
 // pages of the single-page UI; each is served the same HTML and the browser routes with the History API (no # in URLs)
-const UI_VIEWS = new Set(['explore', 'audit', 'monitor', 'sim', 'scans', 'overview', 'signals', 'groups', 'entities', 'wallets', 'tokens', 'logs', 'config']);
+const UI_VIEWS = new Set(['creators', 'explore', 'audit', 'monitor', 'sim', 'scans', 'overview', 'signals', 'groups', 'entities', 'wallets', 'tokens', 'logs', 'config']);
+const HIDDEN_PUBLIC = new Set(['/api/logs', '/api/config']);
 const auditHits = new Map(); // ip -> [timestamps]
 function auditAllowed(ip) {
   const now = Date.now(), list = (auditHits.get(ip) || []).filter((t) => now - t < 10 * 60e3);
@@ -69,7 +71,7 @@ async function buildSignals(hours = 72, limit = 60) {
 
 const routes = {
   '/api/overview': async () => {
-    const [tokStatus, clusterTag, wallets, profiled, entries, worker, latest, topWin, topLoss, tokens, rugged, netWallets] = await Promise.all([
+    const [tokStatus, clusterTag, wallets, profiled, entries, worker, latest, topWin, topLoss, tokens, rugged, netWallets, blacklisted, groupsWithCreators] = await Promise.all([
       col('tokens').aggregate([{ $group: { _id: '$status', n: { $sum: 1 } } }]).toArray(),
       col('clusters').aggregate([{ $group: { _id: '$tag', n: { $sum: 1 }, wallets: { $sum: '$size' } } }]).toArray(),
       col('wallets').countDocuments({ is_early: true }), col('wallets').countDocuments({ is_early: true, profiled: true }), col('entries').estimatedDocumentCount(),
@@ -77,9 +79,10 @@ const routes = {
       col('clusters').find({ tag: { $in: ['win80', 'win50'] } }, { projection: { tag: 1, size: 1, score: 1, 'metrics.tokens_n': 1, 'metrics.profit_rate': 1, 'metrics.pnl_near': 1, 'ai.label': 1 } }).sort({ 'metrics.profit_rate': -1, 'metrics.pnl_near': -1 }).limit(5).toArray(),
       col('clusters').find({ tag: 'loss' }, { projection: { tag: 1, size: 1, score: 1, 'metrics.tokens_n': 1, 'metrics.profit_rate': 1, 'metrics.pnl_near': 1, 'metrics.rug_share': 1, 'rule.tags': 1, 'ai.label': 1 } }).sort({ size: -1, 'metrics.pnl_near': 1 }).limit(5).toArray(),
       col('tokens').estimatedDocumentCount(), col('tokens').countDocuments({ 'outcome.rugged': true }), col('wallets').countDocuments({ net: true, profiled: true }),
+      col('blacklist').estimatedDocumentCount(), col('clusters').countDocuments({ creator_flag: { $in: ['blacklisted', 'rugger'] } }),
     ]);
     return {
-      now: Date.now(), tokens, tokenStatus: tokStatus.map((r) => ({ status: r._id, n: r.n })), clusterTag: clusterTag.map((r) => ({ tag: tagOf(r._id), n: r.n, wallets: r.wallets })), rugged, netWallets,
+      now: Date.now(), tokens, tokenStatus: tokStatus.map((r) => ({ status: r._id, n: r.n })), clusterTag: clusterTag.map((r) => ({ tag: tagOf(r._id), n: r.n, wallets: r.wallets })), rugged, netWallets, blacklisted, groupsWithCreators,
       wallets, profiled, entries, worker, latest: latest.map(strip), topWin: topWin.map(strip), topLoss: topLoss.map(strip),
       ai: { enabled: aiEnabled(), model: config.ai.model, ...(worker?.ai || {}) }, db: config.mongo.dbName,
     };
@@ -283,7 +286,8 @@ const routes = {
     const limit = clamp(u.searchParams.get('limit'), 50, 200), offset = Math.max(0, Number(u.searchParams.get('offset')) || 0);
     const [total, rows] = await Promise.all([col('tokens').countDocuments(f), col('tokens').find(f, { projection: { pool: 0 } }).sort({ live_ts: -1 }).skip(offset).limit(limit).toArray()]);
     const mix = await earlyMix(rows.map((t) => t._id));
-    return { total, rows: rows.map((t) => { const m = mix.get(t._id); return { ...strip(t), mix: Object.fromEntries(TAGS.map((v) => [v, m[v]])), groups: m.groups.filter((g) => g.tag !== 'unrated').slice(0, 3) }; }) };
+    const cr = await creatorIndex(rows.map((t) => t.creator).filter(Boolean));
+    return { total, rows: rows.map((t) => { const m = mix.get(t._id); return { ...strip(t), creator_risk: creatorBrief(cr.get(t.creator)), mix: Object.fromEntries(TAGS.map((v) => [v, m[v]])), groups: m.groups.filter((g) => g.tag !== 'unrated').slice(0, 3) }; }) };
   },
 
   '/api/token': async (u) => {
@@ -298,7 +302,9 @@ const routes = {
     const cmap = new Map(clusters.map((c) => [c._id, c]));
     const { _id, ...rest } = t;
     const audit = summarizeAudit(await getCachedAudit(id));
-    return { id: _id, ...rest, audit, entries: entries.map((e) => { const w = wmap.get(e.wallet), c = w?.cluster_id ? cmap.get(w.cluster_id) : null;
+    const creatorInfo = t.creator ? (await creatorIndex([t.creator])).get(t.creator) || null : null;
+    const creatorWallet = t.creator ? await col('wallets').findOne({ _id: t.creator }, { projection: { cluster_id: 1, cluster_tag: 1, tag: 1, is_early: 1 } }) : null;
+    return { id: _id, ...rest, audit, creator_info: creatorInfo, creator_wallet: creatorWallet ? { cluster_id: creatorWallet.cluster_id ?? null, cluster_tag: creatorWallet.cluster_tag ?? null, tag: creatorWallet.tag ?? null } : null, entries: entries.map((e) => { const w = wmap.get(e.wallet), c = w?.cluster_id ? cmap.get(w.cluster_id) : null;
       return { wallet: e.wallet, first_buy_hash: e.first_buy_hash || null, rank: e.rank, delay_s: e.delay_s, buy_near: e.buy_near, roi: e.roi, roi_now: e.roi_now, sold_share: e.sold_share, is_creator: e.is_creator, kind: w?.kind || null, funder_kind: w?.funder_kind || null,
         wallet_age_days: w?.created_ts ? Math.round((e.first_buy_ts - w.created_ts) / 86400e3) : null, wallet_tag: tagOf(w?.tag), wallet_profit_rate: w?.stats?.profit_rate ?? null, tag: tagOf(c ? c.tag : w?.tag), cluster: c ? { id: c._id, size: c.size, tag: tagOf(c.tag), label: c.ai?.label || c.rule?.tags?.[0] || null } : null }; }) };
   },
@@ -313,6 +319,35 @@ const routes = {
       col('clusters').find({ $or: [{ _id: rx(q) }, { 'ai.label': rx(q) }, { members: q }] }, { projection: { tag: 1, size: 1, 'ai.label': 1 } }).sort({ size: -1 }).limit(6).toArray(),
     ]);
     return { tokens: tokens.map(strip), wallets: wallets.map(strip), groups: groups.map(strip) };
+  },
+
+  /** Token creators: launches, rugged launches, dev-rug blacklist, and the group they belong to. */
+  '/api/creators': async (u) => {
+    const idx = await creatorIndex();
+    let rows = [...idx.values()];
+    const q = (u.searchParams.get('q') || '').trim().toLowerCase(); if (q) rows = rows.filter((c) => c.account.toLowerCase().includes(q) || c.tokens.some((t) => (t.symbol || '').toLowerCase().includes(q)));
+    const f = u.searchParams.get('filter');
+    if (f === 'blacklisted') rows = rows.filter((c) => c.blacklisted); else if (f === 'rugger') rows = rows.filter((c) => c.rugged > 0); else if (f === 'clean') rows = rows.filter((c) => !c.blacklisted && c.rugged === 0 && c.launches > 0);
+    const sort = u.searchParams.get('sort');
+    rows.sort(sort === 'launches' ? (a, b) => b.launches - a.launches : sort === 'recent' ? (a, b) => (b.tokens[0]?.live_ts || b.blacklisted?.ts || 0) - (a.tokens[0]?.live_ts || a.blacklisted?.ts || 0) : (a, b) => (b.blacklisted ? 1 : 0) - (a.blacklisted ? 1 : 0) || b.rugged - a.rugged || b.launches - a.launches);
+    const total = rows.length, limit = clamp(u.searchParams.get('limit'), 50, 200), offset = Math.max(0, Number(u.searchParams.get('offset')) || 0);
+    const page = rows.slice(offset, offset + limit);
+    const ws = await col('wallets').find({ _id: { $in: page.map((c) => c.account) } }, { projection: { cluster_id: 1, cluster_tag: 1, tag: 1 } }).toArray();
+    const wmap = new Map(ws.map((w) => [w._id, w]));
+    const all = [...idx.values()];
+    return { total, summary: { creators: all.filter((c) => c.launches).length, ruggers: all.filter((c) => c.rugged > 0).length, blacklisted: all.filter((c) => c.blacklisted).length, rugged_tokens: all.reduce((s, c) => s + c.rugged, 0) },
+      rows: page.map((c) => ({ account: c.account, launches: c.launches, rugged: c.rugged, rug_rate: c.rug_rate, flag: creatorFlag(c), blacklisted: c.blacklisted, tokens: c.tokens.slice(0, 5), group: wmap.get(c.account)?.cluster_id ? { id: wmap.get(c.account).cluster_id, tag: wmap.get(c.account).cluster_tag } : null, tag: wmap.get(c.account)?.tag ?? null })) };
+  },
+
+  '/api/creator': async (u) => {
+    const id = u.searchParams.get('id');
+    const c = (await creatorIndex([id])).get(id);
+    if (!c) return { error: 'not found' };
+    const [w, groups] = await Promise.all([col('wallets').findOne({ _id: id }, { projection: { cluster_id: 1, cluster_tag: 1, tag: 1, stats: 1, is_early: 1 } }),
+      col('clusters').find({ 'creators.account': id }, { projection: { tag: 1, size: 1, 'ai.label': 1, 'rule.tags': 1, creators: { $elemMatch: { account: id } } } }).toArray()]);
+    const toks = await col('tokens').find({ creator: id }, { projection: { symbol: 1, launchpad: 1, live_ts: 1, 'outcome.rugged': 1, 'outcome.rug_kinds': 1, 'outcome.peak_multiple': 1, 'outcome.last_multiple': 1, 'outcome.creator_sold': 1, 'outcome.creator_sell_near': 1, 'rug.reason': 1 } }).sort({ live_ts: -1 }).limit(100).toArray();
+    return { id, launches: c.launches, rugged: c.rugged, rug_rate: c.rug_rate, blacklisted: c.blacklisted, flag: creatorFlag(c), wallet: w ? { cluster_id: w.cluster_id ?? null, cluster_tag: w.cluster_tag ?? null, tag: w.tag ?? null, stats: w.stats || null, is_early: !!w.is_early } : null,
+      groups: groups.map((g) => ({ id: g._id, tag: g.tag, size: g.size, label: g.ai?.label || g.rule?.tags?.[0] || null, role: g.creators?.[0]?.role || null, depth: g.creators?.[0]?.depth ?? null })), tokens: toks.map(strip) };
   },
 
   '/api/signals': async (u) => ({ rows: await buildSignals(clamp(u.searchParams.get('hours'), 72, 720), 60) }),
@@ -357,6 +392,7 @@ export function startWeb() {
       if (req.method !== 'GET') { res.writeHead(405).end(); return; }
       if (u.pathname === '/' || u.pathname === '/index.html') { res.writeHead(302, { location: '/explore' }).end(); return; }
       if (UI_VIEWS.has(u.pathname.split('/')[1])) { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' }).end(page); return; } // client-side routes: /config, /groups/<id> ...
+      if (HIDDEN_PUBLIC.has(u.pathname) && config.web.hosted && !config.web.password) { res.writeHead(404).end('not found'); return; } // logs and settings are not shown on a public deployment
       const route = routes[u.pathname];
       if (!route) { res.writeHead(404).end('not found'); return; }
       res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' }).end(JSON.stringify(await route(u, req)));

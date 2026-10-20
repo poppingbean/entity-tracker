@@ -1,4 +1,4 @@
-# NEAR Entity Tracker
+# Safe Near (NEAR Entity Tracker)
 
 An online sibling of the launch scanner. Instead of trading, it answers one question: **who buys NEAR launchpad tokens early, how are those wallets connected, and is each group good or bad money?**
 
@@ -99,6 +99,8 @@ The UI is organised around two ways in, **tokens** and **wallets / groups**, plu
 | **System** | `/logs`, `/config` (read-only settings). |
 
 **Launchpads.** `nearlytrade`, `justhoot` and `memecooking` get the full pipeline. `qlyphs` (migration tokens on a DCL pool quoted in QTC; the token goes live at its first real trade), `tkn` (plain FT factory `<symbol>.tkn.near`; the token waits as `awaiting_pool` until its owner adds liquidity on Ref DCL, found within 7 days) and `gaypad` (bonding curve inside `gaypad.j1-racing.near`; each `token_swap` event is a trade, valued from the change in its wNEAR reserve, with dust thresholds scaled down because a whole curve holds only a couple of NEAR) are tracked for their early investors only: no gates, AI analyst or simulated buys. `node src/cli.js backfill <launchpad> <hours>` replays history.
+
+**Creators.** The *Creators* page (`/creators`, `/creators/<account>`) lists every token creator with launches, rugged launches, rug rate and the dev-rug blacklist (the scanner's blacklist plus creators this tracker's simulated wallet catches dumping). Tokens show a creator warning (blacklisted / rugged N of M launches), and every group lists the **contract creators inside it**: member wallets or linked wallets (up to 3 hops) that launched tokens, with their rugs; a group holding a blacklisted or rugging creator gets the `creator-rug` flag. The Log and Settings pages are no longer in the menu, and their API (`/api/logs`, `/api/config`) answers 404 on a public deployment without a dashboard password.
 
 **Realized vs unrealized profit.** Every P&L is split: *realized* = NEAR already taken out minus the cost of the tokens sold, *unrealized* = tokens still held at the latest price minus their cost. Shown for groups, wallets, each token a group / wallet bought early, and for the simulated wallet and each simulated position.
 
