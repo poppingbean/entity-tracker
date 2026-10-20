@@ -2,6 +2,8 @@
 //   node src/cli.js backfill <launchpad|all> <hours>   replay recent launches into the database
 //   node src/cli.js process                            process everything that is pending, then regroup (and review with NEAR AI)
 //   node src/cli.js reprofile                          profile every early wallet again, then regroup
+//   node src/cli.js label <account> "<name>" [type]    name an exchange / service wallet (type: exchange|service|bridge|fund|other)
+//   node src/cli.js entities                           rebuild the entity table
 //   node src/cli.js evaluate                           only regroup + rule verdicts
 //   node src/cli.js review [n]                         NEAR AI review of up to n groups
 //   node src/cli.js status                             counts
@@ -13,6 +15,7 @@ import { backfill } from './collect/launches.js';
 import { processToken } from './collect/process.js';
 import { profilePending } from './graph/profile.js';
 import { evaluateGroups, reviewPending } from './evaluate/run.js';
+import { buildEntities } from './evaluate/entities.js';
 import { checkAi, aiEnabled, aiStatus } from './ai/nearai.js';
 
 const [cmd, ...args] = process.argv.slice(2);
@@ -63,6 +66,14 @@ try {
     }
     await evaluateGroups();
     if (aiEnabled()) { let k; do { k = await reviewPending(5); } while (k > 0); }
+  } else if (cmd === 'label') {
+    const [account, name, type = 'other'] = args;
+    if (!account || !name) throw new Error('usage: label <account> "<name>" [exchange|service|bridge|fund|other]');
+    await col('labels').replaceOne({ _id: account }, { _id: account, label: name, type, ts: Date.now() }, { upsert: true });
+    await buildEntities();
+    info(`labelled ${account} as "${name}" (${type})`);
+  } else if (cmd === 'entities') {
+    await buildEntities();
   } else if (cmd === 'evaluate') {
     await evaluateGroups();
   } else if (cmd === 'review') {

@@ -7,6 +7,7 @@ import { buildGroups } from '../graph/cluster.js';
 import { computeMetrics, ruleVerdict, metricsPrint } from './metrics.js';
 import { aiEnabled } from '../ai/nearai.js';
 import { reviewCluster } from '../ai/review.js';
+import { buildEntities } from './entities.js';
 
 const evalCfg = () => ({ minutes: config.outcome.minutes, winRoi: config.outcome.winRoi, cobuySeconds: config.graph.cobuySeconds, minTokens: config.evaluate.minTokens, goodScore: config.evaluate.goodScore, badScore: config.evaluate.badScore });
 const newId = (member) => `c_${crypto.createHash('sha1').update(member).digest('hex').slice(0, 8)}`;
@@ -78,6 +79,7 @@ export async function evaluateGroups() {
 
   const by = (v) => docs.filter((d) => d.verdict === v).length;
   info(`GROUPS ${docs.length} (good ${by('good')}, bad ${by('bad')}, neutral ${by('neutral')}, unknown ${by('unknown')}); ${cobuyPairs} co-buy links; ${gone.deletedCount} stale removed`);
+  await buildEntities();
   return { groups: docs.length };
 }
 

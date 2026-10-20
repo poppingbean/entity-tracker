@@ -27,6 +27,7 @@ async function ensureIndexes() {
     ix('edges', { from: 1 }), ix('edges', { to: 1 }), ix('edges', { type: 1 }),
     ix('clusters', { verdict: 1, score: -1 }), ix('clusters', { size: -1 }), ix('clusters', { updated_ts: -1 }),
     ix('cluster_history', { cluster_id: 1, ts: -1 }),
+    ix('entities', { type: 1, funded_n: -1 }), ix('entities', { funded_n: -1 }), ix('entities', { label: 1 }),
     ix('events', { ts: -1 }), ix('events', { at: 1 }, { expireAfterSeconds: 30 * 86400 }), // log lines expire after 30 days
   ]);
 }

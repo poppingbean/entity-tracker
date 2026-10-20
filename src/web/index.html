@@ -66,7 +66,7 @@ const get = async (path, params) => { const q = params ? '?' + new URLSearchPara
 const nb = (a) => `<a href="https://nearblocks.io/address/${encodeURIComponent(a)}" target="_blank" rel="noopener">${esc(short(a, 22))}</a>`;
 const tokLink = (id, lp) => { const e = encodeURIComponent(id); const u = lp === 'nearlytrade' ? `https://nearly.trade/${e}` : lp === 'justhoot' ? `https://justhoot.fun/p/${e}` : `https://nearblocks.io/token/${e}`; return `<a href="${u}" target="_blank" rel="noopener">${esc(short(id, 26))}</a>`; };
 
-const ST = { groups: { verdict: '', q: '', sort: 'size', offset: 0 }, wallets: { q: '', verdict: '', sort: 'tokens', offset: 0 }, tokens: { q: '', status: '', rugged: '', offset: 0 }, logs: { level: '' } };
+const ST = { entities: { type: '', q: '', sort: 'funded', offset: 0 }, groups: { verdict: '', q: '', sort: 'size', offset: 0 }, wallets: { q: '', verdict: '', sort: 'tokens', offset: 0 }, tokens: { q: '', status: '', rugged: '', offset: 0 }, logs: { level: '' } };
 const views = {};
 
 // ------------------------------------------------------------------ overview
@@ -159,6 +159,34 @@ function graphSvg(g) {
   return `<svg class="graph" viewBox="0 0 ${W} ${H}">${edgeSvg}${nodeSvg}</svg>`;
 }
 
+// ------------------------------------------------------------------ entities (exchange wallets, services, funders, destinations)
+views.entities = async () => {
+  const S = ST.entities, j = await get('/api/entities', { type: S.type, q: S.q, sort: S.sort, limit: 50, offset: S.offset });
+  const sel = (k, v, l) => `<option value="${v}" ${S[k] === v ? 'selected' : ''}>${l}</option>`;
+  return `<section><div class="bar"><h2 style="margin:0">Entities</h2><span class="muted">exchange wallets, services, funders and destinations around the early investors</span>
+    <select onchange="ST.entities.type=this.value;ST.entities.offset=0;render()">${sel('type', '', 'all types')}${['exchange', 'service', 'bridge', 'wallet', 'other', 'unknown'].map((v) => sel('type', v, v)).join('')}</select>
+    <select onchange="ST.entities.sort=this.value;render()">${sel('sort', 'funded', 'by wallets funded')}${sel('sort', 'near', 'by NEAR funded')}${sel('sort', 'sink', 'by NEAR received')}${sel('sort', 'tokens', 'by tokens')}${sel('sort', 'pnl', 'by funded P&L')}</select>
+    <input id="eq" type="search" placeholder="account / label" value="${esc(S.q)}" onkeydown="if(event.key==='Enter'){ST.entities.q=this.value;ST.entities.offset=0;render()}">
+    <span class="muted">${n(j.total, 0)} entities (${j.types.map((t) => t.type + ' ' + t.n).join(' · ')})</span>
+    <button ${S.offset ? '' : 'disabled'} onclick="ST.entities.offset=Math.max(0,ST.entities.offset-50);render()">◀</button><button ${S.offset + 50 < j.total ? '' : 'disabled'} onclick="ST.entities.offset+=50;render()">▶</button></div>
+    <table><tr><th>Entity</th><th>Label</th><th>Type</th><th>Roles</th><th>Txs</th><th>Funded</th><th>NEAR funded</th><th>Their groups</th><th>Tokens</th><th>Funded P&amp;L N</th><th>NEAR received</th></tr>
+    ${j.rows.map((e) => `<tr class="click" data-id="${esc(e.id)}" onclick="openEntity(this.dataset.id)"><td>${esc(short(e.id, 26))}</td><td>${esc(e.label || '–')}</td><td>${esc(e.type)}</td><td>${tags(e.roles)}</td><td>${e.tx_count ?? '–'}</td><td>${e.funded_n || '–'}</td><td>${e.funded_near ? n(e.funded_near, 0) : '–'}</td>
+      <td>${e.funded_n ? `<span class="g">${e.funded_verdicts.good}</span>/<span class="r">${e.funded_verdicts.bad}</span>/<span class="a">${e.funded_verdicts.neutral}</span>/<span class="muted">${e.funded_verdicts.unknown + e.funded_verdicts.solo}</span>` : '–'}</td><td>${e.tokens_n || '–'}</td><td class="${roiCls(e.funded_pnl_near)}">${e.funded_n ? n(e.funded_pnl_near, 1) : '–'}</td><td>${e.sink_near ? n(e.sink_near, 0) + ' (' + e.sink_senders_n + ' w)' : '–'}</td></tr>`).join('') || '<tr><td colspan="11" class="muted">no entities yet</td></tr>'}</table>
+    <p class="muted">"Their groups" = funded early wallets whose group is good / bad / neutral / unknown-or-solo.</p></section>`;
+};
+
+async function openEntity(id) {
+  const e = await get('/api/entity', { id });
+  const v = e.funded_verdicts || {};
+  let h = `<h2 style="color:var(--text);font-size:15px">${esc(e.label || short(e.id, 30))} <span class="tag">${esc(e.type)}</span> ${tags(e.roles)}</h2><p>${nb(e.id)} · kind ${esc(e.kind)} · ${e.tx_count ?? '–'} txs${e.label_source ? ' · label from ' + esc(e.label_source) : ''}</p>`;
+  if (e.type === 'exchange') h += '<p class="muted">An exchange wallet funds many unrelated customers, so funding from it links nothing by itself. The numbers below show how much early-market flow came out of it.</p>';
+  if (e.funded_n) h += `<p>Funded <b>${e.funded_n}</b> early wallets with <b>${n(e.funded_near, 0)} N</b> → they bought <b>${e.tokens_n}</b> tokens early · groups: <span class="g">${v.good} good</span> / <span class="r">${v.bad} bad</span> / <span class="a">${v.neutral} neutral</span> / ${v.unknown + v.solo} unknown or solo · funded wallets' P&amp;L <span class="${roiCls(e.funded_pnl_near)}">${n(e.funded_pnl_near, 1)} N</span> (${pct(e.funded_roi)}) · ${e.funded_winners}/${e.funded_judged} winning wallets</p>`;
+  if (e.funded_wallets?.length) h += '<h3>Early wallets it funded</h3><table><tr><th>Wallet</th><th>NEAR</th><th>Hop</th><th>When</th><th>Via</th><th>Group</th></tr>' + e.funded_wallets.map((f) => `<tr class="click" data-id="${esc(f.wallet)}" onclick="openWallet(this.dataset.id)"><td>${esc(short(f.wallet, 26))}</td><td>${n(f.near, 2)}</td><td>${f.hop}</td><td>${when(f.ts)}</td><td>${esc(f.via || 'transfer')}</td><td>${f.cluster_id ? vb(f.verdict) + ' ' + esc(f.cluster_id) : '<span class="muted">solo</span>'}</td></tr>`).join('') + '</table>';
+  if (e.sink_wallets?.length) h += `<h3>Early wallets that sent NEAR to it (${n(e.sink_near, 0)} N)</h3><table><tr><th>Wallet</th><th>NEAR</th><th>Transfers</th></tr>` + e.sink_wallets.map((f) => `<tr class="click" data-id="${esc(f.wallet)}" onclick="openWallet(this.dataset.id)"><td>${esc(short(f.wallet, 26))}</td><td>${n(f.near, 2)}</td><td>${f.n}</td></tr>`).join('') + '</table>';
+  h += '<p class="muted">Name this account: <code>node src/cli.js label ' + esc(e.id) + ' "Binance"  exchange</code></p>';
+  openDrawer(h);
+}
+
 // ------------------------------------------------------------------ wallets
 views.wallets = async () => {
   const S = ST.wallets, j = await get('/api/wallets', { q: S.q, verdict: S.verdict, sort: S.sort, limit: 50, offset: S.offset });
@@ -178,7 +206,7 @@ async function openWallet(id) {
   const w = await get('/api/wallet', { id });
   let h = `<h2 style="color:var(--text);font-size:15px">${esc(w.id)}</h2><p>${nb(w.id)} · ${esc(w.kind || '')} · ${w.tx_count ?? '–'} txs · created ${when(w.created_ts)}</p>`;
   if (w.cluster) h += `<p>Group <a href="#" onclick="openGroup('${esc(w.cluster.id)}');return false">${esc(w.cluster.id)}</a> ${vb(w.cluster.verdict)} ${esc(w.cluster.ai?.label || '')} · ${w.cluster.size} wallets ${tags(w.cluster.rule?.tags)}</p>`;
-  h += '<h3>Who funded it (first meaningful inflows, earliest first)</h3><table><tr><th>Account</th><th>Kind</th><th>NEAR</th><th>When</th><th>Via</th></tr>' + (w.funders || []).map((f) => `<tr><td>${nb(f.account)}</td><td>${esc(f.kind)}${f.creator_only ? ' <span class="tag">creator only</span>' : ''}</td><td>${n(f.near, 2)}</td><td>${when(f.ts)}</td><td>${esc(f.via || 'transfer')}</td></tr>`).join('') + '</table>';
+  h += '<h3>Who funded it (first meaningful inflows, earliest first)</h3><table><tr><th>Account</th><th>Kind</th><th>NEAR</th><th>When</th><th>Via</th></tr>' + (w.funders || []).map((f) => `<tr class="click" data-id="${esc(f.account)}" onclick="openEntity(this.dataset.id)"><td>${nb(f.account)}</td><td>${esc(f.kind)}${f.creator_only ? ' <span class="tag">creator only</span>' : ''}</td><td>${n(f.near, 2)}</td><td>${when(f.ts)}</td><td>${esc(f.via || 'transfer')}</td></tr>`).join('') + '</table>';
   h += '<h3>Funding chain</h3><table><tr><th>Hop</th><th>Account</th><th>Kind</th><th>NEAR</th><th>Txs</th></tr>' + (w.chain || []).map((c) => `<tr><td>${c.hop}</td><td>${nb(c.account)}</td><td>${esc(c.kind)}</td><td>${n(c.near, 2)}</td><td>${c.tx_count ?? '–'}</td></tr>`).join('') + '</table>';
   h += '<h3>Where its NEAR went (recent outflows)</h3><table><tr><th>To</th><th>NEAR</th><th>Transfers</th><th>Last</th></tr>' + (w.flow_out || []).map((f) => `<tr><td>${nb(f.to)}</td><td>${n(f.near, 2)}</td><td>${f.n}</td><td>${when(f.last_ts)}</td></tr>`).join('') + '</table>';
   h += '<h3>Early entries</h3><table><tr><th>Bought</th><th>Token</th><th>Rank</th><th>Delay</th><th>NEAR in</th><th>ROI 1h</th><th>ROI 6h</th><th>ROI 24h</th><th>Now</th><th>Rug</th></tr>' + w.entries.map((e) => `<tr class="click" data-id="${esc(e.token)}" onclick="openToken(this.dataset.id)"><td>${when(e.first_buy_ts)}</td><td><b>${esc(e.symbol || '')}</b> ${esc(short(e.token, 22))}${e.is_creator ? ' <span class="tag">creator</span>' : ''}</td><td>#${e.rank}</td><td>${e.delay_s}s</td><td>${n(e.buy_near, 1)}</td>
@@ -221,7 +249,7 @@ views.logs = async () => {
 // ------------------------------------------------------------------ shell
 function openDrawer(html) { $('drawerBody').innerHTML = html; $('drawer').classList.add('open'); }
 function closeDrawer() { $('drawer').classList.remove('open'); }
-const TABS = ['overview', 'signals', 'groups', 'wallets', 'tokens', 'logs'];
+const TABS = ['overview', 'signals', 'groups', 'entities', 'wallets', 'tokens', 'logs'];
 let seq = 0;
 async function render() {
   const v = (location.hash || '#overview').slice(1);

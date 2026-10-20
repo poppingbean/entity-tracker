@@ -50,9 +50,15 @@ npm start                # worker + web UI (http://127.0.0.1:8790)
 - **FastNEAR:** an API key raises rate limits on the transaction indexer and RPC.
 - **Tests:** `npm test` (grouping, ROI, verdict and AI-parsing logic).
 
+## Entities (exchange wallets included)
+
+A **group** is a set of early investors; an **entity** is any account in their funding and money-flow graph: exchange hot wallets, NEAR Intents accounts, relayers / wallet services, ordinary funder wallets and the destinations their NEAR goes to. The `entities` collection (and the **Entities** tab) records for each one: its kind and label, how many early wallets it funded and how much, which tokens those wallets bought, how they performed, which good / bad groups they belong to, and how much early-investor NEAR it received. An exchange wallet is shown like any other entity, with a note that funding from it links nothing by itself.
+
+Names come from built-in patterns (Binance, OKX, Bybit, Meteor, Intear ...), then from hand-set labels, otherwise a generic "unlabelled exchange / hub wallet": `node src/cli.js label <account> "Binance" exchange` names an account and rebuilds the table. `node src/cli.js entities` rebuilds it without changing anything else.
+
 ## Web UI
 
-Tabs: **Overview** (counts, top good / bad groups, latest launches) · **Signals** (recent tokens where known good or bad groups were among the early buyers, with a bullish / warning / mixed assessment) · **Groups** (filter, sort, open one for the AI review, metrics, funding / money-flow graph, wallets, tokens and verdict history) · **Wallets** · **Tokens** (early buyers with their group verdicts) · **Logs**.
+Tabs: **Overview** (counts, top good / bad groups, latest launches) · **Signals** (recent tokens where known good or bad groups were among the early buyers, with a bullish / warning / mixed assessment) · **Groups** (filter, sort, open one for the AI review, metrics, funding / money-flow graph, wallets, tokens and verdict history) · **Entities** (exchange wallets, services, funders, destinations) · **Wallets** · **Tokens** (early buyers with their group verdicts) · **Logs**.
 
 The UI and API are GET-only. `npm run web` serves the UI alone, `npm run worker` runs only the background loop, `npm start` runs both in one process.
 
@@ -65,7 +71,7 @@ The UI and API are GET-only. `npm run web` serves the UI alone, `npm run worker`
 
 ## MongoDB collections
 
-`tokens` (launches, outcome, status) · `trades` (swaps) · `transfers` (token hand-offs between wallets) · `entries` (early wallet × token, with ROI per checkpoint) · `wallets` (profile, funding chain, outflows, track record, group) · `edges` (funding and flow edges) · `clusters` (groups: members, links, metrics, tokens, rule + AI verdicts) · `cluster_history` · `events` (30-day log) · `meta` (cursors, worker heartbeat).
+`tokens` (launches, outcome, status) · `trades` (swaps) · `transfers` (token hand-offs between wallets) · `entries` (early wallet × token, with ROI per checkpoint) · `wallets` (profile, funding chain, outflows, track record, group) · `edges` (funding and flow edges) · `entities` (every funder / destination account incl. exchange wallets) · `labels` (hand-set names) · `clusters` (groups: members, links, metrics, tokens, rule + AI verdicts) · `cluster_history` · `events` (30-day log) · `meta` (cursors, worker heartbeat).
 
 ## Configuration
 

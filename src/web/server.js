@@ -105,6 +105,27 @@ const routes = {
     };
   },
 
+  '/api/entities': async (u) => {
+    const f = {};
+    const t = u.searchParams.get('type'); if (t) f.type = t;
+    const k = u.searchParams.get('kind'); if (k) f.kind = k;
+    const role = u.searchParams.get('role'); if (role) f.roles = role;
+    const q = (u.searchParams.get('q') || '').trim(); if (q) f.$or = [{ _id: rx(q) }, { label: rx(q) }];
+    const sort = { funded: { funded_n: -1 }, near: { funded_near: -1 }, sink: { sink_near: -1 }, tokens: { tokens_n: -1 }, pnl: { funded_pnl_near: -1 } }[u.searchParams.get('sort')] || { funded_n: -1 };
+    const limit = clamp(u.searchParams.get('limit'), 50, 200), offset = Math.max(0, Number(u.searchParams.get('offset')) || 0);
+    const [total, rows, types] = await Promise.all([col('entities').countDocuments(f),
+      col('entities').find(f, { projection: { funded_wallets: 0, sink_wallets: 0 } }).sort(sort).skip(offset).limit(limit).toArray(),
+      col('entities').aggregate([{ $group: { _id: '$type', n: { $sum: 1 } } }, { $sort: { n: -1 } }]).toArray()]);
+    return { total, rows: rows.map(strip), types: types.map((x) => ({ type: x._id, n: x.n })) };
+  },
+
+  '/api/entity': async (u) => {
+    const e = await col('entities').findOne({ _id: u.searchParams.get('id') });
+    if (!e) return { error: 'not found' };
+    const { _id, ...rest } = e;
+    return { id: _id, ...rest };
+  },
+
   '/api/wallets': async (u) => {
     const f = { is_early: true };
     const q = (u.searchParams.get('q') || '').trim(); if (q) f._id = rx(q);
