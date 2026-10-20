@@ -3,151 +3,254 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>NEAR Entity Tracker · Scanner</title>
+<title>NEAR Entity Tracker</title>
+<script>(() => { let t = null; try { t = localStorage.getItem('theme'); } catch {} document.documentElement.dataset.theme = t === 'light' ? 'light' : 'dark'; })();</script>
 <style>
-  :root {
-    --bg:#f3f9ff; --panel:#ffffff; --panel-2:#f7fbff; --line:#dbe8f6; --line-2:#e9f1fa;
-    --text:#14263b; --muted:#64788f; --faint:#8fa3b8;
-    --primary:#0ea5e9; --primary-600:#0284c7; --primary-700:#0369a1; --primary-50:#f0f9ff; --primary-100:#e0f2fe; --primary-200:#bae6fd;
-    --g:#15803d; --g-bg:#dcfce7; --g-line:#bbf7d0;
-    --r:#dc2626; --r-bg:#fee2e2; --r-line:#fecaca;
-    --a:#b45309; --a-bg:#fef3c7; --a-line:#fde68a;
-    --b:#0369a1; --p:#7c3aed;
-    --shadow:0 1px 2px rgba(15,60,110,.05), 0 8px 24px rgba(14,116,190,.07);
-    --radius:14px;
+  /* ---------- tokens: dark by default, light on demand ---------- */
+  :root, :root[data-theme="dark"] {
+    --bg:#090d13; --bg-2:#0d131b; --panel:#111821; --panel-2:#151e29; --hover:#18222f; --line:#212c3a; --line-2:#1a2330;
+    --text:#e6edf5; --muted:#8a9ab0; --faint:#5b697c;
+    --accent:#2dd4bf; --accent-2:#38bdf8; --accent-ink:#03201d; --accent-soft:rgba(45,212,191,.12); --accent-line:rgba(45,212,191,.35);
+    --good:#22c55e; --bad:#f43f5e; --neutral:#f59e0b; --unknown:#64748b; --solo:#3b4a5e; --info:#38bdf8; --purple:#a78bfa;
+    --good-soft:rgba(34,197,94,.13); --bad-soft:rgba(244,63,94,.13); --neutral-soft:rgba(245,158,11,.13); --unknown-soft:rgba(100,116,139,.18);
+    --shadow:0 12px 32px rgba(0,0,0,.28); --radius:14px; color-scheme:dark;
+  }
+  :root[data-theme="light"] {
+    --bg:#f4f6f9; --bg-2:#eef2f6; --panel:#ffffff; --panel-2:#f8fafc; --hover:#f1f5f9; --line:#e2e8f0; --line-2:#eef2f6;
+    --text:#0f172a; --muted:#5b6b80; --faint:#94a3b8;
+    --accent:#0d9488; --accent-2:#0284c7; --accent-ink:#ffffff; --accent-soft:rgba(13,148,136,.09); --accent-line:rgba(13,148,136,.35);
+    --good:#16a34a; --bad:#e11d48; --neutral:#d97706; --unknown:#94a3b8; --solo:#cbd5e1; --info:#0284c7; --purple:#7c3aed;
+    --good-soft:rgba(22,163,74,.10); --bad-soft:rgba(225,29,72,.09); --neutral-soft:rgba(217,119,6,.10); --unknown-soft:rgba(148,163,184,.16);
+    --shadow:0 1px 2px rgba(15,23,42,.04), 0 8px 24px rgba(15,23,42,.06); color-scheme:light;
   }
   * { box-sizing:border-box; }
-  html { scroll-behavior:smooth; }
-  body { margin:0; color:var(--text); font:14px/1.5 Inter,"Segoe UI",system-ui,-apple-system,Roboto,"Helvetica Neue",Arial,sans-serif; -webkit-font-smoothing:antialiased;
-         background:linear-gradient(180deg,#e3f3ff 0,#f3f9ff 260px,#f3f9ff 100%) fixed; }
-  a { color:var(--primary-600); text-decoration:none; } a:hover { text-decoration:underline; }
-  code, pre { font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:12px; }
-  code { background:var(--primary-50); border:1px solid var(--primary-100); border-radius:6px; padding:1px 6px; color:var(--primary-700); }
-  pre { background:var(--panel-2); border:1px solid var(--line); border-radius:10px; padding:12px; overflow:auto; }
+  body { margin:0; background:var(--bg); color:var(--text); font:14px/1.5 Inter,"Segoe UI",system-ui,-apple-system,Roboto,"Helvetica Neue",Arial,sans-serif; -webkit-font-smoothing:antialiased; }
+  a { color:var(--accent); text-decoration:none; } a:hover { text-decoration:underline; }
+  code, pre, .mono { font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; }
+  code { font-size:12px; background:var(--accent-soft); border:1px solid var(--accent-line); border-radius:6px; padding:1px 6px; color:var(--accent); }
+  pre { font-size:12px; background:var(--panel-2); border:1px solid var(--line); border-radius:10px; padding:12px; overflow:auto; }
+  .muted { color:var(--muted); } .small { font-size:12px; } .wrap { white-space:normal; }
+  .g { color:var(--good); } .r { color:var(--bad); } .a { color:var(--neutral); } .b { color:var(--info); } .p { color:var(--purple); }
 
-  /* ---------- layout ---------- */
-  .app { display:flex; min-height:100vh; }
-  .side { width:250px; flex:0 0 250px; background:var(--panel); border-right:1px solid var(--line); position:sticky; top:0; height:100vh; display:flex; flex-direction:column; padding:18px 14px; overflow-y:auto; }
-  .brand { display:flex; align-items:center; gap:11px; padding:4px 8px 18px; color:var(--text); text-decoration:none !important; }
-  .logo { width:38px; height:38px; border-radius:11px; display:grid; place-items:center; color:#fff; flex:0 0 auto;
-          background:linear-gradient(135deg,#38bdf8 0%,#0284c7 100%); box-shadow:0 6px 14px rgba(2,132,199,.35); }
-  .brand b { display:block; font-size:15px; letter-spacing:.2px; } .brand small { color:var(--muted); font-size:11.5px; }
-  .nav-group { margin:10px 0 4px; padding:0 10px; font-size:10.5px; font-weight:700; letter-spacing:.9px; text-transform:uppercase; color:var(--faint); }
-  #nav a { display:flex; align-items:center; gap:11px; padding:8px 11px; margin:2px 0; border-radius:10px; color:#3b5068; font-weight:500; text-decoration:none; transition:background .12s,color .12s; }
-  #nav a svg { width:17px; height:17px; stroke:currentColor; fill:none; stroke-width:1.9; stroke-linecap:round; stroke-linejoin:round; flex:0 0 auto; opacity:.85; }
-  #nav a:hover { background:var(--primary-50); color:var(--primary-700); }
-  #nav a.on { background:linear-gradient(90deg,var(--primary-100),#f0f9ff); color:var(--primary-700); font-weight:650; box-shadow:inset 3px 0 0 var(--primary); }
-  .side-foot { margin-top:auto; padding:12px 10px 2px; font-size:11.5px; color:var(--muted); border-top:1px solid var(--line-2); }
-  .content { flex:1; min-width:0; }
-  .top { display:flex; flex-wrap:wrap; align-items:flex-end; justify-content:space-between; gap:12px; padding:26px 32px 6px; max-width:1560px; margin:0 auto; }
-  .top h1 { margin:0; font-size:24px; letter-spacing:-.2px; } .top .sub { margin:3px 0 0; color:var(--muted); font-size:13px; }
-  #status { color:var(--primary-700); background:var(--primary-100); border:1px solid var(--primary-200); padding:4px 12px; border-radius:999px; font-size:12px; font-weight:600; }
-  #status:empty { display:none; }
-  main { padding:16px 32px 48px; max-width:1560px; margin:0 auto; transition:opacity .15s; }
-  main.loading { opacity:.55; }
+  /* ---------- top bar ---------- */
+  .topbar { position:sticky; top:0; z-index:40; background:color-mix(in srgb, var(--bg) 88%, transparent); backdrop-filter:blur(10px); border-bottom:1px solid var(--line); }
+  .topin { max-width:1440px; margin:0 auto; padding:10px 24px; display:flex; align-items:center; gap:18px; }
+  .brand { display:flex; align-items:center; gap:10px; color:var(--text); text-decoration:none !important; flex:0 0 auto; }
+  .logo { width:32px; height:32px; border-radius:9px; display:grid; place-items:center; color:var(--accent-ink); background:linear-gradient(135deg,var(--accent),var(--accent-2)); }
+  .brand b { font-size:15px; letter-spacing:.1px; } .brand small { display:block; color:var(--muted); font-size:11px; line-height:1.1; }
+  #nav { display:flex; gap:2px; }
+  #nav a { padding:7px 12px; border-radius:9px; color:var(--muted); font-weight:600; white-space:nowrap; text-decoration:none; }
+  #nav a:hover { color:var(--text); background:var(--hover); }
+  #nav a.on { color:var(--text); background:var(--panel-2); box-shadow:inset 0 -2px 0 var(--accent); }
+  .topbar .search { flex:1; max-width:440px; margin-left:auto; }
+  .status { display:flex; align-items:center; gap:7px; font-size:12px; color:var(--muted); white-space:nowrap; }
+  .dot { width:8px; height:8px; border-radius:50%; background:var(--unknown); } .dot.ok { background:var(--good); box-shadow:0 0 0 3px var(--good-soft); } .dot.bad { background:var(--bad); box-shadow:0 0 0 3px var(--bad-soft); }
+  .status:has(#status:empty) { display:none; }
+  .icon-btn { background:transparent; border:1px solid var(--line); color:var(--muted); width:34px; height:34px; padding:0; display:grid; place-items:center; border-radius:9px; cursor:pointer; flex:0 0 auto; }
+  .icon-btn:hover { color:var(--text); background:var(--hover); }
+  .icon-btn svg, .search > svg { width:16px; height:16px; stroke:currentColor; fill:none; stroke-width:2; stroke-linecap:round; stroke-linejoin:round; }
+  #subnav { max-width:1440px; margin:0 auto; padding:0 24px; display:flex; gap:4px; overflow-x:auto; }
+  #subnav a { padding:9px 12px 10px; color:var(--muted); font-weight:600; font-size:13px; border-bottom:2px solid transparent; white-space:nowrap; text-decoration:none; }
+  #subnav a:hover { color:var(--text); } #subnav a.on { color:var(--accent); border-bottom-color:var(--accent); }
+  #subnav[hidden] { display:none; }
 
-  /* ---------- cards, headings ---------- */
-  section { background:var(--panel); border:1px solid var(--line); border-radius:var(--radius); padding:18px 20px; margin-bottom:18px; overflow-x:auto; box-shadow:var(--shadow); }
-  section > h2:first-child, section > .bar:first-child h2 { margin-top:0; }
-  h2 { font-size:15px; margin:0 0 12px; color:var(--text); font-weight:650; display:flex; align-items:center; gap:9px; flex-wrap:wrap; }
-  h2::before { content:""; width:4px; height:16px; border-radius:3px; background:linear-gradient(180deg,#38bdf8,#0284c7); flex:0 0 auto; }
+  /* ---------- search ---------- */
+  .search { position:relative; display:flex; align-items:center; }
+  .search > svg { position:absolute; left:11px; color:var(--faint); pointer-events:none; }
+  .search input { width:100%; padding:8px 12px 8px 34px; }
+  .search.big input { font-size:15px; padding:13px 16px 13px 40px; border-radius:12px; }
+  .search.big > svg { left:14px; width:18px; height:18px; }
+  .sr { display:none; position:absolute; top:calc(100% + 6px); left:0; right:0; background:var(--panel); border:1px solid var(--line); border-radius:12px; box-shadow:var(--shadow); max-height:70vh; overflow:auto; z-index:50; padding:6px; }
+  .sr.open { display:block; }
+  .sr-h { padding:8px 10px 4px; font-size:10.5px; font-weight:700; letter-spacing:.8px; text-transform:uppercase; color:var(--faint); }
+  .sr-i { display:flex; align-items:center; gap:10px; padding:7px 10px; border-radius:8px; color:var(--text); text-decoration:none !important; }
+  .sr-i:hover, .sr-i.on { background:var(--hover); }
+  .sr-i b { display:block; font-weight:600; } .sr-i small { display:block; color:var(--muted); font-size:11.5px; }
+  .sr-empty { padding:14px; color:var(--muted); }
+
+  /* ---------- page ---------- */
+  main { max-width:1440px; margin:0 auto; padding:20px 24px 56px; transition:opacity .15s; }
+  main.loading { opacity:.5; }
+  .pagehead { max-width:1440px; margin:0 auto; padding:22px 24px 0; }
+  .pagehead h1 { margin:0; font-size:22px; letter-spacing:-.2px; } .pagehead p { margin:3px 0 0; color:var(--muted); font-size:13px; }
+  .pagehead[hidden] { display:none; }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:var(--radius); padding:18px 20px; margin-bottom:16px; overflow-x:auto; }
+  .card.warn { background:var(--neutral-soft); border-color:color-mix(in srgb, var(--neutral) 40%, transparent); }
+  .card.err { background:var(--bad-soft); border-color:color-mix(in srgb, var(--bad) 40%, transparent); }
+  h2 { font-size:15px; margin:0 0 14px; font-weight:650; display:flex; align-items:baseline; gap:10px; flex-wrap:wrap; }
   h2 .muted { font-weight:400; font-size:12.5px; }
-  h3 { font-size:11.5px; margin:20px 0 8px; color:var(--primary-700); font-weight:700; letter-spacing:.8px; text-transform:uppercase; }
-  .muted { color:var(--muted); }
-  .g { color:var(--g); } .r { color:var(--r); } .a { color:var(--a); } .b { color:var(--b); } .p { color:var(--p); }
-  .wrap { white-space:normal; }
-  section.a { background:var(--a-bg); border-color:var(--a-line); } section.r { background:var(--r-bg); border-color:var(--r-line); }
+  h3 { font-size:11px; margin:20px 0 8px; color:var(--muted); font-weight:700; letter-spacing:.8px; text-transform:uppercase; }
+  .head { display:flex; justify-content:space-between; align-items:baseline; gap:12px; flex-wrap:wrap; } .head h2 { margin-bottom:14px; }
+  .grid2 { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:16px; } .grid2 > .card { margin-bottom:16px; }
+  .grid2.wide-l { grid-template-columns:minmax(0,5fr) minmax(0,7fr); }
+  .crumbs { font-size:12.5px; color:var(--muted); margin-bottom:12px; } .crumbs a { color:var(--muted); } .crumbs a:hover { color:var(--accent); }
+
+  /* ---------- hero ---------- */
+  .hero { padding:30px 28px 24px; border-radius:18px; margin-bottom:16px; border:1px solid var(--line);
+          background:radial-gradient(800px 260px at 10% -20%, var(--accent-soft), transparent 70%), radial-gradient(600px 240px at 100% 0%, rgba(56,189,248,.10), transparent 70%), var(--panel); }
+  .hero h1 { margin:0 0 6px; font-size:28px; letter-spacing:-.4px; } .hero > p { margin:0 0 18px; max-width:720px; }
+  .hero .search { max-width:720px; margin-bottom:22px; }
+
+  /* ---------- tiles ---------- */
+  .tiles { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:10px; }
+  .tile { border:1px solid var(--line); border-radius:12px; padding:11px 14px; background:var(--panel-2); min-width:0; }
+  .tile > span { font-size:11.5px; font-weight:600; color:var(--muted); }
+  .tile b { display:block; font-size:20px; line-height:1.25; margin-top:2px; letter-spacing:-.2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .tile small { display:block; color:var(--muted); font-size:11.5px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+
+  /* ---------- detail header ---------- */
+  .dh-main { display:flex; gap:16px; align-items:flex-start; margin-bottom:16px; }
+  .dh-main h1 { margin:0; font-size:24px; letter-spacing:-.3px; display:flex; align-items:center; gap:10px; flex-wrap:wrap; word-break:break-all; }
+  .dh-main h1 .muted { font-size:15px; font-weight:500; }
+  .meta { color:var(--muted); font-size:12.5px; margin-top:5px; display:flex; flex-wrap:wrap; gap:6px 10px; align-items:center; }
+  .banner { display:flex; align-items:center; gap:12px; padding:12px 14px; border-radius:12px; border:1px solid var(--line); background:var(--panel-2); margin-bottom:14px; flex-wrap:wrap; }
+  .banner.good { border-color:color-mix(in srgb, var(--good) 40%, transparent); background:var(--good-soft); }
+  .banner.bad { border-color:color-mix(in srgb, var(--bad) 40%, transparent); background:var(--bad-soft); }
+  .banner.neutral { border-color:color-mix(in srgb, var(--neutral) 40%, transparent); background:var(--neutral-soft); }
 
   /* ---------- tables ---------- */
   table { border-collapse:separate; border-spacing:0; width:100%; font-size:13px; font-variant-numeric:tabular-nums; }
-  th { position:sticky; top:0; text-align:left; padding:9px 12px; font-size:11px; font-weight:700; letter-spacing:.6px; text-transform:uppercase; color:var(--primary-700); background:var(--primary-50); border-bottom:1px solid var(--primary-200); white-space:nowrap; }
-  th:first-child { border-top-left-radius:10px; } th:last-child { border-top-right-radius:10px; }
+  th { text-align:left; padding:8px 12px; font-size:10.5px; font-weight:700; letter-spacing:.7px; text-transform:uppercase; color:var(--faint); border-bottom:1px solid var(--line); white-space:nowrap; }
   td { padding:9px 12px; border-bottom:1px solid var(--line-2); white-space:nowrap; vertical-align:middle; }
   tr:last-child td { border-bottom:0; }
-  tr.click { cursor:pointer; } tr.click:hover td { background:var(--primary-50); }
-  tr.click:hover td:first-child { box-shadow:inset 3px 0 0 var(--primary); }
+  [data-href] { cursor:pointer; }
+  tr[data-href]:hover td { background:var(--hover); }
+  td.num, th.num { text-align:right; }
+  table.kv td:first-child { color:var(--muted); width:45%; }
 
-  /* ---------- KPI cards ---------- */
-  .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); gap:14px; }
-  .kpi { border:1px solid var(--line); border-radius:12px; padding:13px 15px; background:linear-gradient(160deg,#ffffff 0%,#f2f9ff 100%); position:relative; overflow:hidden; }
-  .kpi::before { content:""; position:absolute; left:0; top:0; bottom:0; width:3px; background:linear-gradient(180deg,#38bdf8,#0284c7); }
-  .kpi > span { font-size:11.5px; font-weight:600; color:var(--muted); letter-spacing:.3px; }
-  .kpi b { display:block; font-size:22px; line-height:1.2; margin-top:4px; letter-spacing:-.3px; }
+  /* ---------- entity cells, avatars ---------- */
+  .av { display:inline-grid; place-items:center; border-radius:50%; color:#fff; font-weight:700; flex:0 0 auto; letter-spacing:-.3px;
+        background:linear-gradient(135deg, hsl(var(--h) 65% 52%), hsl(calc(var(--h) + 50) 70% 38%)); }
+  .ent { display:inline-flex; align-items:center; gap:9px; min-width:0; vertical-align:middle; }
+  .ent b a { color:var(--text); } .ent b a:hover { color:var(--accent); }
+  .ent > span { min-width:0; }
+  .ent small { display:block; color:var(--muted); font-size:11.5px; line-height:1.25; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .acct { font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:12.5px; }
 
   /* ---------- controls ---------- */
   .bar { display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-bottom:14px; }
-  input, select, button { background:#fff; color:var(--text); border:1px solid var(--line); border-radius:9px; padding:7px 11px; font:inherit; font-size:13px; transition:border-color .12s, box-shadow .12s, background .12s; }
-  input:focus, select:focus { outline:0; border-color:var(--primary); box-shadow:0 0 0 3px rgba(14,165,233,.18); }
-  input[type=search] { min-width:230px; }
-  button { cursor:pointer; font-weight:600; color:var(--primary-700); border-color:var(--primary-200); background:var(--primary-50); }
-  button:hover:not(:disabled) { background:var(--primary-100); border-color:var(--primary); }
-  button:disabled { opacity:.4; cursor:default; }
+  .bar .spacer { flex:1; }
+  input, select, button { background:var(--panel-2); color:var(--text); border:1px solid var(--line); border-radius:9px; padding:7px 11px; font:inherit; font-size:13px; }
+  input:focus, select:focus { outline:0; border-color:var(--accent); box-shadow:0 0 0 3px var(--accent-soft); }
+  input[type=search] { min-width:220px; }
+  button { cursor:pointer; font-weight:600; }
+  button:hover:not(:disabled) { border-color:var(--accent); color:var(--accent); }
+  button:disabled { opacity:.35; cursor:default; }
+  button.primary { background:var(--accent); color:var(--accent-ink); border-color:var(--accent); } button.primary:hover { color:var(--accent-ink); filter:brightness(1.08); }
   td button { padding:3px 9px; font-size:12px; margin-right:3px; }
+  .seg { display:inline-flex; border:1px solid var(--line); border-radius:10px; padding:2px; background:var(--panel-2); }
+  .seg button { border:0; background:transparent; padding:5px 11px; border-radius:8px; color:var(--muted); font-size:12.5px; }
+  .seg button.on { background:var(--panel); color:var(--text); box-shadow:0 0 0 1px var(--line); }
 
-  /* ---------- pills, tags ---------- */
-  .v { display:inline-block; padding:1px 10px; border-radius:999px; border:1px solid var(--line); font-size:11.5px; font-weight:700; text-transform:uppercase; letter-spacing:.4px; }
-  .v.good { color:var(--g); background:var(--g-bg); border-color:var(--g-line); } .v.bad { color:var(--r); background:var(--r-bg); border-color:var(--r-line); }
-  .v.neutral { color:var(--a); background:var(--a-bg); border-color:var(--a-line); } .v.unknown { color:var(--muted); background:#eef3f8; border-color:var(--line); }
-  .tag { display:inline-block; padding:0 8px; border:1px solid var(--primary-200); background:var(--primary-50); border-radius:999px; font-size:11px; font-weight:600; color:var(--primary-700); margin-right:4px; }
+  /* ---------- pills ---------- */
+  .v { display:inline-block; padding:1px 9px; border-radius:999px; font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.4px; border:1px solid transparent; white-space:nowrap; }
+  .v.good { color:var(--good); background:var(--good-soft); border-color:color-mix(in srgb, var(--good) 35%, transparent); }
+  .v.bad { color:var(--bad); background:var(--bad-soft); border-color:color-mix(in srgb, var(--bad) 35%, transparent); }
+  .v.neutral { color:var(--neutral); background:var(--neutral-soft); border-color:color-mix(in srgb, var(--neutral) 35%, transparent); }
+  .v.unknown, .v.solo { color:var(--muted); background:var(--unknown-soft); border-color:var(--line); }
+  .chip { display:inline-block; padding:0 8px; border:1px solid var(--line); background:var(--panel-2); border-radius:999px; font-size:11px; font-weight:600; color:var(--muted); margin-right:4px; white-space:nowrap; }
+  .chip.ai { color:var(--purple); border-color:color-mix(in srgb, var(--purple) 35%, transparent); }
 
-  /* ---------- drawer ---------- */
-  #drawer { position:fixed; top:0; right:-920px; width:900px; max-width:100vw; height:100vh; overflow:auto; background:var(--panel); border-left:1px solid var(--line); padding:0 26px 40px; transition:right .22s cubic-bezier(.2,.8,.2,1); z-index:30; }
-  #drawer.open { right:0; box-shadow:-24px 0 60px rgba(8,47,90,.18); }
-  #drawer > button { position:sticky; top:0; float:right; margin:16px 0 0 10px; z-index:2; }
-  #drawer h2 { font-size:18px; margin-top:20px; }
-  #drawer p { margin:5px 0; }
-  #scrim { display:none; position:fixed; inset:0; background:rgba(8,47,90,.28); backdrop-filter:blur(1.5px); z-index:20; }
-  #drawer.open + #scrim { display:block; }
-  .ai { border:1px solid var(--primary-200); border-left:4px solid var(--primary); background:linear-gradient(160deg,#f5fbff,#ffffff); border-radius:12px; padding:14px 16px; margin:12px 0; }
+  /* ---------- early-money bar ---------- */
+  .mix { display:flex; height:8px; min-width:120px; border-radius:99px; overflow:hidden; background:var(--line-2); gap:1px; }
+  .mix.lg { height:14px; border-radius:7px; margin:4px 0 12px; }
+  .mix i { display:block; height:100%; }
+  .mix i.good, .lg-dot.good { background:var(--good); } .mix i.bad, .lg-dot.bad { background:var(--bad); } .mix i.neutral, .lg-dot.neutral { background:var(--neutral); }
+  .mix i.unknown, .lg-dot.unknown { background:var(--unknown); } .mix i.solo, .lg-dot.solo { background:var(--solo); }
+  .lg-dot { display:inline-block; width:9px; height:9px; border-radius:3px; margin-right:6px; vertical-align:baseline; }
+  .mixcell { min-width:170px; } .mixcell small { display:block; color:var(--muted); font-size:11.5px; margin-top:3px; }
+  .bar-score { display:inline-block; width:56px; height:6px; border-radius:4px; background:var(--line-2); vertical-align:middle; margin-right:7px; overflow:hidden; }
+  .bar-score i { display:block; height:100%; background:var(--accent); }
+
+  /* ---------- token cards, group list ---------- */
+  .tokgrid { display:grid; grid-template-columns:repeat(auto-fill,minmax(290px,1fr)); gap:12px; }
+  .tcard { border:1px solid var(--line); border-radius:13px; padding:14px; background:var(--panel-2); display:flex; flex-direction:column; gap:11px; transition:border-color .12s, transform .12s; }
+  .tcard:hover { border-color:var(--accent-line); transform:translateY(-1px); }
+  .tc-top { display:flex; justify-content:space-between; align-items:flex-start; gap:8px; }
+  .tc-stats { display:grid; grid-template-columns:repeat(4,1fr); gap:6px; }
+  .tc-stats small { display:block; color:var(--muted); font-size:10.5px; text-transform:uppercase; letter-spacing:.5px; font-weight:600; }
+  .tc-stats b { font-size:13px; white-space:nowrap; }
+  .tc-groups { display:flex; flex-wrap:wrap; gap:5px; min-height:20px; }
+  .badge { font-size:11px; font-weight:700; padding:2px 8px; border-radius:6px; white-space:nowrap; }
+  .badge.g { background:var(--good-soft); } .badge.r { background:var(--bad-soft); } .badge.a { background:var(--neutral-soft); }
+  .gchip { display:inline-flex; align-items:center; gap:5px; font-size:11.5px; padding:1px 8px 1px 6px; border-radius:999px; border:1px solid var(--line); background:var(--panel); color:var(--text); max-width:100%; }
+  .gchip i { width:7px; height:7px; border-radius:50%; flex:0 0 auto; }
+  .gchip span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .glist { display:flex; flex-direction:column; gap:6px; }
+  .gitem { display:grid; grid-template-columns:auto minmax(0,1fr) auto; gap:10px; align-items:center; padding:9px 11px; border:1px solid var(--line); border-radius:10px; background:var(--panel-2); }
+  .gitem:hover { border-color:var(--accent-line); }
+  .gitem b { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; } .gitem small { color:var(--muted); font-size:11.5px; }
+  .legend { display:flex; flex-wrap:wrap; gap:6px 16px; font-size:12px; color:var(--muted); margin-top:8px; }
+  .mixlegend { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:8px; }
+  .mixlegend div { padding:8px 10px; border-radius:9px; background:var(--panel-2); border:1px solid var(--line-2); }
+  .mixlegend b { display:block; font-size:15px; } .mixlegend small { color:var(--muted); font-size:11.5px; }
+
+  /* ---------- AI + graphs ---------- */
+  .ai { border:1px solid color-mix(in srgb, var(--purple) 35%, transparent); background:linear-gradient(160deg, color-mix(in srgb, var(--purple) 9%, var(--panel)), var(--panel)); border-radius:12px; padding:14px 16px; margin:0 0 16px; }
+  .ai p { margin:8px 0; }
   ul.flags { margin:4px 0 8px 18px; padding:0; } ul.flags li { margin:3px 0; }
-  svg.graph { width:100%; background:#f8fcff; border:1px solid var(--line); border-radius:12px; }
-  .legend { margin-top:6px; font-size:12px; } .legend span { margin-right:14px; }
+  svg.graph { width:100%; background:var(--panel-2); border:1px solid var(--line); border-radius:12px; display:block; }
+  svg.bubbles { width:100%; max-height:560px; display:block; }
+  svg.bubbles a circle { transition:opacity .1s; } svg.bubbles a:hover circle { opacity:.75; }
 
+  footer { max-width:1440px; margin:0 auto; padding:0 24px 30px; color:var(--faint); font-size:12px; display:flex; justify-content:space-between; gap:12px; flex-wrap:wrap; }
+  footer a { color:var(--muted); font-weight:600; }
+
+  @media (max-width:1100px) { .topbar .status span { display:none; } }
   @media (max-width:960px) {
-    .app { flex-direction:column; }
-    .side { position:static; width:auto; height:auto; flex:none; flex-direction:row; flex-wrap:wrap; align-items:center; padding:10px 12px; gap:6px; border-right:0; border-bottom:1px solid var(--line); }
-    .brand { padding:0 10px 0 0; } .nav-group, .side-foot { display:none; }
-    #nav { display:flex; flex-wrap:wrap; gap:4px; } #nav a { padding:6px 10px; }
-    .top, main { padding-left:16px; padding-right:16px; }
+    .topin { flex-wrap:wrap; gap:10px; padding:10px 16px; }
+    .brand small { display:none; }
+    .topbar .search { order:3; flex:1 1 100%; max-width:none; margin:0; }
+    #nav { order:4; flex:1 1 100%; overflow-x:auto; }
+    .status { margin-left:auto; }
+    #subnav, .pagehead, main, footer { padding-left:16px; padding-right:16px; }
+    .grid2, .grid2.wide-l { grid-template-columns:minmax(0,1fr); }
+    .hero { padding:22px 18px; } .hero h1 { font-size:22px; }
+    input[type=search] { min-width:0; width:100%; }
+    .dh-main h1 { font-size:20px; }
   }
 </style>
 </head>
 <body>
-<div class="app">
-  <aside class="side">
-    <a class="brand" href="/monitor" onclick="return nav(event,'/monitor')">
-      <span class="logo"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><circle cx="5" cy="6" r="2"/><circle cx="19" cy="6" r="2"/><circle cx="5" cy="18" r="2"/><circle cx="19" cy="18" r="2"/><path d="M7 7l3 3M17 7l-3 3M7 17l3-3M17 17l-3-3"/></svg></span>
+<header class="topbar">
+  <div class="topin">
+    <a class="brand" href="/explore" onclick="return navA(event,this)">
+      <span class="logo"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><circle cx="5" cy="6" r="2"/><circle cx="19" cy="6" r="2"/><circle cx="5" cy="18" r="2"/><circle cx="19" cy="18" r="2"/><path d="M7 7l3 3M17 7l-3 3M7 17l3-3M17 17l-3-3"/></svg></span>
       <span><b>Entity Tracker</b><small>NEAR launchpads · early money</small></span>
     </a>
     <nav id="nav"></nav>
-    <div class="side-foot">Powered by <a href="https://trustflow.vn" target="_blank" rel="noopener" style="color:inherit;font-weight:600">Trustflow.vn</a><br><span id="sideNote"></span></div>
-  </aside>
-  <div class="content">
-    <header class="top"><div><h1 id="pageTitle">Monitor</h1><p class="sub" id="pageSub"></p></div><span id="status"></span></header>
-    <main id="main"></main>
+    <div class="search" id="topSearch"></div>
+    <div class="status" title="worker / AI status"><i class="dot" id="statusDot"></i><span id="status"></span></div>
+    <button class="icon-btn" title="Light / dark" onclick="toggleTheme()"><svg viewBox="0 0 24 24"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg></button>
   </div>
-</div>
-<div id="drawer"><button onclick="closeDrawer()">Close ✕</button><div id="drawerBody"></div></div>
-<div id="scrim" onclick="closeDrawer()"></div>
+  <nav id="subnav" hidden></nav>
+</header>
+<div class="pagehead" id="pagehead"><h1 id="pageTitle"></h1><p id="pageSub"></p></div>
+<main id="main"></main>
+<footer><span>Read-only on-chain · verdicts are evidence, not proof</span><span>Powered by <a href="https://trustflow.vn" target="_blank" rel="noopener">Trustflow.vn</a></span></footer>
 
 <script>
 const $ = (id) => document.getElementById(id);
-const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const n = (x, d = 2) => (x == null || Number.isNaN(+x) ? '–' : (+x).toLocaleString('en-US', { maximumFractionDigits: d }));
-const pct = (x, d = 0) => (x == null ? '–' : (x * 100).toFixed(d) + '%');
+const pct = (x, d = 0) => (x == null || Number.isNaN(+x) ? '–' : (x * 100).toFixed(d) + '%');
 const when = (ts) => (ts ? new Date(ts).toLocaleString() : '–');
-const ago = (ms) => { if (ms == null) return '–'; const s = Math.max(0, Math.round(ms / 1000)); return s < 60 ? s + 's' : s < 3600 ? Math.floor(s / 60) + 'm' : s < 86400 ? Math.floor(s / 3600) + 'h' : Math.floor(s / 86400) + 'd'; };
+const ago = (ms) => { if (ms == null || Number.isNaN(ms)) return '–'; const s = Math.max(0, Math.round(ms / 1000)); return s < 60 ? s + 's' : s < 3600 ? Math.floor(s / 60) + 'm' : s < 86400 ? Math.floor(s / 3600) + 'h' : Math.floor(s / 86400) + 'd'; };
+const since = (ts) => (ts ? ago(Date.now() - ts) + ' ago' : '–');
 const short = (a, k = 18) => (a && a.length > k ? a.slice(0, k - 2) + '…' : a || '–');
 const roiCls = (r) => (r == null ? 'muted' : r > 0 ? 'g' : r < 0 ? 'r' : 'muted');
-const vb = (v) => `<span class="v ${esc(v || 'unknown')}">${esc(v || 'unknown')}</span>`;
-const tags = (t) => (t || []).map((x) => `<span class="tag">${esc(x)}</span>`).join('');
+const signed = (x, d = 1) => (x == null ? '–' : (x > 0 ? '+' : '') + n(x, d));
+const vb = (v) => `<span class="v ${esc(v || 'unknown')}">${esc(v === 'bad' ? 'dangerous' : v || 'unknown')}</span>`;
+const tags = (t) => (t || []).map((x) => `<span class="chip">${esc(x)}</span>`).join('');
 const get = async (path, params) => { const q = params ? '?' + new URLSearchParams(Object.entries(params).filter(([, v]) => v !== '' && v != null)) : ''; const r = await fetch(path + q); const j = await r.json(); if (j.error && !j.rows && !j.now && !j.nodes) throw new Error(j.error); return j; };
-// ---- links: every wallet / contract / transaction goes to NearBlocks, every token to its launchpad's token page
+
+// ---- external links: every wallet / contract / transaction goes to NearBlocks, every token to its launchpad's token page
 const NB = 'https://nearblocks.io', STOP = ' onclick="event.stopPropagation()"'; // a link inside a clickable row must not also open the row
-const ext = (url, text, title) => `<a href="${url}" target="_blank" rel="noopener" title="${esc(title ?? text)}"${STOP}>${esc(text)}</a>`;
+const ext = (url, text, title) => `<a href="${esc(url)}" target="_blank" rel="noopener" title="${esc(title ?? text)}"${STOP}>${esc(text)}</a>`;
 const ACCT_RE = /^[a-z0-9][a-z0-9._-]*$/;
+const nbAddr = (a) => `${NB}/address/${encodeURIComponent(a)}`;
 /** A wallet / contract account -> NearBlocks address page. Anything that is not an account id (labels, composite keys) is plain text. */
-const acct = (a, k = 24) => (a ? (ACCT_RE.test(a) ? ext(`${NB}/address/${encodeURIComponent(a)}`, short(a, k), a) : esc(short(a, k))) : '–');
+const acct = (a, k = 24) => (a ? (ACCT_RE.test(a) ? ext(nbAddr(a), short(a, k), a) : esc(short(a, k))) : '–');
 const nb = (a) => acct(a, 22);
 /** A transaction hash -> NearBlocks transaction page. */
 const txl = (h) => (h ? ext(`${NB}/txns/${encodeURIComponent(h)}`, String(h).slice(0, 8) + '…', h) : '–');
@@ -166,78 +269,205 @@ const tokUrl = (id, lp) => {
 /** A token -> its launchpad's token detail page (nearly.trade, justhoot.fun, meme.cooking), NearBlocks otherwise. */
 const tokLink = (id, lp, k = 26) => (id ? ext(tokUrl(id, lp), short(id, k), id) : '–');
 
-const ST = { scans: { kind: '', pass: '', bought: '', q: '', offset: 0 }, entities: { type: '', q: '', sort: 'funded', offset: 0 }, groups: { verdict: '', q: '', sort: 'size', offset: 0 }, wallets: { q: '', verdict: '', sort: 'tokens', offset: 0 }, tokens: { q: '', status: '', rugged: '', offset: 0 }, logs: { level: '' } };
+// ---- internal links: tokens, wallets and groups each have their own page
+const P = { tok: (id) => '/tokens/' + encodeURIComponent(id), wal: (id) => '/wallets/' + encodeURIComponent(id), grp: (id) => '/groups/' + encodeURIComponent(id),
+  ent: (id) => '/entities/' + encodeURIComponent(id), scan: (id) => '/scans/' + encodeURIComponent(id), sim: (id) => '/sim/' + encodeURIComponent(id), audit: (id) => '/audit/' + encodeURIComponent(id) };
+const row = (path) => `data-href="${esc(path)}" onclick="rowNav(event,this)"`;
+const ilink = (path, html, title) => `<a href="${esc(path)}" onclick="event.stopPropagation();return navA(event,this)"${title ? ` title="${esc(title)}"` : ''}>${html}</a>`;
+const hue = (s) => { let h = 7; for (const c of String(s)) h = (h * 31 + c.charCodeAt(0)) >>> 0; return h % 360; };
+const avatar = (id, label, size = 30) => `<span class="av" style="--h:${hue(id)};width:${size}px;height:${size}px;font-size:${Math.round(size * 0.38)}px">${esc(String(label || id || '?').replace(/^[^a-z0-9]+/i, '').slice(0, 2).toUpperCase() || '?')}</span>`;
+/** Token cell: avatar, symbol -> token page, account and a launchpad link. */
+const tokCell = (id, sym, lp, k = 26) => `<span class="ent">${avatar(id, sym)}<span><b>${ilink(P.tok(id), esc(sym || short(id, 16)), id)}</b><small><span class="acct">${esc(short(id, k))}</span> ${ext(tokUrl(id, lp), '↗', 'open on ' + (lp || padOf(id) || 'NearBlocks'))}</small></span></span>`;
+/** Wallet cell: account -> wallet page, plus NearBlocks. Non-account keys stay plain text. */
+const walLink = (id, k = 24) => (!id ? '–' : ACCT_RE.test(id) ? `<span class="acct">${ilink(P.wal(id), esc(short(id, k)), id)}</span> ${ext(nbAddr(id), '↗', 'NearBlocks: ' + id)}` : esc(short(id, k)));
+const VCOL = { good: 'var(--good)', bad: 'var(--bad)', neutral: 'var(--neutral)', unknown: 'var(--unknown)', solo: 'var(--solo)' };
+const gchip = (g) => `<a class="gchip" href="${esc(P.grp(g.id))}" onclick="event.stopPropagation();return navA(event,this)" title="${esc((g.label || g.id) + ' · ' + (g.verdict || 'unknown'))}"><i style="background:${VCOL[g.verdict] || VCOL.unknown}"></i><span>${esc(short(g.label || g.id, 26))}</span>${g.wallets != null ? `<span class="muted">${g.wallets}w</span>` : ''}</a>`;
+const tile = (label, value, sub, cls = '') => `<div class="tile"><span>${label}</span><b class="${cls}">${value}</b>${sub != null && sub !== '' ? `<small>${sub}</small>` : ''}</div>`;
+const crumbs = (items) => `<div class="crumbs">${items.map(([l, p]) => (p ? ilink(p, esc(l)) : `<span>${esc(l)}</span>`)).join(' / ')}</div>`;
+const empty = (cols, text) => `<tr><td colspan="${cols}" class="muted">${text}</td></tr>`;
+
+// ---- early money split by group verdict
+const MIXV = [['good', 'Good groups'], ['bad', 'Dangerous groups'], ['neutral', 'Neutral groups'], ['unknown', 'Groups, too few tokens'], ['solo', 'Unlinked wallets']];
+const mixTotal = (m) => MIXV.reduce((s, [v]) => s + (m?.[v]?.near || 0), 0);
+const mixBar = (m, cls = '') => {
+  const tot = mixTotal(m);
+  if (!tot) return '<div class="mix ' + cls + '"></div>';
+  return `<div class="mix ${cls}">${MIXV.map(([v, l]) => { const x = m[v]?.near || 0; return x ? `<i class="${v}" style="width:${((x / tot) * 100).toFixed(2)}%" title="${l}: ${n(x, 1)} N · ${m[v].w} wallets (${pct(x / tot)})"></i>` : ''; }).join('')}</div>`;
+};
+const mixLegend = (m) => { const tot = mixTotal(m) || 1; return `<div class="mixlegend">${MIXV.map(([v, l]) => `<div><small><span class="lg-dot ${v}"></span>${l}</small><b>${pct((m[v]?.near || 0) / tot)}</b><small>${n(m[v]?.near || 0, 1)} N · ${m[v]?.w || 0} wallets</small></div>`).join('')}</div>`; };
+const mixCell = (m) => { const tot = mixTotal(m); if (!tot) return '<span class="muted">no early buyers yet</span>'; const w = MIXV.reduce((s, [v]) => s + (m[v]?.w || 0), 0);
+  return `<div class="mixcell">${mixBar(m)}<small>${w} wallets · ${n(tot, 0)} N · <span class="g">${pct((m.good?.near || 0) / tot)}</span> / <span class="r">${pct((m.bad?.near || 0) / tot)}</span></small></div>`; };
+const wavg = (pairs) => { const w = pairs.reduce((s, [, x]) => s + (x || 0), 0); return w ? pairs.reduce((s, [r, x]) => s + r * (x || 0), 0) / w : null; };
+
+// ---- list state, filters, pager
+const ST = { scans: { kind: '', pass: '', bought: '', q: '', offset: 0 }, entities: { type: '', q: '', sort: 'funded', offset: 0 }, groups: { verdict: '', q: '', sort: 'size', offset: 0 },
+  wallets: { q: '', verdict: '', sort: 'tokens', offset: 0 }, tokens: { q: '', status: '', rugged: '', launchpad: '', offset: 0 }, signals: { hours: 72 }, logs: { level: '' } };
+const setSt = (view, field, value, reset = true) => { ST[view][field] = value; if (reset && 'offset' in ST[view]) ST[view].offset = 0; render(); };
+const sel = (view, field, opts) => `<select onchange="setSt('${view}','${field}',this.value)">${opts.map(([v, l]) => `<option value="${esc(v)}" ${String(ST[view][field]) === String(v) ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select>`;
+const seg = (view, field, opts) => `<div class="seg">${opts.map(([v, l]) => `<button class="${String(ST[view][field]) === String(v) ? 'on' : ''}" onclick="setSt('${view}','${field}','${esc(v)}')">${esc(l)}</button>`).join('')}</div>`;
+const qbox = (view, ph) => `<input type="search" placeholder="${esc(ph)}" value="${esc(ST[view].q)}" onkeydown="if(event.key==='Enter')setSt('${view}','q',this.value)">`;
+const pager = (view, total, size = 50) => { const o = ST[view].offset; return `<span class="muted">${total ? `${n(o + 1, 0)}–${n(Math.min(total, o + size), 0)} of ${n(total, 0)}` : '0'}</span>
+  <button ${o ? '' : 'disabled'} onclick="ST.${view}.offset=Math.max(0,ST.${view}.offset-${size});render()">◀</button><button ${o + size < total ? '' : 'disabled'} onclick="ST.${view}.offset+=${size};render()">▶</button>`; };
+const setStatus = (w, now, ai) => {
+  const fresh = w && now - w.ts < 10 * 60e3;
+  $('statusDot').className = 'dot ' + (w ? (fresh ? 'ok' : 'bad') : '');
+  $('status').textContent = `worker ${w ? ago(now - w.ts) + ' ago' : 'not seen'} · AI ${ai.enabled ? (ai.ok === false ? 'error' : ai.model) : 'off'}`;
+};
+const aiBanner = (ai) => (!ai.enabled ? '<div class="card warn">NEAR AI is off (set NEAR_AI_API_KEY). Groups get rule-based verdicts only.</div>' : ai.ok === false ? `<div class="card err">NEAR AI error: ${esc(ai.error || '')}</div>` : '');
 const views = {};
 
-// ------------------------------------------------------------------ overview
-views.overview = async () => {
-  const o = await get('/api/overview');
-  const W = o.worker, ai = o.ai;
-  $('status').textContent = `worker ${W ? ago(o.now - W.ts) + ' ago' : 'not seen'} · AI ${ai.enabled ? (ai.ok === false ? 'error' : ai.model) : 'off'} · db ${o.db}`;
-  const kpi = (l, v, c = '') => `<div class="kpi"><span class="muted">${l}</span><b class="${c}">${v}</b></div>`;
+// ================================================================== EXPLORE
+const ASSESS = { bullish: ['g', 'Good money in'], warning: ['r', 'Dangerous money in'], mixed: ['a', 'Mixed money'] };
+const outcomeTxt = (o) => (o ? (o.rugged ? '<span class="r">RUG</span> ' : '') + `<span class="${roiCls((o.last_multiple ?? 1) - 1)}">x${n(o.last_multiple, 1)}</span>` : '–');
+const signalCard = (s) => `<div class="tcard" ${row(P.tok(s.token))}>
+  <div class="tc-top">${tokCell(s.token, s.symbol, s.launchpad, 22)}<span class="badge ${ASSESS[s.assessment][0]}">${ASSESS[s.assessment][1]}</span></div>
+  ${mixBar(s.mix)}
+  <div class="tc-stats"><span><small>Early</small><b>${s.early_wallets}w · ${n(s.total_near, 0)} N</b></span><span><small>Good</small><b class="g">${pct(s.good_share)}</b></span><span><small>Danger</small><b class="r">${pct(s.bad_share)}</b></span><span><small>Now</small><b>${outcomeTxt(s.outcome)}</b></span></div>
+  <div class="tc-groups">${s.groups.slice(0, 4).map(gchip).join('')}</div>
+  <div class="muted small">${esc(s.launchpad)} · live ${since(s.live_ts)}</div></div>`;
+const groupMini = (rows, empty_) => `<table><tr><th>Group</th><th class="num">Wallets</th><th class="num">Score</th><th class="num">Tokens</th><th class="num">Win</th><th class="num">Rug</th><th class="num">P&amp;L N</th></tr>
+  ${rows.map((c) => `<tr ${row(P.grp(c.id))}><td><span class="ent">${avatar(c.id, c.ai?.label || c.id, 26)}<span><b>${ilink(P.grp(c.id), esc(short(c.ai?.label || (c.rule?.tags || [])[0] || c.id, 30)))}</b><small class="acct">${esc(short(c.id, 22))}</small></span></span></td>
+    <td class="num">${c.size}</td><td class="num">${n(c.score, 0)}</td><td class="num">${c.metrics?.tokens_n ?? '–'}</td><td class="num">${pct(c.metrics?.win_rate)}</td><td class="num">${pct(c.metrics?.rug_share)}</td><td class="num ${roiCls(c.metrics?.pnl_near)}">${signed(c.metrics?.pnl_near)}</td></tr>`).join('') || empty(7, empty_)}</table>`;
+
+views.explore = async () => {
+  const [o, s] = await Promise.all([get('/api/overview'), get('/api/signals', { hours: 72 })]);
+  setStatus(o.worker, o.now, o.ai);
   const cv = Object.fromEntries(o.clusterVerdict.map((x) => [x.verdict, x]));
-  const gl = (v) => (cv[v] ? `${cv[v].n} <span class="muted" style="font-size:12px">(${cv[v].wallets} wallets)</span>` : '0');
-  return `<section><div class="grid">
-    ${kpi('Tokens tracked', n(o.tokens, 0))}${kpi('Early entries', n(o.entries, 0))}${kpi('Early wallets', n(o.wallets, 0) + ` <span class="muted" style="font-size:12px">(${n(o.profiled, 0)} profiled)</span>`)}
-    ${kpi('Good groups', gl('good'), 'g')}${kpi('Bad groups', gl('bad'), 'r')}${kpi('Neutral', gl('neutral'), 'a')}${kpi('Unknown (few tokens)', gl('unknown'), 'muted')}
-  </div></section>
-  ${ai.enabled ? '' : '<section class="a">NEAR AI is off (set NEAR_AI_API_KEY). Groups get rule-based verdicts only.</section>'}
-  ${ai.enabled && ai.ok === false ? `<section class="r">NEAR AI error: ${esc(ai.error || '')}</section>` : ''}
-  <section><h2>Top good groups</h2>${groupTable(o.topGood)}</section>
-  <section><h2>Largest bad groups</h2>${groupTable(o.topBad)}</section>
-  <section><h2>Latest launches</h2><table><tr><th>Live</th><th>Token</th><th>Pad</th><th>Status</th><th>Early</th><th>Peak x</th><th>Rug</th></tr>
-    ${o.latest.map((t) => `<tr class="click" data-id="${esc(t.id)}" onclick="openToken(this.dataset.id)"><td>${when(t.live_ts)}</td><td><b>${esc(t.symbol || '')}</b> ${tokLink(t.id, t.launchpad, 28)}</td><td>${esc(t.launchpad)}</td><td>${esc(t.status)}</td><td>${t.entries_n ?? '–'}</td><td>${n(t.outcome?.peak_multiple, 1)}</td><td class="${t.outcome?.rugged ? 'r' : 'muted'}">${t.outcome?.rugged ? 'RUG' : '–'}</td></tr>`).join('')}</table></section>`;
+  const gt = (v, l, c) => tile(l, n(cv[v]?.n || 0, 0), `${n(cv[v]?.wallets || 0, 0)} wallets`, c);
+  return `<div class="hero"><h1>Follow the early money on NEAR launchpads</h1>
+    <p class="muted">Open a token to see which wallet groups bought it in the first minutes and how much they put in, or open a wallet to see its group, who funded it and how its early buys turned out.</p>
+    ${searchBox('heroSearch', 'big')}
+    <div class="tiles">${tile('Tokens tracked', n(o.tokens, 0))}${tile('Early wallets', n(o.wallets, 0), `${n(o.profiled, 0)} profiled · ${n(o.entries, 0)} entries`)}${gt('good', 'Good groups', 'g')}${gt('bad', 'Dangerous groups', 'r')}${gt('neutral', 'Neutral groups', 'a')}${gt('unknown', 'Unjudged groups', 'muted')}</div></div>
+  ${aiBanner(o.ai)}
+  <div class="card"><div class="head"><h2>Tokens with known groups among the early buyers <span class="muted">last 72 h</span></h2>${ilink('/signals', 'All signals →')}</div>
+    <div class="tokgrid">${s.rows.slice(0, 9).map(signalCard).join('') || '<p class="muted">No signals yet: needs profiled wallets and evaluated groups.</p>'}</div>
+    <div class="legend">${MIXV.map(([v, l]) => `<span><span class="lg-dot ${v}"></span>${l}</span>`).join('')}<span>bar = share of early NEAR</span></div></div>
+  <div class="grid2"><div class="card"><div class="head"><h2>Best groups</h2>${ilink('/groups', 'All groups →')}</div>${groupMini(o.topGood, 'no good groups yet')}</div>
+    <div class="card"><div class="head"><h2>Largest dangerous groups</h2>${ilink('/groups', 'All groups →')}</div>${groupMini(o.topBad, 'no dangerous groups yet')}</div></div>
+  <div class="card"><div class="head"><h2>Latest launches</h2>${ilink('/tokens', 'All tokens →')}</div><table><tr><th>Token</th><th>Pad</th><th>Live</th><th>Status</th><th class="num">Early</th><th class="num">Peak</th><th>Rug</th></tr>
+    ${o.latest.map((t) => `<tr ${row(P.tok(t.id))}><td>${tokCell(t.id, t.symbol, t.launchpad)}</td><td>${esc(t.launchpad)}</td><td>${since(t.live_ts)}</td><td><span class="chip">${esc(t.status)}</span></td><td class="num">${t.entries_n ?? '–'}</td><td class="num">x${n(t.outcome?.peak_multiple, 1)}</td><td class="${t.outcome?.rugged ? 'r' : 'muted'}">${t.outcome?.rugged ? 'RUG' : '–'}</td></tr>`).join('') || empty(7, 'no launches yet')}</table></div>`;
 };
-const groupTable = (rows) => `<table><tr><th>Group</th><th>Label</th><th>Wallets</th><th>Score</th><th>Tokens</th><th>Win</th><th>Rug</th><th>P&amp;L N</th></tr>
-  ${rows.map((c) => `<tr class="click" data-id="${esc(c.id)}" onclick="openGroup(this.dataset.id)"><td>${esc(c.id)}</td><td>${esc(c.ai?.label || (c.rule?.tags || []).join(', ') || '–')}</td><td>${c.size}</td><td>${n(c.score, 0)}</td><td>${c.metrics?.tokens_n ?? '–'}</td><td>${pct(c.metrics?.win_rate)}</td><td>${pct(c.metrics?.rug_share)}</td><td class="${roiCls(c.metrics?.pnl_near)}">${n(c.metrics?.pnl_near, 1)}</td></tr>`).join('') || '<tr><td colspan="8" class="muted">none yet</td></tr>'}</table>`;
 
-// ------------------------------------------------------------------ signals
+// ================================================================== TOKENS
+views.tokens = async () => {
+  const S = ST.tokens, j = await get('/api/tokens', { q: S.q, status: S.status, rugged: S.rugged, launchpad: S.launchpad, limit: 50, offset: S.offset });
+  return `<div class="card"><div class="bar">${qbox('tokens', 'symbol / token / creator')}
+    ${sel('tokens', 'launchpad', [['', 'all launchpads'], ['nearlytrade', 'nearly.trade'], ['justhoot', 'justhoot'], ['memecooking', 'meme.cooking']])}
+    ${sel('tokens', 'status', [['', 'any status'], ...['new', 'entries_open', 'tracking', 'done'].map((v) => [v, v])])}
+    ${seg('tokens', 'rugged', [['', 'All'], ['1', 'Rugged']])}<span class="spacer"></span>${pager('tokens', j.total)}</div>
+    <table><tr><th>Token</th><th>Pad</th><th>Live</th><th>Early money by group</th><th>Groups in early</th><th class="num">Buyers</th><th class="num">Peak</th><th class="num">Now</th><th>Flags</th></tr>
+    ${j.rows.map((t) => `<tr ${row(P.tok(t.id))}><td>${tokCell(t.id, t.symbol, t.launchpad)}</td><td>${esc(t.launchpad)}</td><td>${since(t.live_ts)}</td><td>${mixCell(t.mix)}</td>
+      <td class="wrap" style="min-width:160px"><div class="tc-groups">${(t.groups || []).map(gchip).join('') || '<span class="muted small">–</span>'}</div></td><td class="num">${t.outcome?.buyers ?? '–'}</td>
+      <td class="num">x${n(t.outcome?.peak_multiple, 1)}</td><td class="num ${roiCls((t.outcome?.last_multiple ?? 1) - 1)}">x${n(t.outcome?.last_multiple, 1)}</td>
+      <td>${t.outcome?.rugged ? '<span class="v bad">rug</span> ' : ''}${t.outcome?.creator_sold ? '<span class="v neutral">creator sold</span>' : ''}${!t.outcome?.rugged && !t.outcome?.creator_sold ? `<span class="chip">${esc(t.status)}</span>` : ''}</td></tr>`).join('') || empty(9, 'no tokens')}</table>
+    <div class="legend">${MIXV.map(([v, l]) => `<span><span class="lg-dot ${v}"></span>${l}</span>`).join('')}<span>· green / red % = early NEAR from good / dangerous groups</span></div></div>`;
+};
+
 views.signals = async () => {
-  const j = await get('/api/signals', { hours: 72 });
-  const cls = { bullish: 'g', warning: 'r', mixed: 'a' };
-  return `<section><h2>Signals: recent tokens where known good / bad groups were among the early buyers <span class="muted">(last 72 h)</span></h2><table>
-    <tr><th>Live</th><th>Token</th><th>Pad</th><th>Assessment</th><th>Good</th><th>Bad</th><th>Early wallets</th><th>Groups</th><th>Now</th></tr>
-    ${j.rows.map((s) => `<tr class="click" data-id="${esc(s.token)}" onclick="openToken(this.dataset.id)"><td>${when(s.live_ts)}</td><td><b>${esc(s.symbol || '')}</b> ${tokLink(s.token, s.launchpad, 26)}</td><td>${esc(s.launchpad)}</td>
-      <td class="${cls[s.assessment] || ''}"><b>${esc(s.assessment)}</b></td><td class="g">${s.good.w} w · ${n(s.good.near, 0)} N (${pct(s.good_share)})</td><td class="r">${s.bad.w} w · ${n(s.bad.near, 0)} N (${pct(s.bad_share)})</td><td>${s.early_wallets}</td>
-      <td class="wrap">${s.groups.slice(0, 3).map((g) => `${vb(g.verdict)} ${esc(g.label || g.id)} (${g.wallets})`).join(' · ')}</td>
-      <td>${s.outcome ? (s.outcome.rugged ? '<span class="r">RUG</span> ' : '') + 'x' + n(s.outcome.last_multiple, 1) : '–'}</td></tr>`).join('') || '<tr><td colspan="9" class="muted">no signals yet: needs profiled wallets and evaluated groups</td></tr>'}</table></section>`;
+  const j = await get('/api/signals', { hours: ST.signals.hours });
+  const by = (a) => j.rows.filter((s) => s.assessment === a);
+  const block = (a, title) => (by(a).length ? `<div class="card"><h2>${title} <span class="muted">${by(a).length}</span></h2><div class="tokgrid">${by(a).map(signalCard).join('')}</div></div>` : '');
+  return `<div class="bar">${seg('signals', 'hours', [[24, '24 h'], [72, '72 h'], [168, '7 days']])}<span class="muted">${j.rows.length} tokens where known groups were among the early buyers</span></div>
+    ${block('bullish', 'Good money in, little dangerous money')}${block('warning', 'Dangerous groups hold 25 %+ of early NEAR')}${block('mixed', 'Mixed')}
+    ${j.rows.length ? '' : '<div class="card muted">No signals yet: needs profiled wallets and evaluated groups.</div>'}`;
 };
 
-// ------------------------------------------------------------------ groups
+async function tokenPage(id) {
+  const t = await get('/api/token', { id }), o = t.outcome || {}, es = t.entries || [], au = t.audit;
+  const mix = Object.fromEntries(MIXV.map(([v]) => [v, { w: 0, near: 0 }])), groups = new Map();
+  for (const e of es) {
+    const v = e.cluster ? (mix[e.cluster.verdict] ? e.cluster.verdict : 'unknown') : 'solo';
+    mix[v].w++; mix[v].near += e.buy_near || 0;
+    if (e.cluster) { const g = groups.get(e.cluster.id) || { ...e.cluster, wallets: 0, near: 0, roi: [] }; g.wallets++; g.near += e.buy_near || 0; if (e.roi_now != null) g.roi.push([e.roi_now, e.buy_near]); groups.set(e.cluster.id, g); }
+  }
+  const total = mixTotal(mix), gl = [...groups.values()].sort((a, b) => b.near - a.near);
+  const riskCls = au?.available ? (au.risk_level === 'low' ? 'g' : au.risk_level === 'medium' ? 'a' : 'r') : 'muted';
+  let h = `<div class="card">${crumbs([['Tokens', '/tokens'], [t.symbol || short(t.id, 20)]])}
+    <div class="dh-main">${avatar(t.id, t.symbol, 54)}<div style="min-width:0"><h1>${esc(t.symbol || short(t.id, 24))} <span class="muted">${esc(t.name || '')}</span>${o.rugged ? ' <span class="v bad">rug</span>' : ''}</h1>
+      <div class="meta"><span class="chip">${esc(t.launchpad)}</span><span class="chip">${esc(t.status)}</span><span class="acct">${esc(t.id)}</span><span>live ${when(t.live_ts)} (${since(t.live_ts)})</span></div>
+      <div class="meta"><span>creator ${t.creator ? walLink(t.creator, 30) : '–'}</span><span>launch tx ${txl(t.live_tx)}</span>${ext(tokUrl(t.id, t.launchpad), 'Launchpad page ↗')}${ext(`${NB}/token/${encodeURIComponent(t.id)}`, 'NearBlocks ↗')}${ilink(P.audit(t.id), 'Full audit →')}</div></div></div>
+    <div class="tiles">${tile('Peak', 'x' + n(o.peak_multiple, 1))}${tile('Now', 'x' + n(o.last_multiple, 1), o.drawdown != null ? `drawdown ${pct(o.drawdown)}` : null, roiCls((o.last_multiple ?? 1) - 1))}
+      ${tile('Buyers', o.buyers ?? '–', `${n(o.buy_near, 0)} N in · ${n(o.sell_near, 0)} N out`)}${tile('Early wallets', es.length, `${n(total, 0)} N in the first minutes`)}
+      ${tile('From good groups', pct(total ? mix.good.near / total : null), `${mix.good.w} wallets`, 'g')}${tile('From dangerous groups', pct(total ? mix.bad.near / total : null), `${mix.bad.w} wallets`, 'r')}
+      ${tile('Creator sold', o.creator_sold ? 'yes' : 'no', o.creator_sold ? n(o.creator_sell_near, 1) + ' N' : null, o.creator_sold ? 'r' : 'g')}${tile('Contract risk', au?.available ? au.risk_score : '–', au?.available ? au.risk_level : 'not audited', riskCls)}</div></div>`;
+  h += `<div class="grid2 wide-l"><div class="card"><h2>Early money by group <span class="muted">who put NEAR in during the first minutes</span></h2>${mixBar(mix, 'lg')}${mixLegend(mix)}
+      <h3>Groups in this token (${gl.length})</h3>${gl.length ? `<div class="glist">${gl.map((g) => { const r = wavg(g.roi); return `<div class="gitem" ${row(P.grp(g.id))}>${vb(g.verdict)}<div style="min-width:0"><b>${esc(g.label || g.id)}</b><small>${g.wallets} of ${g.size} wallets · ${n(g.near, 1)} N (${pct(total ? g.near / total : null)})</small></div><span class="${roiCls(r)}" title="NEAR-weighted ROI now">${pct(r)}</span></div>`; }).join('')}</div>` : '<p class="muted">None of the early buyers belongs to a known group yet.</p>'}</div>
+    <div class="card"><h2>Bubble map <span class="muted">early buyers clustered by group · size = NEAR in · click a bubble</span></h2>${bubbleMap(es)}
+      <div class="legend">${MIXV.map(([v, l]) => `<span><span class="lg-dot ${v}"></span>${l}</span>`).join('')}<span><span class="lg-dot" style="background:transparent;box-shadow:inset 0 0 0 2px var(--bad)"></span>creator</span></div></div></div>`;
+  h += `<div class="card"><h2>Early buyers <span class="muted">${es.length} wallets, by entry rank</span></h2><table><tr><th>#</th><th>Wallet</th><th>Group</th><th class="num">Delay</th><th>Buy tx</th><th class="num">NEAR in</th><th class="num">Wallet age</th><th>Funded by</th><th class="num">ROI 1h</th><th class="num">ROI 24h</th><th class="num">Now</th></tr>
+    ${es.map((e) => `<tr ${row(P.wal(e.wallet))}><td class="muted">${e.rank}</td><td>${walLink(e.wallet)}${e.is_creator ? ' <span class="v bad">creator</span>' : ''}</td>
+      <td>${e.cluster ? `${vb(e.cluster.verdict)} ${ilink(P.grp(e.cluster.id), esc(short(e.cluster.label || e.cluster.id, 26)))} <span class="muted">(${e.cluster.size})</span>` : '<span class="muted">unlinked</span>'}</td><td class="num">${e.delay_s}s</td><td>${txl(e.first_buy_hash)}</td><td class="num">${n(e.buy_near, 1)}</td>
+      <td class="num">${e.wallet_age_days != null ? e.wallet_age_days + ' d' : '–'}</td><td>${esc(e.funder_kind || '–')}</td><td class="num ${roiCls(e.roi?.['60'])}">${pct(e.roi?.['60'])}</td><td class="num ${roiCls(e.roi?.['1440'])}">${pct(e.roi?.['1440'])}</td><td class="num ${roiCls(e.roi_now)}">${pct(e.roi_now)}</td></tr>`).join('') || empty(11, 'no early buyers recorded')}</table></div>`;
+  h += `<div class="card"><div class="head"><h2>Contract audit</h2>${ilink(P.audit(t.id), 'Open the full audit →')}</div>` + (au?.available ? `<p><span class="v ${riskCls === 'g' ? 'good' : riskCls === 'a' ? 'neutral' : 'bad'}">risk ${au.risk_score} · ${esc(au.risk_level)}</span> <span class="v ${au.trust_level === 'high' ? 'good' : 'unknown'}">trust ${au.trust_score}</span> · full-access keys ${au.full_access_keys ?? '–'} · ${(au.confirmed_malicious || []).length ? '<span class="r">confirmed: ' + au.confirmed_malicious.map((c) => esc(c.key)).join(', ') + '</span>' : 'no confirmed malicious finding'}</p>${(au.findings || []).length ? '<ul class="flags">' + au.findings.map((f) => `<li>${esc(f.key)} (+${f.weight})${f.detail ? ' <span class="muted">' + esc(f.detail) + '</span>' : ''}</li>`).join('') + '</ul>' : ''}` : '<p class="muted">Not audited yet.</p>') + '</div>';
+  return h;
+}
+
+/** Bubble map: one bubble per early buyer (area ~ NEAR in), packed inside one circle per group, groups packed around the biggest. */
+function bubbleMap(entries) {
+  if (!entries.length) return '<p class="muted">no early buyers recorded</p>';
+  const buckets = new Map();
+  for (const e of entries) { const k = e.cluster ? e.cluster.id : ''; const b = buckets.get(k) || { key: k, c: e.cluster, items: [], near: 0 }; b.items.push(e); b.near += e.buy_near || 0; buckets.set(k, b); }
+  const maxN = Math.max(...entries.map((e) => e.buy_near || 0), 0.01);
+  const pack = (cs, gap) => { // greedy: biggest first, each next one at the first free spot on an outward spiral
+    const done = [];
+    for (const c of cs) {
+      if (!done.length) { c.x = 0; c.y = 0; done.push(c); continue; }
+      for (let a = 0; ; a += 0.2) { const d = 0.9 * a, x = d * Math.cos(a), y = d * Math.sin(a); if (done.every((p) => Math.hypot(p.x - x, p.y - y) >= p.r + c.r + gap)) { c.x = x; c.y = y; break; } }
+      done.push(c);
+    }
+    return done;
+  };
+  const groups = [...buckets.values()].sort((a, b) => b.near - a.near).map((b) => {
+    const cs = pack(b.items.map((e) => ({ e, r: 4 + 18 * Math.sqrt((e.buy_near || 0) / maxN) })).sort((x, y) => y.r - x.r), 1.5);
+    return { ...b, cs, r: Math.max(...cs.map((c) => Math.hypot(c.x, c.y) + c.r)) + 7 };
+  });
+  pack(groups, 30);
+  const x0 = Math.min(...groups.map((g) => g.x - g.r)) - 6, x1 = Math.max(...groups.map((g) => g.x + g.r)) + 6;
+  const y0 = Math.min(...groups.map((g) => g.y - g.r)) - 20, y1 = Math.max(...groups.map((g) => g.y + g.r)) + 6;
+  const W = Math.max(x1 - x0, 320), fs = Math.max(9, W / 85);
+  const svg = groups.map((g) => {
+    const v = g.c ? (VCOL[g.c.verdict] ? g.c.verdict : 'unknown') : 'solo', col = VCOL[v];
+    const label = g.c ? `${short(g.c.label || g.c.id, 24)} · ${g.items.length}` : `unlinked · ${g.items.length}`;
+    const ring = `<circle cx="${g.x}" cy="${g.y}" r="${g.r}" style="fill:${col};fill-opacity:.07;stroke:${col};stroke-opacity:.55" stroke-width="1.2" ${g.c ? '' : 'stroke-dasharray="4 4"'}/>`;
+    const lbl = `<text x="${g.x}" y="${g.y - g.r - 5}" text-anchor="middle" font-size="${fs}" style="fill:var(--muted)" font-weight="600">${esc(label)}</text>`;
+    const dots = g.cs.map((c) => `<a href="${esc(P.wal(c.e.wallet))}" onclick="return navA(event,this)"><circle cx="${g.x + c.x}" cy="${g.y + c.y}" r="${c.r}" style="fill:${col}" fill-opacity="${g.c ? 0.85 : 0.9}" ${c.e.is_creator ? 'stroke="var(--bad)" stroke-width="2.5"' : ''}><title>${esc(c.e.wallet)}\n${n(c.e.buy_near, 2)} N in · rank #${c.e.rank} · ${c.e.delay_s}s after open\nROI now ${pct(c.e.roi_now)}${g.c ? '\ngroup ' + esc(g.c.label || g.c.id) + ' (' + esc(g.c.verdict) + ')' : ''}${c.e.is_creator ? '\nCREATOR' : ''}</title></circle></a>`).join('');
+    return (g.c ? `<a href="${esc(P.grp(g.c.id))}" onclick="return navA(event,this)">${ring}${lbl}</a>` : ring + lbl) + dots;
+  }).join('');
+  return `<svg class="bubbles" viewBox="${x0} ${y0} ${x1 - x0} ${y1 - y0}" preserveAspectRatio="xMidYMid meet">${svg}</svg>`;
+}
+
+// ================================================================== WALLETS & GROUPS
 views.groups = async () => {
   const S = ST.groups, j = await get('/api/clusters', { verdict: S.verdict, q: S.q, sort: S.sort, limit: 50, offset: S.offset });
-  const sel = (k, v, l) => `<option value="${v}" ${S[k] === v ? 'selected' : ''}>${l}</option>`;
-  return `<section><div class="bar"><h2 style="margin:0">Groups</h2>
-    <select onchange="ST.groups.verdict=this.value;ST.groups.offset=0;render()">${sel('verdict', '', 'all verdicts')}${['good', 'bad', 'neutral', 'unknown'].map((v) => sel('verdict', v, v)).join('')}</select>
-    <select onchange="ST.groups.sort=this.value;render()">${sel('sort', 'size', 'by size')}${sel('sort', 'score', 'by score')}${sel('sort', 'pnl', 'by P&L')}${sel('sort', 'recent', 'most recent entry')}</select>
-    <input id="gq" type="search" placeholder="wallet / group id / label" value="${esc(S.q)}" onkeydown="if(event.key==='Enter'){ST.groups.q=this.value;ST.groups.offset=0;render()}">
-    <span class="muted">${n(j.total, 0)} groups</span>
-    <button ${S.offset ? '' : 'disabled'} onclick="ST.groups.offset=Math.max(0,ST.groups.offset-50);render()">◀</button><button ${S.offset + 50 < j.total ? '' : 'disabled'} onclick="ST.groups.offset+=50;render()">▶</button></div>
-    <table><tr><th>Group</th><th>Verdict</th><th>Label</th><th>Tags</th><th>Wallets</th><th>Score</th><th>Tokens</th><th>Win</th><th>Rug</th><th>Insider</th><th>ROI</th><th>P&amp;L N</th><th>Last entry</th></tr>
-    ${j.rows.map((c) => `<tr class="click" data-id="${esc(c.id)}" onclick="openGroup(this.dataset.id)"><td>${esc(c.id)}</td><td>${vb(c.verdict)}${c.verdict_source === 'ai' ? ' <span class="tag">AI</span>' : ''}</td><td>${esc(c.ai?.label || '–')}</td><td>${tags(c.rule?.tags)}</td><td>${c.size}</td><td>${n(c.score, 0)}</td>
-      <td>${c.metrics.tokens_n}</td><td>${pct(c.metrics.win_rate)}</td><td>${pct(c.metrics.rug_share)}</td><td>${pct(c.metrics.creator_linked_share)}</td><td class="${roiCls(c.metrics.roi_weighted)}">${pct(c.metrics.roi_weighted)}</td><td class="${roiCls(c.metrics.pnl_near)}">${n(c.metrics.pnl_near, 1)}</td><td>${c.metrics.last_entry_ts ? ago(Date.now() - c.metrics.last_entry_ts) + ' ago' : '–'}</td></tr>`).join('') || '<tr><td colspan="13" class="muted">no groups yet</td></tr>'}</table></section>`;
+  return `<div class="card"><div class="bar">${seg('groups', 'verdict', [['', 'All'], ['good', 'Good'], ['bad', 'Dangerous'], ['neutral', 'Neutral'], ['unknown', 'Unjudged']])}
+    ${sel('groups', 'sort', [['size', 'by size'], ['score', 'by score'], ['pnl', 'by P&L'], ['recent', 'most recent entry']])}${qbox('groups', 'wallet / group id / label')}<span class="spacer"></span>${pager('groups', j.total)}</div>
+    <table><tr><th>Group</th><th>Verdict</th><th>Tags</th><th class="num">Wallets</th><th>Score</th><th class="num">Tokens</th><th class="num">Win</th><th class="num">Rug</th><th class="num">Insider</th><th class="num">ROI</th><th class="num">P&amp;L N</th><th>Last entry</th></tr>
+    ${j.rows.map((c) => `<tr ${row(P.grp(c.id))}><td><span class="ent">${avatar(c.id, c.ai?.label || c.id, 28)}<span><b>${ilink(P.grp(c.id), esc(short(c.ai?.label || c.id, 32)))}</b><small class="acct">${esc(short(c.id, 24))}</small></span></span></td>
+      <td>${vb(c.verdict)}${c.verdict_source === 'ai' ? ' <span class="chip ai">AI</span>' : ''}</td><td class="wrap">${tags(c.rule?.tags)}</td><td class="num">${c.size}</td>
+      <td><span class="bar-score"><i style="width:${Math.max(0, Math.min(100, c.score || 0))}%"></i></span>${n(c.score, 0)}</td><td class="num">${c.metrics.tokens_n}</td><td class="num">${pct(c.metrics.win_rate)}</td><td class="num">${pct(c.metrics.rug_share)}</td><td class="num">${pct(c.metrics.creator_linked_share)}</td>
+      <td class="num ${roiCls(c.metrics.roi_weighted)}">${pct(c.metrics.roi_weighted)}</td><td class="num ${roiCls(c.metrics.pnl_near)}">${signed(c.metrics.pnl_near)}</td><td>${since(c.metrics.last_entry_ts)}</td></tr>`).join('') || empty(12, 'no groups yet')}</table></div>`;
 };
 
-async function openGroup(id) {
-  setUrl('/groups/' + encodeURIComponent(id));
+async function groupPage(id) {
   const [c, g] = await Promise.all([get('/api/cluster', { id }), get('/api/graph', { id })]);
-  const m = c.metrics, ai = c.ai;
-  let h = `<h2 style="color:var(--text);font-size:15px">${esc(c.id)} ${vb(c.verdict)} ${c.verdict_source === 'ai' ? '<span class="tag">by NEAR AI</span>' : '<span class="tag">by rules</span>'} ${tags(c.rule?.tags)}</h2>`;
-  h += `<p class="muted">${c.size} wallets · rule score ${n(c.rule?.score, 0)} (${esc(c.rule?.verdict)}) · updated ${when(c.updated_ts)}</p>`;
+  const m = c.metrics || {}, ai = c.ai, label = ai?.label || (c.rule?.tags || [])[0] || c.id;
+  let h = `<div class="card">${crumbs([['Groups', '/groups'], [short(label, 40)]])}
+    <div class="dh-main">${avatar(c.id, label, 54)}<div style="min-width:0"><h1>${esc(label)} ${vb(c.verdict)} ${c.verdict_source === 'ai' ? '<span class="chip ai">by NEAR AI</span>' : '<span class="chip">by rules</span>'}</h1>
+      <div class="meta"><span class="acct">${esc(c.id)}</span><span>${c.size} wallets</span><span>rule score ${n(c.rule?.score, 0)} (${esc(c.rule?.verdict)})</span><span>updated ${since(c.updated_ts)}</span>${tags(c.rule?.tags)}</div></div></div>
+    <div class="tiles">${tile('Judged tokens', m.tokens_n ?? '–', `${m.entries_n ?? '–'} entries`)}${tile('Win rate', pct(m.win_rate), `loss rate ${pct(m.loss_rate)}`, (m.win_rate ?? 0) >= 0.5 ? 'g' : '')}${tile('P&L', signed(m.pnl_near) + ' N', `${n(m.total_buy_near, 1)} N bought`, roiCls(m.pnl_near))}
+      ${tile('Weighted ROI', pct(m.roi_weighted), `median token ${pct(m.median_token_roi)}`, roiCls(m.roi_weighted))}${tile('Rugged tokens', pct(m.rug_share), `${m.rug_tokens_n ?? 0} tokens · win in rugs ${pct(m.win_rate_in_rugs)}`, (m.rug_share ?? 0) >= 0.4 ? 'r' : '')}
+      ${tile('Creator-linked', pct(m.creator_linked_share), null, (m.creator_linked_share ?? 0) > 0.1 ? 'r' : '')}${tile('Avg entry delay', n(m.avg_delay_s, 0) + ' s', `first-5 share ${pct(m.first_movers_share)}`)}${tile('Fresh / synced', `${pct(m.fresh_share)} / ${pct(m.sync_share)}`, 'wallets < 3 d / synchronised buys')}</div></div>`;
   if (ai) h += `<div class="ai"><b>${esc(ai.label || 'AI review')}</b> · ${vb(ai.verdict)} confidence ${n(ai.confidence)} · ${esc(ai.archetype)} · advice <b>${esc(ai.follow_advice)}</b> <span class="muted">(${esc(ai.model)}, ${when(ai.ts)})</span>
-      <p>${esc(ai.summary)}</p>${(ai.reasons || []).length ? '<ul class="flags">' + ai.reasons.map((x) => `<li>${esc(x)}</li>`).join('') + '</ul>' : ''}${(ai.red_flags || []).length ? '<p class="a">Caution</p><ul class="flags">' + ai.red_flags.map((x) => `<li>${esc(x)}</li>`).join('') + '</ul>' : ''}</div>`;
-  else h += '<p class="muted">No NEAR AI review yet (needs NEAR_AI_API_KEY and at least the minimum number of judged tokens).</p>';
-  h += '<h3>Track record</h3><table>' + [
-    ['Judged tokens', m.tokens_n], ['Entries', m.entries_n], ['Total bought', n(m.total_buy_near, 1) + ' N'], ['P&L (mark-to-market)', n(m.pnl_near, 1) + ' N'], ['Weighted ROI', pct(m.roi_weighted)], ['Median token ROI', pct(m.median_token_roi)],
-    ['Win rate (tokens)', pct(m.win_rate)], ['Loss rate (≤ -50%)', pct(m.loss_rate)], ['Rugged tokens', `${m.rug_tokens_n} (${pct(m.rug_share)})`], ['Win rate inside rugs', pct(m.win_rate_in_rugs)], ['P&L inside rugs', n(m.pnl_in_rugs, 1) + ' N'],
-    ['Creator-linked entries', pct(m.creator_linked_share)], ['Fresh wallets (<3 d)', pct(m.fresh_share)], ['Synchronised buys', pct(m.sync_share)], ['Avg entry delay', n(m.avg_delay_s, 0) + ' s'], ['First-5 buyer share', pct(m.first_movers_share)],
-  ].map(([k, v]) => `<tr><td class="muted">${k}</td><td>${v}</td></tr>`).join('') + '</table>';
-  h += '<h3>Funding & money-flow graph</h3>' + graphSvg(g) + '<div class="legend muted"><span style="color:#0284c7">● member wallet</span><span style="color:#d97706">● funder / anchor</span><span style="color:#64788f">● exchange / relayer / other</span><span style="color:#16a34a">— funded by</span><span style="color:#ef4444">— NEAR sent to</span></div>';
-  h += '<h3>Why these wallets are one group</h3><table><tr><th>Link</th><th>Anchor</th><th>Wallets</th></tr>' + (c.links || []).slice(0, 40).map((l) => `<tr><td>${esc(l.type)}</td><td>${acct(l.anchor, 40)}</td><td>${l.wallets.length}</td></tr>`).join('') + '</table>';
-  h += '<h3>Wallets</h3><table><tr><th>Wallet</th><th>Funded by</th><th>Kind</th><th>Age</th><th>Txs</th><th>Tokens</th><th>Win</th><th>ROI</th><th>P&amp;L N</th></tr>' + c.wallets.map((w) => `<tr class="click" data-id="${esc(w.id)}" onclick="openWallet(this.dataset.id)"><td>${acct(w.id, 24)}</td><td>${acct(w.funder, 20)} <span class="muted">${esc(w.funder_kind || '')}</span></td><td>${esc(w.kind || '')}</td><td>${w.created_ts ? ago(Date.now() - w.created_ts) : '–'}</td><td>${w.tx_count ?? '–'}</td><td>${w.stats?.tokens_n ?? '–'}</td><td>${pct(w.stats?.win_rate)}</td><td class="${roiCls(w.stats?.roi_weighted)}">${pct(w.stats?.roi_weighted)}</td><td class="${roiCls(w.stats?.pnl_near)}">${n(w.stats?.pnl_near, 1)}</td></tr>`).join('') + '</table>';
-  h += '<h3>Tokens the group bought early</h3><table><tr><th>Live</th><th>Token</th><th>Wallets</th><th>Bought N</th><th>ROI</th><th>P&amp;L N</th><th>Peak x</th><th>Rug</th><th>Insider</th><th>1st buy</th></tr>' + (c.tokens || []).map((t) => `<tr class="click" data-id="${esc(t.token)}" onclick="openToken(this.dataset.id)"><td>${when(t.live_ts)}</td><td><b>${esc(t.symbol || '')}</b> ${tokLink(t.token, t.launchpad, 22)}</td><td>${t.wallets}</td><td>${n(t.buy_near, 1)}</td><td class="${roiCls(t.roi)}">${pct(t.roi)}</td><td class="${roiCls(t.pnl_near)}">${n(t.pnl_near, 1)}</td><td>${n(t.peak_multiple, 1)}</td><td class="${t.rugged ? 'r' : 'muted'}">${t.rugged ? 'RUG' : '–'}</td><td>${t.insider_wallets || '–'}</td><td>${t.first_delay_s}s</td></tr>`).join('') + '</table>';
-  if ((c.history || []).length) h += '<h3>Verdict history</h3><table><tr><th>When</th><th>Verdict</th><th>Score</th><th>AI</th><th>Tokens</th></tr>' + c.history.map((x) => `<tr><td>${when(x.ts)}</td><td>${vb(x.verdict)}</td><td>${n(x.score, 0)}</td><td>${x.ai_verdict ? esc(x.ai_verdict) + ' ' + n(x.ai_confidence) : '–'}</td><td>${x.tokens_n ?? '–'}</td></tr>`).join('') + '</table>';
-  openDrawer(h);
+      <p>${esc(ai.summary)}</p>${(ai.reasons || []).length ? '<ul class="flags">' + ai.reasons.map((x) => `<li>${esc(x)}</li>`).join('') + '</ul>' : ''}${(ai.red_flags || []).length ? '<p class="a"><b>Caution</b></p><ul class="flags">' + ai.red_flags.map((x) => `<li>${esc(x)}</li>`).join('') + '</ul>' : ''}</div>`;
+  else h += '<div class="card muted">No NEAR AI review yet (needs NEAR_AI_API_KEY and at least the minimum number of judged tokens).</div>';
+  h += `<div class="card"><h2>Tokens the group bought early <span class="muted">${(c.tokens || []).length}</span></h2><table><tr><th>Token</th><th>Live</th><th class="num">Wallets</th><th class="num">Bought N</th><th class="num">ROI</th><th class="num">P&amp;L N</th><th class="num">Peak</th><th>Rug</th><th class="num">Insider</th><th class="num">1st buy</th></tr>
+    ${(c.tokens || []).map((t) => `<tr ${row(P.tok(t.token))}><td>${tokCell(t.token, t.symbol, t.launchpad, 22)}</td><td>${when(t.live_ts)}</td><td class="num">${t.wallets}</td><td class="num">${n(t.buy_near, 1)}</td><td class="num ${roiCls(t.roi)}">${pct(t.roi)}</td><td class="num ${roiCls(t.pnl_near)}">${signed(t.pnl_near)}</td><td class="num">x${n(t.peak_multiple, 1)}</td><td class="${t.rugged ? 'r' : 'muted'}">${t.rugged ? 'RUG' : '–'}</td><td class="num">${t.insider_wallets || '–'}</td><td class="num">${t.first_delay_s}s</td></tr>`).join('') || empty(10, 'none')}</table></div>`;
+  h += `<div class="card"><h2>Member wallets <span class="muted">${c.wallets.length}</span></h2><table><tr><th>Wallet</th><th>Funded by</th><th>Kind</th><th class="num">Age</th><th class="num">Txs</th><th class="num">Tokens</th><th class="num">Win</th><th class="num">ROI</th><th class="num">P&amp;L N</th></tr>
+    ${c.wallets.map((w) => `<tr ${row(P.wal(w.id))}><td>${walLink(w.id)}</td><td>${acct(w.funder, 20)} <span class="muted">${esc(w.funder_kind || '')}</span></td><td>${esc(w.kind || '')}</td><td class="num">${w.created_ts ? ago(Date.now() - w.created_ts) : '–'}</td><td class="num">${w.tx_count ?? '–'}</td><td class="num">${w.stats?.tokens_n ?? '–'}</td><td class="num">${pct(w.stats?.win_rate)}</td><td class="num ${roiCls(w.stats?.roi_weighted)}">${pct(w.stats?.roi_weighted)}</td><td class="num ${roiCls(w.stats?.pnl_near)}">${signed(w.stats?.pnl_near)}</td></tr>`).join('')}</table></div>`;
+  h += `<div class="card"><h2>Funding &amp; money-flow graph</h2>${graphSvg(g)}<div class="legend"><span><span class="lg-dot" style="background:var(--accent)"></span>member wallet</span><span><span class="lg-dot neutral"></span>funder / anchor</span><span><span class="lg-dot unknown"></span>exchange / relayer / other</span><span class="g">— funded by</span><span class="r">— NEAR sent to</span></div></div>`;
+  h += `<div class="grid2"><div class="card"><h2>Why these wallets are one group</h2><table><tr><th>Link</th><th>Anchor</th><th class="num">Wallets</th></tr>${(c.links || []).slice(0, 40).map((l) => `<tr><td><span class="chip">${esc(l.type)}</span></td><td>${ACCT_RE.test(l.anchor || '') ? ilink(P.ent(l.anchor), esc(short(l.anchor, 36)), l.anchor) + ' ' + ext(nbAddr(l.anchor), '↗') : esc(short(l.anchor, 36))}</td><td class="num">${l.wallets.length}</td></tr>`).join('') || empty(3, 'no links recorded')}</table></div>`;
+  h += `<div class="card"><h2>Verdict history</h2><table><tr><th>When</th><th>Verdict</th><th class="num">Score</th><th>AI</th><th class="num">Tokens</th></tr>${(c.history || []).map((x) => `<tr><td>${when(x.ts)}</td><td>${vb(x.verdict)}</td><td class="num">${n(x.score, 0)}</td><td>${x.ai_verdict ? esc(x.ai_verdict) + ' ' + n(x.ai_confidence) : '–'}</td><td class="num">${x.tokens_n ?? '–'}</td></tr>`).join('') || empty(5, 'no history yet')}</table></div></div>`;
+  return h;
 }
 
 // Layered picture: funders on top, member wallets in the middle, destinations of NEAR at the bottom.
@@ -250,77 +480,132 @@ function graphSvg(g) {
   for (const e of flow) { const d = nodes.get(e.to); if (d && d.level == null) d.level = 1; }
   for (const x of nodes.values()) if (x.level == null) x.level = -1;
   const levels = [...new Set([...nodes.values()].map((x) => x.level))].sort((a, b) => a - b);
-  const W = 820, rowH = 110, H = levels.length * rowH + 30;
+  const W = 1000, rowH = 110, H = levels.length * rowH + 30;
   const pos = new Map();
-  levels.forEach((lv, li) => { const row = [...nodes.values()].filter((x) => x.level === lv); row.forEach((x, i) => pos.set(x.id, { x: 20 + ((i + 0.5) * (W - 40)) / row.length, y: 30 + li * rowH })); });
-  const color = (x) => (x.member ? '#0284c7' : x.kind === 'wallet' || x.kind == null ? '#f59e0b' : '#94a3b8');
-  const edgeSvg = g.edges.map((e) => { const a = pos.get(e.from), b = pos.get(e.to); if (!a || !b) return ''; const col = e.type === 'fund' ? '#16a34a' : '#ef4444';
-    return `<path d="M${a.x},${a.y} C${a.x},${(a.y + b.y) / 2} ${b.x},${(a.y + b.y) / 2} ${b.x},${b.y}" fill="none" stroke="${col}" stroke-opacity=".5" stroke-width="${Math.min(3, 0.6 + Math.log10(1 + (e.near || 0)))}"><title>${esc(e.type)} ${esc(short(e.from, 20))} → ${esc(short(e.to, 20))} ${n(e.near, 2)} N</title></path>`; }).join('');
-  const nodeSvg = [...nodes.values()].map((x) => { const p = pos.get(x.id); return `<a href="${NB}/address/${encodeURIComponent(x.id)}" target="_blank" rel="noopener" style="cursor:pointer"><g><circle cx="${p.x}" cy="${p.y}" r="${x.member ? 7 : 5}" fill="${color(x)}"><title>${esc(x.id)}${x.kind ? ' · ' + esc(x.kind) : ''}${x.tx_count != null ? ' · ' + x.tx_count + ' txs' : ''}</title></circle>${nodes.size <= 40 ? `<text x="${p.x}" y="${p.y + 18}" fill="#64788f" font-size="9" text-anchor="middle">${esc(short(x.id, 14))}</text>` : ''}</g></a>`; }).join('');
+  levels.forEach((lv, li) => { const r = [...nodes.values()].filter((x) => x.level === lv); r.forEach((x, i) => pos.set(x.id, { x: 20 + ((i + 0.5) * (W - 40)) / r.length, y: 30 + li * rowH })); });
+  const color = (x) => (x.member ? 'var(--accent)' : x.kind === 'wallet' || x.kind == null ? 'var(--neutral)' : 'var(--unknown)');
+  const edgeSvg = g.edges.map((e) => { const a = pos.get(e.from), b = pos.get(e.to); if (!a || !b) return ''; const col = e.type === 'fund' ? 'var(--good)' : 'var(--bad)';
+    return `<path d="M${a.x},${a.y} C${a.x},${(a.y + b.y) / 2} ${b.x},${(a.y + b.y) / 2} ${b.x},${b.y}" fill="none" style="stroke:${col}" stroke-opacity=".5" stroke-width="${Math.min(3, 0.6 + Math.log10(1 + (e.near || 0)))}"><title>${esc(e.type)} ${esc(short(e.from, 20))} → ${esc(short(e.to, 20))} ${n(e.near, 2)} N</title></path>`; }).join('');
+  const nodeSvg = [...nodes.values()].map((x) => { const p = pos.get(x.id), href = x.member ? P.wal(x.id) : P.ent(x.id);
+    return `<a href="${esc(href)}" onclick="return navA(event,this)"><g><circle cx="${p.x}" cy="${p.y}" r="${x.member ? 7 : 5}" style="fill:${color(x)}"><title>${esc(x.id)}${x.kind ? ' · ' + esc(x.kind) : ''}${x.tx_count != null ? ' · ' + x.tx_count + ' txs' : ''}</title></circle>${nodes.size <= 40 ? `<text x="${p.x}" y="${p.y + 18}" style="fill:var(--muted)" font-size="9" text-anchor="middle">${esc(short(x.id, 14))}</text>` : ''}</g></a>`; }).join('');
   return `<svg class="graph" viewBox="0 0 ${W} ${H}">${edgeSvg}${nodeSvg}</svg>`;
 }
 
-// ------------------------------------------------------------------ contract audit
+views.wallets = async () => {
+  const S = ST.wallets, j = await get('/api/wallets', { q: S.q, verdict: S.verdict, sort: S.sort, limit: 50, offset: S.offset });
+  return `<div class="card"><div class="bar">${seg('wallets', 'verdict', [['', 'All'], ['good', 'Good group'], ['bad', 'Dangerous group'], ['neutral', 'Neutral'], ['unknown', 'Unjudged']])}
+    ${sel('wallets', 'sort', [['tokens', 'by tokens'], ['pnl', 'by P&L'], ['roi', 'by ROI'], ['recent', 'newest']])}${qbox('wallets', 'wallet contains…')}<span class="spacer"></span>${pager('wallets', j.total)}</div>
+    <table><tr><th>Wallet</th><th>Group</th><th>Funded by</th><th class="num">Age</th><th class="num">Txs</th><th class="num">Tokens</th><th class="num">Win</th><th class="num">ROI</th><th class="num">P&amp;L N</th><th class="num">Rug</th></tr>
+    ${j.rows.map((w) => `<tr ${row(P.wal(w.id))}><td><span class="ent">${avatar(w.id, w.id, 26)}<span>${walLink(w.id, 28)}</span></span></td><td>${w.cluster_id ? vb(w.cluster_verdict) + ' ' + ilink(P.grp(w.cluster_id), `<span class="acct">${esc(short(w.cluster_id, 18))}</span>`) : '<span class="muted">unlinked</span>'}</td>
+      <td>${acct(w.funder, 18)} <span class="muted">${esc(w.funder_kind || '')}</span></td><td class="num">${w.created_ts ? ago(Date.now() - w.created_ts) : '–'}</td><td class="num">${w.tx_count ?? '–'}</td><td class="num">${w.stats?.tokens_n ?? '–'}</td><td class="num">${pct(w.stats?.win_rate)}</td>
+      <td class="num ${roiCls(w.stats?.roi_weighted)}">${pct(w.stats?.roi_weighted)}</td><td class="num ${roiCls(w.stats?.pnl_near)}">${signed(w.stats?.pnl_near)}</td><td class="num">${pct(w.stats?.rug_share)}</td></tr>`).join('') || empty(10, 'no wallets')}</table></div>`;
+};
+
+async function walletPage(id) {
+  const w = await get('/api/wallet', { id }), s = w.stats || {}, c = w.cluster;
+  let h = `<div class="card">${crumbs([['Wallets', '/wallets'], [short(w.id, 40)]])}
+    <div class="dh-main">${avatar(w.id, w.id, 54)}<div style="min-width:0"><h1 class="acct">${esc(w.id)}</h1>
+      <div class="meta">${w.kind ? `<span class="chip">${esc(w.kind)}</span>` : ''}<span>${w.tx_count ?? '–'} txs</span><span>created ${when(w.created_ts)}</span>${ext(nbAddr(w.id), 'NearBlocks ↗')}</div></div></div>
+    ${c ? `<div class="banner ${esc(c.verdict)}" ${row(P.grp(c.id))}>${vb(c.verdict)}<div style="flex:1;min-width:0"><b>Member of ${esc(c.ai?.label || c.id)}</b><div class="muted small">${c.size} wallets linked by funding / money flow · score ${n(c.score, 0)} ${tags(c.rule?.tags)}</div></div>${ilink(P.grp(c.id), 'Open group →')}</div>`
+      : '<div class="banner"><span class="v solo">unlinked</span><span class="muted">Not linked to any other early wallet yet.</span></div>'}
+    <div class="tiles">${tile('Tokens bought early', s.tokens_n ?? '–', `${s.entries_n ?? '–'} entries`)}${tile('Win rate', pct(s.win_rate), null, (s.win_rate ?? 0) >= 0.5 ? 'g' : '')}${tile('Weighted ROI', pct(s.roi_weighted), null, roiCls(s.roi_weighted))}
+      ${tile('P&L', signed(s.pnl_near) + ' N', `${n(s.total_buy_near, 1)} N bought`, roiCls(s.pnl_near))}${tile('Rugged tokens', pct(s.rug_share), null, (s.rug_share ?? 0) >= 0.4 ? 'r' : '')}${tile('Main funder', w.funder ? esc(short(w.funder, 20)) : '–', esc(w.funder_kind || ''))}</div></div>`;
+  h += `<div class="card"><h2>Early entries <span class="muted">${w.entries.length}</span></h2><table><tr><th>Token</th><th>Bought</th><th>Tx</th><th class="num">Rank</th><th class="num">Delay</th><th class="num">NEAR in</th><th class="num">ROI 1h</th><th class="num">ROI 6h</th><th class="num">ROI 24h</th><th class="num">Now</th><th>Rug</th></tr>
+    ${w.entries.map((e) => `<tr ${row(P.tok(e.token))}><td>${tokCell(e.token, e.symbol, e.launchpad, 22)}${e.is_creator ? ' <span class="v bad">creator</span>' : ''}</td><td>${when(e.first_buy_ts)}</td><td>${txl(e.first_buy_hash)}</td><td class="num">#${e.rank}</td><td class="num">${e.delay_s}s</td><td class="num">${n(e.buy_near, 1)}</td>
+      ${['60', '360', '1440'].map((k) => `<td class="num ${roiCls(e.roi?.[k])}">${pct(e.roi?.[k])}</td>`).join('')}<td class="num ${roiCls(e.roi_now)}">${pct(e.roi_now)}</td><td class="${e.rugged ? 'r' : 'muted'}">${e.rugged ? 'RUG' : '–'}</td></tr>`).join('') || empty(11, 'none')}</table></div>`;
+  h += `<div class="grid2"><div class="card"><h2>Who funded it <span class="muted">first meaningful inflows, earliest first</span></h2><table><tr><th>Account</th><th>Kind</th><th class="num">NEAR</th><th>When</th><th>Tx</th><th>Via</th></tr>
+    ${(w.funders || []).map((f) => `<tr ${row(P.ent(f.account))}><td>${nb(f.account)}</td><td>${esc(f.kind)}${f.creator_only ? ' <span class="chip">creator only</span>' : ''}</td><td class="num">${n(f.near, 2)}</td><td>${when(f.ts)}</td><td>${txl(f.hash)}</td><td>${esc(f.via || 'transfer')}</td></tr>`).join('') || empty(6, 'not profiled yet')}</table></div>
+    <div class="card"><h2>Funding chain</h2><table><tr><th class="num">Hop</th><th>Account</th><th>Kind</th><th class="num">NEAR</th><th class="num">Txs</th></tr>
+    ${(w.chain || []).map((x) => `<tr ${row(P.ent(x.account))}><td class="num">${x.hop}</td><td>${nb(x.account)}</td><td>${esc(x.kind)}</td><td class="num">${n(x.near, 2)}</td><td class="num">${x.tx_count ?? '–'}</td></tr>`).join('') || empty(5, 'none')}</table></div></div>`;
+  h += `<div class="card"><h2>Where its NEAR went <span class="muted">recent outflows</span></h2><table><tr><th>To</th><th class="num">NEAR</th><th class="num">Transfers</th><th>Last</th></tr>
+    ${(w.flow_out || []).map((f) => `<tr ${row(P.ent(f.to))}><td>${nb(f.to)}</td><td class="num">${n(f.near, 2)}</td><td class="num">${f.n}</td><td>${when(f.last_ts)}</td></tr>`).join('') || empty(4, 'none recorded')}</table></div>`;
+  return h;
+}
+
+views.entities = async () => {
+  const S = ST.entities, j = await get('/api/entities', { type: S.type, q: S.q, sort: S.sort, limit: 50, offset: S.offset });
+  return `<div class="card"><div class="bar">${sel('entities', 'type', [['', 'all types'], ...['exchange', 'service', 'bridge', 'wallet', 'other', 'unknown'].map((v) => [v, v])])}
+    ${sel('entities', 'sort', [['funded', 'by wallets funded'], ['near', 'by NEAR funded'], ['sink', 'by NEAR received'], ['tokens', 'by tokens'], ['pnl', 'by funded P&L']])}${qbox('entities', 'account / label')}
+    <span class="muted small">${j.types.map((t) => esc(t.type) + ' ' + t.n).join(' · ')}</span><span class="spacer"></span>${pager('entities', j.total)}</div>
+    <table><tr><th>Entity</th><th>Type</th><th>Roles</th><th class="num">Txs</th><th class="num">Funded</th><th class="num">NEAR funded</th><th>Their groups</th><th class="num">Tokens</th><th class="num">Funded P&amp;L N</th><th class="num">NEAR received</th></tr>
+    ${j.rows.map((e) => `<tr ${row(P.ent(e.id))}><td><span class="ent">${avatar(e.id, e.label || e.id, 26)}<span><b>${ilink(P.ent(e.id), esc(short(e.label || e.id, 28)))}</b><small>${acct(e.id, 26)}</small></span></span></td><td><span class="chip">${esc(e.type)}</span></td><td class="wrap">${tags(e.roles)}</td><td class="num">${e.tx_count ?? '–'}</td><td class="num">${e.funded_n || '–'}</td><td class="num">${e.funded_near ? n(e.funded_near, 0) : '–'}</td>
+      <td>${e.funded_n ? `<span class="g">${e.funded_verdicts.good}</span> / <span class="r">${e.funded_verdicts.bad}</span> / <span class="a">${e.funded_verdicts.neutral}</span> / <span class="muted">${e.funded_verdicts.unknown + e.funded_verdicts.solo}</span>` : '–'}</td><td class="num">${e.tokens_n || '–'}</td><td class="num ${roiCls(e.funded_pnl_near)}">${e.funded_n ? signed(e.funded_pnl_near) : '–'}</td><td class="num">${e.sink_near ? n(e.sink_near, 0) + ' (' + e.sink_senders_n + ' w)' : '–'}</td></tr>`).join('') || empty(10, 'no entities yet')}</table>
+    <p class="muted small">"Their groups" = funded early wallets whose group is good / dangerous / neutral / unknown-or-unlinked.</p></div>`;
+};
+
+async function entityPage(id) {
+  const e = await get('/api/entity', { id }), v = e.funded_verdicts || {};
+  let h = `<div class="card">${crumbs([['Funders & entities', '/entities'], [short(e.label || e.id, 40)]])}
+    <div class="dh-main">${avatar(e.id, e.label || e.id, 54)}<div style="min-width:0"><h1>${esc(e.label || e.id)} <span class="chip">${esc(e.type)}</span>${tags(e.roles)}</h1>
+      <div class="meta"><span class="acct">${esc(e.id)}</span><span>kind ${esc(e.kind)}</span><span>${e.tx_count ?? '–'} txs</span>${e.label_source ? `<span>label from ${esc(e.label_source)}</span>` : ''}${ACCT_RE.test(e.id) ? ext(nbAddr(e.id), 'NearBlocks ↗') : ''}</div></div></div>`;
+  if (e.funded_n) h += `<div class="tiles">${tile('Early wallets funded', e.funded_n, `${n(e.funded_near, 0)} N sent`)}${tile('Tokens they bought', e.tokens_n ?? '–')}${tile('Their P&L', signed(e.funded_pnl_near) + ' N', pct(e.funded_roi), roiCls(e.funded_pnl_near))}${tile('Winning wallets', `${e.funded_winners}/${e.funded_judged}`)}
+    ${tile('Groups', `<span class="g">${v.good}</span> / <span class="r">${v.bad}</span> / <span class="a">${v.neutral}</span>`, `${(v.unknown || 0) + (v.solo || 0)} unknown or unlinked`)}</div>`;
+  h += '</div>';
+  if (e.type === 'exchange') h += '<div class="card warn">An exchange wallet funds many unrelated customers, so funding from it links nothing by itself. The numbers show how much early-market flow came out of it.</div>';
+  if (e.funded_wallets?.length) h += `<div class="card"><h2>Early wallets it funded</h2><table><tr><th>Wallet</th><th class="num">NEAR</th><th class="num">Hop</th><th>When</th><th>Tx</th><th>Via</th><th>Group</th></tr>${e.funded_wallets.map((f) => `<tr ${row(P.wal(f.wallet))}><td>${walLink(f.wallet, 26)}</td><td class="num">${n(f.near, 2)}</td><td class="num">${f.hop}</td><td>${when(f.ts)}</td><td>${txl(f.hash)}</td><td>${esc(f.via || 'transfer')}</td><td>${f.cluster_id ? vb(f.verdict) + ' ' + ilink(P.grp(f.cluster_id), esc(short(f.cluster_id, 20))) : '<span class="muted">unlinked</span>'}</td></tr>`).join('')}</table></div>`;
+  if (e.sink_wallets?.length) h += `<div class="card"><h2>Early wallets that sent NEAR to it <span class="muted">${n(e.sink_near, 0)} N</span></h2><table><tr><th>Wallet</th><th class="num">NEAR</th><th class="num">Transfers</th></tr>${e.sink_wallets.map((f) => `<tr ${row(P.wal(f.wallet))}><td>${walLink(f.wallet, 26)}</td><td class="num">${n(f.near, 2)}</td><td class="num">${f.n}</td></tr>`).join('')}</table></div>`;
+  h += `<p class="muted small">Name this account: <code>node src/cli.js label ${esc(e.id)} "Binance"  exchange</code></p>`;
+  return h;
+}
+
+// ================================================================== SCANNER
 const LV = { low: 'good', medium: 'neutral', high: 'bad', critical: 'bad', unrated: 'unknown', high_trust: 'good' };
 const CAT = { critical: 'Critical', ownership: 'Ownership & control', trading: 'Trading', liquidity: 'Liquidity', trust: 'Trust signals' };
 const gauge = (label, score, level, kind) => {
   const v = score ?? 0, col = kind === 'risk' ? (v >= 70 ? '#dc2626' : v >= 45 ? '#ea580c' : v >= 20 ? '#d97706' : '#16a34a') : (v >= 70 ? '#16a34a' : v >= 40 ? '#0ea5e9' : v >= 15 ? '#d97706' : '#94a3b8');
-  return `<div class="kpi"><span>${label}</span><b style="color:${col}">${score ?? '–'}<span class="muted" style="font-size:13px;font-weight:500"> / 100 · ${esc(level || '–')}</span></b><div style="height:7px;border-radius:5px;background:#e6f1fb;margin-top:8px;overflow:hidden"><div style="height:100%;width:${v}%;background:${col}"></div></div></div>`;
+  return `<div class="tile"><span>${label}</span><b style="color:${col}">${score ?? '–'}<span class="muted" style="font-size:13px;font-weight:500"> / 100 · ${esc(level || '–')}</span></b><div style="height:6px;border-radius:5px;background:var(--line-2);margin-top:8px;overflow:hidden"><div style="height:100%;width:${v}%;background:${col}"></div></div></div>`;
 };
 function auditBody(a) {
-  if (a.error) return `<section class="r">${esc(a.error)}</section>`;
-  if (a.notFound) return `<section class="a">${esc(a.address)}: there is no contract deployed on this account (a plain wallet), nothing to audit.</section>`;
+  if (a.error) return `<div class="card err">${esc(a.error)}</div>`;
+  if (a.notFound) return `<div class="card warn">${esc(a.address)}: there is no contract deployed on this account (a plain wallet), nothing to audit.</div>`;
   const sum = a.summary || {};
-  let h = `<section><div class="bar"><h2 style="margin:0">${esc(a.address)}${a.tokenSymbol ? ' · ' + esc(a.tokenSymbol) : ''} <span class="tag">${esc(a.kind)}</span></h2><span class="muted">audited ${when(a.fetchedAt)}${a.cached ? ' (cached ≤ 1 h)' : ''}</span><button onclick="runAudit('${esc(a.address)}',true)">Re-run</button></div>
-    <div class="grid">${gauge('Risk score (higher = riskier)', a.risk.score, a.risk.level, 'risk')}${gauge('Trust score', a.trust.score, a.trust.level, 'trust')}
-    <div class="kpi"><span>Full-access keys</span><b>${sum.full_access_keys ?? '–'}</b></div><div class="kpi"><span>Confirmed malicious findings</span><b class="${(sum.confirmed_malicious || []).length ? 'r' : 'g'}">${(sum.confirmed_malicious || []).length}</b></div>
-    <div class="kpi"><span>Recent sells</span><b>${sum.sells ? sum.sells.ok + ' ok / ' + sum.sells.failed + ' failed' : '–'}</b></div></div>`;
+  let h = `<div class="card"><div class="bar"><h2 style="margin:0">${esc(a.address)}${a.tokenSymbol ? ' · ' + esc(a.tokenSymbol) : ''} <span class="chip">${esc(a.kind)}</span></h2><span class="muted">audited ${when(a.fetchedAt)}${a.cached ? ' (cached ≤ 1 h)' : ''}</span>${a.kind === 'token' ? ilink(P.tok(a.address), 'Token page →') : ''}<span class="spacer"></span><button onclick="runAudit('${esc(a.address)}',true)">Re-run</button></div>
+    <div class="tiles">${gauge('Risk score (higher = riskier)', a.risk.score, a.risk.level, 'risk')}${gauge('Trust score', a.trust.score, a.trust.level, 'trust')}
+    ${tile('Full-access keys', sum.full_access_keys ?? '–')}${tile('Confirmed malicious findings', (sum.confirmed_malicious || []).length, null, (sum.confirmed_malicious || []).length ? 'r' : 'g')}${tile('Recent sells', sum.sells ? sum.sells.ok + ' ok / ' + sum.sells.failed + ' failed' : '–')}</div>`;
   if ((sum.confirmed_malicious || []).length) h += `<p class="r"><b>Confirmed:</b> ${sum.confirmed_malicious.map((c) => esc(c.key) + (c.detail ? ' (' + esc(c.detail) + ')' : '')).join(' · ')}</p>`;
-  h += '</section>';
+  h += '</div>';
   const all = [...a.risk.factors, ...a.trust.factors.filter((f) => !a.risk.factors.some((x) => x.key === f.key))];
   const groups = {};
   for (const f of all) (groups[f.category] ||= []).push(f);
-  h += '<section><h2>Checklist <span class="muted">every criterion that was evaluated, not only the ones that tripped</span></h2><table><tr><th>Result</th><th>Check</th><th>Weight</th><th>Detail</th></tr>' +
-    ['critical', 'ownership', 'trading', 'liquidity', 'trust'].filter((c) => groups[c]).map((c) => `<tr><td colspan="4" style="background:var(--primary-50);font-weight:700;color:var(--primary-700)">${CAT[c]}</td></tr>` + groups[c].map((f) => `<tr><td>${f.category === 'trust' ? (f.hit ? '<span class="v good">earned</span>' : '<span class="v unknown">not earned</span>') : f.hit ? (f.weight > 0 ? '<span class="v bad">hit</span>' : '<span class="v unknown">note</span>') : '<span class="v good">pass</span>'}</td><td class="wrap">${esc(f.label)}</td><td class="${f.hit && f.weight > 0 ? 'r' : 'muted'}">${f.weight > 0 ? '+' : ''}${f.weight}</td><td class="wrap muted">${esc(f.detail || '')}</td></tr>`).join('')).join('') + '</table></section>';
+  h += '<div class="card"><h2>Checklist <span class="muted">every criterion that was evaluated, not only the ones that tripped</span></h2><table><tr><th>Result</th><th>Check</th><th class="num">Weight</th><th>Detail</th></tr>' +
+    ['critical', 'ownership', 'trading', 'liquidity', 'trust'].filter((c) => groups[c]).map((c) => `<tr><td colspan="4" style="background:var(--panel-2);font-weight:700;color:var(--muted);font-size:11px;letter-spacing:.7px;text-transform:uppercase">${CAT[c]}</td></tr>` + groups[c].map((f) => `<tr><td>${f.category === 'trust' ? (f.hit ? '<span class="v good">earned</span>' : '<span class="v unknown">not earned</span>') : f.hit ? (f.weight > 0 ? '<span class="v bad">hit</span>' : '<span class="v unknown">note</span>') : '<span class="v good">pass</span>'}</td><td class="wrap">${esc(f.label)}</td><td class="num ${f.hit && f.weight > 0 ? 'r' : 'muted'}">${f.weight > 0 ? '+' : ''}${f.weight}</td><td class="wrap muted">${esc(f.detail || '')}</td></tr>`).join('')).join('') + '</table></div>';
   const code = a.raw?.code;
-  if (code) h += `<section><h2>Code <span class="muted">${code.exports.length} exported functions</span></h2>${code.fakeStorage.length ? `<p class="r">Fake storage methods: ${code.fakeStorage.map(esc).join(', ')}</p>` : ''}${(code.privilegedNames || []).length ? `<p class="a">Privileged methods: ${code.privilegedNames.map(esc).join(', ')}</p>` : ''}${code.nonStandard.length ? `<p>Non-standard methods: ${code.nonStandard.map(esc).join(', ')}</p>` : '<p class="muted">No methods outside the standards.</p>'}</section>`;
-  if (a.raw?.tax) h += `<section><h2>Launchpad tax</h2><pre>${esc(JSON.stringify(a.raw.tax, null, 1))}</pre></section>`;
+  if (code) h += `<div class="card"><h2>Code <span class="muted">${code.exports.length} exported functions</span></h2>${code.fakeStorage.length ? `<p class="r">Fake storage methods: ${code.fakeStorage.map(esc).join(', ')}</p>` : ''}${(code.privilegedNames || []).length ? `<p class="a">Privileged methods: ${code.privilegedNames.map(esc).join(', ')}</p>` : ''}${code.nonStandard.length ? `<p>Non-standard methods: ${code.nonStandard.map(esc).join(', ')}</p>` : '<p class="muted">No methods outside the standards.</p>'}</div>`;
+  if (a.raw?.tax) h += `<div class="card"><h2>Launchpad tax</h2><pre>${esc(JSON.stringify(a.raw.tax, null, 1))}</pre></div>`;
   return h;
 }
 async function runAudit(address, force) {
   address = (address || '').trim();
-  if (!address) return;
-  $('auditResult').innerHTML = '<section class="muted">Auditing ' + esc(address) + ' … reading keys, code and recent transactions (10-30 s on a fresh contract)</section>';
-  setUrl('/audit/' + encodeURIComponent(address));
+  if (!address || !$('auditResult')) return;
+  $('auditResult').innerHTML = '<div class="card muted">Auditing ' + esc(address) + ' … reading keys, code and recent transactions (10-30 s on a fresh contract)</div>';
+  setUrl(P.audit(address));
   const a = await get('/api/audit', { address, force: force ? '1' : '' }).catch((e) => ({ error: e.message }));
   $('auditResult').innerHTML = auditBody(a);
   $('auditInput').value = address;
 }
 views.audit = async () => {
   const recent = await get('/api/audits', { limit: 25 });
-  return `<section><div class="bar"><h2 style="margin:0">Audit a NEAR contract</h2>
-      <input id="auditInput" type="search" style="min-width:380px" placeholder="token or contract account, e.g. doge.neardogecoin.near" onkeydown="if(event.key==='Enter')runAudit(this.value)"><button onclick="runAudit($('auditInput').value)">Audit</button></div>
-      <p class="muted" style="margin:0">Checks access keys (a full-access key can redeploy or drain the contract), WASM exports (fake NEP-145 storage methods are the classic honeypot backdoor, privileged methods), the launchpad buy/sell tax and recent sell behaviour. Tokens are also audited automatically when the scanner checks them, and a confirmed finding fails the <code>contract_audit_ok</code> gate.</p></section>
+  return `<div class="card"><div class="bar"><input id="auditInput" type="search" style="flex:1;max-width:520px" placeholder="token or contract account, e.g. doge.neardogecoin.near" onkeydown="if(event.key==='Enter')runAudit(this.value)"><button class="primary" onclick="runAudit($('auditInput').value)">Audit</button></div>
+      <p class="muted" style="margin:0">Checks access keys (a full-access key can redeploy or drain the contract), WASM exports (fake NEP-145 storage methods are the classic honeypot backdoor, privileged methods), the launchpad buy/sell tax and recent sell behaviour. Tokens are also audited automatically when the scanner checks them, and a confirmed finding fails the <code>contract_audit_ok</code> gate.</p></div>
     <div id="auditResult"></div>
-    <section><h2>Recent audits</h2><table><tr><th>When</th><th>Account</th><th>Kind</th><th>Risk</th><th>Trust</th></tr>${recent.rows.map((r) => `<tr class="click" data-id="${esc(r.id)}" onclick="runAudit(this.dataset.id)"><td>${when(r.fetchedAt)}</td><td>${r.kind === 'token' ? tokLink(r.id, null, 34) : acct(r.id, 34)} ${r.tokenSymbol ? '<b>' + esc(r.tokenSymbol) + '</b>' : ''}</td><td>${esc(r.kind)}</td><td>${r.notFound ? '<span class="muted">no contract</span>' : `<span class="v ${LV[r.risk.level] || 'unknown'}">${r.risk.score} · ${esc(r.risk.level)}</span>`}</td><td>${r.notFound ? '–' : `<span class="v ${r.trust.level === 'high' ? 'good' : r.trust.level === 'unrated' ? 'unknown' : 'neutral'}">${r.trust.score} · ${esc(r.trust.level)}</span>`}</td></tr>`).join('') || '<tr><td colspan="5" class="muted">none yet</td></tr>'}</table></section>`;
+    <div class="card"><h2>Recent audits</h2><table><tr><th>When</th><th>Account</th><th>Kind</th><th>Risk</th><th>Trust</th></tr>${recent.rows.map((r) => `<tr data-id="${esc(r.id)}" data-href="" onclick="runAudit(this.dataset.id)"><td>${when(r.fetchedAt)}</td><td>${r.kind === 'token' ? tokCell(r.id, r.tokenSymbol, null, 34) : acct(r.id, 34)}</td><td>${esc(r.kind)}</td><td>${r.notFound ? '<span class="muted">no contract</span>' : `<span class="v ${LV[r.risk.level] || 'unknown'}">${r.risk.score} · ${esc(r.risk.level)}</span>`}</td><td>${r.notFound ? '–' : `<span class="v ${r.trust.level === 'high' ? 'good' : r.trust.level === 'unrated' ? 'unknown' : 'neutral'}">${r.trust.score} · ${esc(r.trust.level)}</span>`}</td></tr>`).join('') || empty(5, 'none yet')}</table></div>`;
 };
 
-// ------------------------------------------------------------------ scanner monitor
 const lineSvg = (pts, { fmt = (v) => n(v, 2), base = null } = {}) => {
   if (pts.length < 2) return '<p class="muted">not enough data points yet (a point is stored every 5 minutes while the worker runs)</p>';
-  const W = 820, H = 110, xs = pts.map((p) => p.x), ys = pts.map((p) => p.y);
+  const W = 1000, H = 120, xs = pts.map((p) => p.x), ys = pts.map((p) => p.y);
   const x0 = Math.min(...xs), x1 = Math.max(...xs), lo = Math.min(...ys, base ?? Infinity), hi = Math.max(...ys, base ?? -Infinity);
   const sx = (x) => 8 + ((x - x0) / (x1 - x0 || 1)) * (W - 16), sy = (y) => H - 10 - ((y - lo) / (hi - lo || 1)) * (H - 20);
   const d = pts.map((p, i) => `${i ? 'L' : 'M'}${sx(p.x).toFixed(1)},${sy(p.y).toFixed(1)}`).join('');
-  const b = base != null ? `<line x1="0" x2="${W}" y1="${sy(base)}" y2="${sy(base)}" stroke="#bcd3ea" stroke-dasharray="4 4"/>` : '';
-  return `<svg class="graph" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="height:110px">${b}<path d="${d}" fill="none" stroke="#0ea5e9" stroke-width="2" stroke-linejoin="round"/></svg><div class="muted" style="display:flex;justify-content:space-between"><span>${esc(when(x0))}</span><span>min ${fmt(lo)} · max ${fmt(hi)}</span><span>${esc(when(x1))}</span></div>`;
+  const b = base != null ? `<line x1="0" x2="${W}" y1="${sy(base)}" y2="${sy(base)}" style="stroke:var(--faint)" stroke-dasharray="4 4"/>` : '';
+  return `<svg class="graph" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="height:120px">${b}<path d="${d}L${sx(x1)},${H}L${sx(x0)},${H}Z" style="fill:var(--accent-soft)"/><path d="${d}" fill="none" style="stroke:var(--accent)" stroke-width="2" stroke-linejoin="round"/></svg><div class="muted small" style="display:flex;justify-content:space-between;margin-top:4px"><span>${esc(when(x0))}</span><span>min ${fmt(lo)} · max ${fmt(hi)}</span><span>${esc(when(x1))}</span></div>`;
 };
 const scanState = (t, scanCfg) => {
   if (t.status === 'skipped_quote') return '<span class="muted">skipped (quote not tradable)</span>';
   const s = t.scan;
   if (s?.stale) return '<span class="muted">stale</span>';
   if (s?.error) return '<span class="r">error</span>';
-  if (s?.score != null) return s.bought ? '<span class="g"><b>BOUGHT (sim)</b></span>' : s.pass ? '<span class="a">gates PASS, no buy</span>' : '<span class="r">gates FAIL</span>';
+  if (s?.score != null) return s.bought ? '<span class="v good">bought (sim)</span>' : s.pass ? '<span class="v neutral">pass, no buy</span>' : '<span class="v bad">gates fail</span>';
   const minAge = Math.max(scanCfg.observeSeconds, t.launchpad === 'justhoot' ? scanCfg.justhootMinAgeSeconds : 0) * 1000;
   const left = minAge - (Date.now() - t.live_ts);
   return left > 0 ? `<span class="b">observing, check in ${ago(left)}</span>` : '<span class="b">checking…</span>';
@@ -328,245 +613,191 @@ const scanState = (t, scanCfg) => {
 
 views.monitor = async () => {
   const m = await get('/api/monitor');
-  const W = m.window24h, w = m.worker;
-  $('status').textContent = `worker ${w ? ago(m.now - w.ts) + ' ago' : 'not seen'} · AI ${m.ai.enabled ? (m.ai.ok === false ? 'error' : m.ai.model) : 'off'}`;
-  const kpi = (l, v, c = '') => `<div class="kpi"><span class="muted">${l}</span><b class="${c}">${v}</b></div>`;
-  return `<section><div class="grid">${kpi('Launches (24 h)', W.launches)}${kpi('Checked', W.scanned)}${kpi('Passed the gates', W.passed, 'a')}${kpi('Bought (simulated)', W.bought, 'g')}${kpi('Launches (3 h)', m.launchesLast3h)}</div></section>
-  <section><h2>Launchpad polling</h2><table><tr><th>Launchpad</th><th>Last poll</th><th>Status</th></tr>${m.polls.map((p) => `<tr><td>${esc(p.launchpad)}</td><td>${p.ts ? ago(m.now - p.ts) + ' ago' : '–'}</td><td class="${p.ok === false ? 'r' : 'g'}">${p.ok === false ? esc(p.error || 'failed') : p.ts ? 'ok' : '–'}</td></tr>`).join('')}</table></section>
-  <section><h2>Latest launches <span class="muted">· first check ${m.scan.observeSeconds}s after the pool opens (justhoot ${m.scan.justhootMinAgeSeconds}s) · click a row</span></h2><table>
-    <tr><th>Live</th><th>Symbol</th><th>Token</th><th>Pad</th><th>Age</th><th>State</th><th>Score</th><th>Gate fail</th><th>Decision</th><th>Early</th><th>Peak x</th><th>Now x</th></tr>
-    ${m.rows.map((t) => `<tr class="click" data-id="${esc(t.scan?.id || '')}" data-tok="${esc(t.id)}" onclick="this.dataset.id ? openScan(this.dataset.id) : openToken(this.dataset.tok)"><td>${when(t.live_ts)}</td><td><b>${esc(t.symbol || '')}</b></td><td>${tokLink(t.id, t.launchpad, 28)}</td><td>${esc(t.launchpad)}</td><td>${ago(m.now - t.live_ts)}</td>
-      <td>${scanState(t, m.scan)}</td><td class="${t.scan?.score == null ? 'muted' : 'b'}">${t.scan?.score ?? '–'}</td><td class="r wrap">${esc((t.scan?.failed || []).join(', '))}</td><td class="wrap muted">${esc(t.scan?.decision || '')}</td><td>${t.entries_n ?? '–'}</td><td>${n(t.peak_multiple, 1)}</td><td>${n(t.last_multiple, 1)}${t.rugged ? ' <span class="r">RUG</span>' : ''}</td></tr>`).join('')}</table></section>`;
+  const W = m.window24h;
+  setStatus(m.worker, m.now, m.ai);
+  return `<div class="card"><div class="tiles">${tile('Launches (24 h)', W.launches)}${tile('Checked', W.scanned)}${tile('Passed the gates', W.passed, null, 'a')}${tile('Bought (simulated)', W.bought, null, 'g')}${tile('Launches (3 h)', m.launchesLast3h)}
+    ${m.polls.map((p) => tile(esc(p.launchpad), p.ts ? ago(m.now - p.ts) + ' ago' : '–', p.ok === false ? esc(short(p.error || 'failed', 30)) : 'last poll ok', p.ok === false ? 'r' : '')).join('')}</div></div>
+  <div class="card"><h2>Latest launches <span class="muted">first check ${m.scan.observeSeconds}s after the pool opens (justhoot ${m.scan.justhootMinAgeSeconds}s) · click a row for the evaluation</span></h2><table>
+    <tr><th>Token</th><th>Pad</th><th>Age</th><th>State</th><th class="num">Score</th><th>Gate fail</th><th>Decision</th><th class="num">Early</th><th class="num">Peak</th><th class="num">Now</th></tr>
+    ${m.rows.map((t) => `<tr ${row(t.scan?.id ? P.scan(t.scan.id) : P.tok(t.id))}><td>${tokCell(t.id, t.symbol, t.launchpad)}</td><td>${esc(t.launchpad)}</td><td>${ago(m.now - t.live_ts)}</td>
+      <td>${scanState(t, m.scan)}</td><td class="num ${t.scan?.score == null ? 'muted' : 'b'}">${t.scan?.score ?? '–'}</td><td class="r wrap small">${esc((t.scan?.failed || []).join(', '))}</td><td class="wrap muted small">${esc(t.scan?.decision || '')}</td><td class="num">${t.entries_n ?? '–'}</td><td class="num">x${n(t.peak_multiple, 1)}</td><td class="num">x${n(t.last_multiple, 1)}${t.rugged ? ' <span class="r">RUG</span>' : ''}</td></tr>`).join('') || empty(10, 'no launches yet')}</table></div>`;
 };
 
-// ------------------------------------------------------------------ simulated investing
 const simAct = async (id, percent) => {
   if (!confirm(`Simulated sale of ${percent}% of this position (paper money). Continue?`)) return;
   const r = await fetch('/api/sim/sell', { method: 'POST', headers: { 'content-type': 'application/json', 'x-tracker': '1' }, body: JSON.stringify({ id, percent }) });
   const j = await r.json();
-  alert(j.status === 'sold' || j.status === 'closed' ? `Simulated sale done: ${n(j.near, 3)} NEAR` : `Not sold: ${j.reason || j.status}`);
+  alert(j.status === 'sold' || j.status === 'closed' ? `Simulated sale done: ${n(j.near, 3)} NEAR` : `Not sold: ${j.reason || j.error || j.status}`);
   render();
 };
 views.sim = async () => {
   const [o, op, cl] = await Promise.all([get('/api/sim/overview'), get('/api/sim/positions', { status: 'open' }), get('/api/sim/positions', { status: 'closed' })]);
   const a = o.account; if (Math.abs(o.pnl_near) < 1e-9) o.pnl_near = 0; const pnlCls = o.pnl_near >= 0 ? 'g' : 'r'; // no "-0" from rounding noise
-  const kpi = (l, v, c = '') => `<div class="kpi"><span class="muted">${l}</span><b class="${c}">${v}</b></div>`;
   const sum = (rows, f) => rows.reduce((t, p) => t + (f(p) || 0), 0);
   const closedPnl = sum(cl.rows, (p) => (p.realized_near || 0) - (p.cost_near || 0));
-  return `<section><div class="grid">${kpi('Equity', n(o.equity, 2) + ' N', pnlCls)}${kpi('P&L', (o.pnl_near >= 0 ? '+' : '') + n(o.pnl_near, 2) + ' N (' + pct(o.pnl_pct, 1) + ')', pnlCls)}${kpi('Cash', n(a.cash_near, 2) + ' N')}${kpi('Open value', n(o.open_value, 2) + ' N')}${kpi('Realized', n(a.realized_near, 2) + ' N')}${kpi('Open / closed', o.open_n + ' / ' + o.closed_n)}${kpi('Buys today', o.buys_today + ' / ' + o.limits.maxBuysPerDay)}</div>
-    <p class="muted">Simulated wallet: started with ${n(a.start_near, 0)} NEAR on ${when(a.created_ts)}. Paper money only: buys and sells are priced with the pool's on-chain quote (price impact and pool fee included), the token's own tax and ${n(0.01 * 100, 0)}% extra slippage; nothing is sent to the chain. Size ${o.limits.buyNear} N (${o.limits.highRiskBuyNear} N when the AI rates the risk high), exposure cap ${o.limits.maxOpenCostNear} N, reserve ${o.limits.minReserveNear} N.</p></section>
-  <section><h2>Equity curve</h2>${lineSvg(o.equity_series.map((e) => ({ x: e.ts, y: e.equity })), { fmt: (v) => n(v, 2) + ' N', base: a.start_near })}</section>
-  <section><h2>Open positions <span class="muted">(${op.rows.length}) · click a row for fills and reviews</span></h2><table><tr><th>Opened</th><th>Token</th><th>Pad</th><th>Cost N</th><th>Value N</th><th>ROI</th><th>Realized N</th><th>AI</th><th>Take profit</th><th>Sell (simulated)</th></tr>
-    ${op.rows.map((p) => `<tr class="click" data-id="${esc(p.id)}" onclick="openSimPosition(this.dataset.id)"><td>${when(p.opened_ts)}</td><td><b>${esc(p.symbol || '')}</b> ${tokLink(p.token, p.launchpad, 22)}</td><td>${esc(p.launchpad)}</td><td>${n(p.cost_near)}</td><td>${n(p.value_near, 3)}</td><td class="${roiCls(p.roi)}"><b>${pct(p.roi)}</b></td><td>${n(p.realized_near, 3)}</td>
-      <td class="muted">${p.ai ? esc(p.ai.action) + ' ' + n(p.ai.confidence) + ' ' + esc(p.ai.risk_level) : 'rules'}</td><td class="${p.take_profit ? 'g' : 'muted'}">${p.take_profit ? 'took ' + n(p.take_profit.near, 2) + ' N' : 'waiting for ROI > ' + (o.limits ? '300%' : '')}</td>
-      <td onclick="event.stopPropagation()">${[25, 50, 100].map((x) => `<button data-id="${esc(p.id)}" onclick="simAct(this.dataset.id,${x})">${x === 100 ? 'All' : x + '%'}</button>`).join(' ')}</td></tr>`).join('') || '<tr><td colspan="10" class="muted">no open positions</td></tr>'}</table></section>
-  <section><h2>Closed positions <span class="muted">(${cl.rows.length}) · cost ${n(sum(cl.rows, (p) => p.cost_near))} N · proceeds ${n(sum(cl.rows, (p) => p.realized_near), 2)} N · P&amp;L <span class="${roiCls(closedPnl)}">${n(closedPnl, 2)} N</span></span></h2><table><tr><th>Opened</th><th>Closed</th><th>Token</th><th>Pad</th><th>Cost N</th><th>Proceeds N</th><th>P&amp;L N</th><th>ROI</th><th>Exit</th></tr>
-    ${cl.rows.map((p) => { const pnl = (p.realized_near || 0) - (p.cost_near || 0), roi = p.cost_near ? pnl / p.cost_near : null; return `<tr class="click" data-id="${esc(p.id)}" onclick="openSimPosition(this.dataset.id)"><td>${when(p.opened_ts)}</td><td>${when(p.exit?.ts)}</td><td><b>${esc(p.symbol || '')}</b> ${tokLink(p.token, p.launchpad, 22)}</td><td>${esc(p.launchpad)}</td><td>${n(p.cost_near)}</td><td>${n(p.realized_near, 3)}</td><td class="${roiCls(pnl)}">${pnl >= 0 ? '+' : ''}${n(pnl, 3)}</td><td class="${roiCls(roi)}"><b>${pct(roi)}</b></td><td class="muted wrap">${esc(p.exit?.reason || '')}</td></tr>`; }).join('') || '<tr><td colspan="9" class="muted">no closed positions</td></tr>'}</table></section>`;
+  return `<div class="card"><div class="tiles">${tile('Equity', n(o.equity, 2) + ' N', null, pnlCls)}${tile('P&L', signed(o.pnl_near, 2) + ' N', pct(o.pnl_pct, 1), pnlCls)}${tile('Cash', n(a.cash_near, 2) + ' N')}${tile('Open value', n(o.open_value, 2) + ' N')}${tile('Realized', n(a.realized_near, 2) + ' N')}${tile('Open / closed', o.open_n + ' / ' + o.closed_n)}${tile('Buys today', o.buys_today + ' / ' + o.limits.maxBuysPerDay)}</div>
+    <p class="muted small" style="margin-bottom:0">Simulated wallet: started with ${n(a.start_near, 0)} NEAR on ${when(a.created_ts)}. Paper money only: buys and sells are priced with the pool's on-chain quote (price impact and pool fee included), the token's own tax and 1% extra slippage; nothing is sent to the chain. Size ${o.limits.buyNear} N (${o.limits.highRiskBuyNear} N when the AI rates the risk high), exposure cap ${o.limits.maxOpenCostNear} N, reserve ${o.limits.minReserveNear} N.</p></div>
+  <div class="card"><h2>Equity curve</h2>${lineSvg(o.equity_series.map((e) => ({ x: e.ts, y: e.equity })), { fmt: (v) => n(v, 2) + ' N', base: a.start_near })}</div>
+  <div class="card"><h2>Open positions <span class="muted">${op.rows.length} · click a row for fills and reviews</span></h2><table><tr><th>Token</th><th>Opened</th><th class="num">Cost N</th><th class="num">Value N</th><th class="num">ROI</th><th class="num">Realized N</th><th>AI</th><th>Take profit</th><th>Sell (simulated)</th></tr>
+    ${op.rows.map((p) => `<tr ${row(P.sim(p.id))}><td>${tokCell(p.token, p.symbol, p.launchpad, 22)}</td><td>${when(p.opened_ts)}</td><td class="num">${n(p.cost_near)}</td><td class="num">${n(p.value_near, 3)}</td><td class="num ${roiCls(p.roi)}"><b>${pct(p.roi)}</b></td><td class="num">${n(p.realized_near, 3)}</td>
+      <td class="muted">${p.ai ? esc(p.ai.action) + ' ' + n(p.ai.confidence) + ' ' + esc(p.ai.risk_level) : 'rules'}</td><td class="${p.take_profit ? 'g' : 'muted'}">${p.take_profit ? 'took ' + n(p.take_profit.near, 2) + ' N' : 'waiting'}</td>
+      <td onclick="event.stopPropagation()">${[25, 50, 100].map((x) => `<button data-id="${esc(p.id)}" onclick="simAct(this.dataset.id,${x})">${x === 100 ? 'All' : x + '%'}</button>`).join(' ')}</td></tr>`).join('') || empty(9, 'no open positions')}</table></div>
+  <div class="card"><h2>Closed positions <span class="muted">${cl.rows.length} · cost ${n(sum(cl.rows, (p) => p.cost_near))} N · proceeds ${n(sum(cl.rows, (p) => p.realized_near), 2)} N · P&amp;L <span class="${roiCls(closedPnl)}">${signed(closedPnl, 2)} N</span></span></h2><table><tr><th>Token</th><th>Opened</th><th>Closed</th><th class="num">Cost N</th><th class="num">Proceeds N</th><th class="num">P&amp;L N</th><th class="num">ROI</th><th>Exit</th></tr>
+    ${cl.rows.map((p) => { const pnl = (p.realized_near || 0) - (p.cost_near || 0), roi = p.cost_near ? pnl / p.cost_near : null; return `<tr ${row(P.sim(p.id))}><td>${tokCell(p.token, p.symbol, p.launchpad, 22)}</td><td>${when(p.opened_ts)}</td><td>${when(p.exit?.ts)}</td><td class="num">${n(p.cost_near)}</td><td class="num">${n(p.realized_near, 3)}</td><td class="num ${roiCls(pnl)}">${signed(pnl, 3)}</td><td class="num ${roiCls(roi)}"><b>${pct(roi)}</b></td><td class="muted wrap small">${esc(p.exit?.reason || '')}</td></tr>`; }).join('') || empty(8, 'no closed positions')}</table></div>`;
 };
 
-async function openSimPosition(id) {
-  setUrl('/sim/' + encodeURIComponent(id));
+async function simPage(id) {
   const p = await get('/api/sim/position', { id });
-  let h = `<h2 style="color:var(--text);font-size:15px">${esc(p.symbol || '')} · simulated position ${p.status === 'open' ? '<span class="v neutral">open</span>' : '<span class="v unknown">closed</span>'}</h2><p>${tokLink(p.token, p.launchpad)} · opened ${when(p.opened_ts)} · ${esc(p.origin || '')} · route ${esc(p.route || '')}</p>`;
-  h += `<p>cost ${n(p.cost_near)} N · value ${n(p.value_near, 3)} N · ROI <b class="${roiCls(p.roi)}">${pct(p.roi)}</b> · realized ${n(p.realized_near, 3)} N · held ${n(p.held_tokens, 0)} tokens${p.exit ? ' · exit: ' + esc(p.exit.reason) : ''}</p>`;
-  if (p.ai) h += `<p class="muted">AI at entry: ${esc(p.ai.action)} ${n(p.ai.confidence)} · risk ${esc(p.ai.risk_level)} · rule score ${p.score ?? '–'} · ${esc(p.size_reason || '')}</p>`;
-  h += '<h3>Fills</h3><table><tr><th>When</th><th>Side</th><th>NEAR</th><th>Tokens</th><th>Reason</th></tr>' + p.fills.map((f) => `<tr><td>${when(f.ts)}</td><td class="${f.side === 'buy' ? 'g' : 'r'}">${f.side}</td><td>${n(f.near, 3)}</td><td>${n(f.tokens, 0)}</td><td class="wrap muted">${esc(f.reason || '')}</td></tr>`).join('') + '</table>';
-  h += '<h3>Reviews of this token</h3><table><tr><th>When</th><th>Kind</th><th>Score</th><th>Rules</th><th>AI</th><th>Decision</th></tr>' + p.scans.map((s) => `<tr class="click" data-id="${esc(s.id)}" onclick="openScan(this.dataset.id)"><td>${when(s.ts)}</td><td>${esc(s.kind)}${s.kind === 'followup' ? ' +' + s.minutes + 'm' : ''}</td><td class="b">${s.score}</td><td class="${s.pass ? 'g' : 'r'}">${s.pass ? 'pass' : 'fail'}</td><td>${s.ai ? esc(s.ai.action) + ' ' + n(s.ai.confidence) : '–'}</td><td class="wrap muted">${esc(s.decision || '')}</td></tr>`).join('') + '</table>';
-  openDrawer(h);
+  let h = `<div class="card">${crumbs([['Simulated wallet', '/sim'], [p.symbol || short(p.token, 20)]])}
+    <div class="dh-main">${avatar(p.token, p.symbol, 48)}<div><h1>${esc(p.symbol || '')} · simulated position ${p.status === 'open' ? '<span class="v neutral">open</span>' : '<span class="v unknown">closed</span>'}</h1>
+    <div class="meta">${ilink(P.tok(p.token), 'Token page →')}${ext(tokUrl(p.token, p.launchpad), 'Launchpad ↗')}<span>opened ${when(p.opened_ts)}</span><span>${esc(p.origin || '')}</span><span>route ${esc(p.route || '')}</span></div></div></div>
+    <div class="tiles">${tile('Cost', n(p.cost_near) + ' N')}${tile('Value', n(p.value_near, 3) + ' N')}${tile('ROI', pct(p.roi), null, roiCls(p.roi))}${tile('Realized', n(p.realized_near, 3) + ' N')}${tile('Held tokens', n(p.held_tokens, 0))}${p.exit ? tile('Exit', esc(p.exit.reason)) : ''}</div>
+    ${p.ai ? `<p class="muted small" style="margin-bottom:0">AI at entry: ${esc(p.ai.action)} ${n(p.ai.confidence)} · risk ${esc(p.ai.risk_level)} · rule score ${p.score ?? '–'} · ${esc(p.size_reason || '')}</p>` : ''}</div>`;
+  h += `<div class="grid2"><div class="card"><h2>Fills</h2><table><tr><th>When</th><th>Side</th><th class="num">NEAR</th><th class="num">Tokens</th><th>Reason</th></tr>${p.fills.map((f) => `<tr><td>${when(f.ts)}</td><td class="${f.side === 'buy' ? 'g' : 'r'}">${f.side}</td><td class="num">${n(f.near, 3)}</td><td class="num">${n(f.tokens, 0)}</td><td class="wrap muted small">${esc(f.reason || '')}</td></tr>`).join('')}</table></div>
+    <div class="card"><h2>Reviews of this token</h2><table><tr><th>When</th><th>Kind</th><th class="num">Score</th><th>Rules</th><th>AI</th><th>Decision</th></tr>${p.scans.map((s) => `<tr ${row(P.scan(s.id))}><td>${when(s.ts)}</td><td>${esc(s.kind)}${s.kind === 'followup' ? ' +' + s.minutes + 'm' : ''}</td><td class="num b">${s.score}</td><td class="${s.pass ? 'g' : 'r'}">${s.pass ? 'pass' : 'fail'}</td><td>${s.ai ? esc(s.ai.action) + ' ' + n(s.ai.confidence) : '–'}</td><td class="wrap muted small">${esc(s.decision || '')}</td></tr>`).join('')}</table></div></div>`;
+  return h;
 }
 
-// ------------------------------------------------------------------ evaluations (every gate check + AI review)
 views.scans = async () => {
   const S = ST.scans, j = await get('/api/scans', { kind: S.kind, pass: S.pass, bought: S.bought, q: S.q, limit: 50, offset: S.offset });
-  const sel = (k, v, l) => `<option value="${v}" ${S[k] === v ? 'selected' : ''}>${l}</option>`;
-  return `<section><div class="bar"><h2 style="margin:0">Evaluations</h2><span class="muted">every gate check and AI analyst review</span>
-    <select onchange="ST.scans.kind=this.value;ST.scans.offset=0;render()">${sel('kind', '', 'all kinds')}${sel('kind', 'first', 'first check')}${sel('kind', 'followup', 'follow-up')}</select>
-    <select onchange="ST.scans.pass=this.value;ST.scans.offset=0;render()">${sel('pass', '', 'pass + fail')}${sel('pass', '1', 'gates pass')}${sel('pass', '0', 'gates fail')}</select>
-    <select onchange="ST.scans.bought=this.value;ST.scans.offset=0;render()">${sel('bought', '', 'all')}${sel('bought', '1', 'bought only')}</select>
-    <input id="sq" type="search" placeholder="symbol / token" value="${esc(S.q)}" onkeydown="if(event.key==='Enter'){ST.scans.q=this.value;ST.scans.offset=0;render()}">
-    <span class="muted">${n(j.total, 0)} rows</span><button ${S.offset ? '' : 'disabled'} onclick="ST.scans.offset=Math.max(0,ST.scans.offset-50);render()">◀</button><button ${S.offset + 50 < j.total ? '' : 'disabled'} onclick="ST.scans.offset+=50;render()">▶</button></div>
-    <table><tr><th>At</th><th>Symbol</th><th>Kind</th><th>Score</th><th>Gates</th><th>Gate fail</th><th>AI</th><th>Decision</th><th>Trade</th></tr>
-    ${j.rows.map((s) => `<tr class="click" data-id="${esc(s.id)}" onclick="openScan(this.dataset.id)"><td>${when(s.ts)}</td><td><b>${ext(tokUrl(s.token, s.launchpad), s.symbol || short(s.token, 14), s.token)}</b> <span class="muted">${esc(s.launchpad || '')}</span></td><td>${esc(s.kind)}${s.kind === 'followup' ? ' +' + s.minutes + 'm' : ''}</td><td class="b">${s.score}</td><td class="${s.pass ? 'g' : 'r'}">${s.pass ? 'pass' : 'fail'}</td>
-      <td class="r wrap">${esc((s.failed || []).map((g) => g.id).join(', '))}</td><td>${s.ai ? esc(s.ai.action) + ' ' + n(s.ai.confidence) + ' <span class="muted">' + esc(s.ai.risk_level) + '</span>' : '–'}</td><td class="wrap muted">${esc(s.decision || '')}</td><td class="${s.trade?.status === 'bought' ? 'g' : 'muted'}">${s.trade ? esc(s.trade.status) + (s.trade.near ? ' ' + s.trade.near + ' N' : '') : ''}</td></tr>`).join('') || '<tr><td colspan="9" class="muted">no evaluations yet: tokens are checked a couple of minutes after their pool opens</td></tr>'}</table></section>`;
+  return `<div class="card"><div class="bar">${seg('scans', 'pass', [['', 'All'], ['1', 'Gates pass'], ['0', 'Gates fail']])}${sel('scans', 'kind', [['', 'all kinds'], ['first', 'first check'], ['followup', 'follow-up']])}${sel('scans', 'bought', [['', 'all'], ['1', 'bought only']])}
+    ${qbox('scans', 'symbol / token')}<span class="spacer"></span>${pager('scans', j.total)}</div>
+    <table><tr><th>Token</th><th>At</th><th>Kind</th><th class="num">Score</th><th>Gates</th><th>Gate fail</th><th>AI</th><th>Decision</th><th>Trade</th></tr>
+    ${j.rows.map((s) => `<tr ${row(P.scan(s.id))}><td>${tokCell(s.token, s.symbol, s.launchpad, 22)}</td><td>${when(s.ts)}</td><td>${esc(s.kind)}${s.kind === 'followup' ? ' +' + s.minutes + 'm' : ''}</td><td class="num b">${s.score}</td><td>${s.pass ? '<span class="v good">pass</span>' : '<span class="v bad">fail</span>'}</td>
+      <td class="r wrap small">${esc((s.failed || []).map((g) => g.id).join(', '))}</td><td>${s.ai ? esc(s.ai.action) + ' ' + n(s.ai.confidence) + ' <span class="muted">' + esc(s.ai.risk_level) + '</span>' : '–'}</td><td class="wrap muted small">${esc(s.decision || '')}</td><td class="${s.trade?.status === 'bought' ? 'g' : 'muted'}">${s.trade ? esc(s.trade.status) + (s.trade.near ? ' ' + s.trade.near + ' N' : '') : ''}</td></tr>`).join('') || empty(9, 'no evaluations yet: tokens are checked a couple of minutes after their pool opens')}</table></div>`;
 };
 
-async function openScan(id) {
-  setUrl('/scans/' + encodeURIComponent(id));
+async function scanPage(id) {
   const s = await get('/api/scan', { id }), f = s.features || {}, ai = s.ai;
-  let h = `<h2 style="color:var(--text);font-size:15px">${esc(s.symbol || '')} · ${esc(s.kind)}${s.kind === 'followup' ? ' +' + s.minutes + ' min' : ''} · score <span class="b">${s.score}</span> · gates <span class="${s.pass ? 'g' : 'r'}">${s.pass ? 'PASS' : 'FAIL'}</span></h2><p>${tokLink(s.token, s.launchpad)} · ${when(s.ts)} · ${esc(s.decision || '')}</p>`;
+  let h = `<div class="card">${crumbs([['Evaluations', '/scans'], [`${s.symbol || short(s.token, 20)} · ${s.kind}`]])}
+    <div class="dh-main">${avatar(s.token, s.symbol, 48)}<div><h1>${esc(s.symbol || '')} · ${esc(s.kind)}${s.kind === 'followup' ? ' +' + s.minutes + ' min' : ''} ${s.pass ? '<span class="v good">gates pass</span>' : '<span class="v bad">gates fail</span>'}</h1>
+    <div class="meta">${ilink(P.tok(s.token), 'Token page →')}${ext(tokUrl(s.token, s.launchpad), 'Launchpad ↗')}<span>${when(s.ts)}</span><span>score <b class="b">${s.score}</b></span><span>${esc(s.decision || '')}</span></div></div></div>`;
   if (s.trade) h += `<p>Simulated trade: <b class="${s.trade.status === 'bought' ? 'g' : ''}">${esc(s.trade.status)}</b> ${s.trade.near ? s.trade.near + ' N' : ''} ${esc(s.trade.reason || '')}</p>`;
   if ((s.failed || []).length) h += '<h3>Failed gates</h3><ul class="flags">' + s.failed.map((g) => `<li><span class="r">${esc(g.id)}</span> ${esc(g.why)}</li>`).join('') + '</ul>';
-  if (ai) h += `<div class="ai"><b>NEAR AI analyst</b> · ${esc(ai.action)} confidence ${n(ai.confidence)} · risk ${esc(ai.risk_level)} · quality ${ai.quality_score ?? '–'} <span class="muted">(${esc(ai.model)})</span>${(ai.reasons || []).length ? '<ul class="flags">' + ai.reasons.map((x) => `<li>${esc(x)}</li>`).join('') + '</ul>' : ''}${(ai.red_flags || []).length ? '<p class="a">Red flags</p><ul class="flags">' + ai.red_flags.map((x) => `<li>${esc(x)}</li>`).join('') + '</ul>' : ''}</div>`;
-  else h += '<p class="muted">No AI review (the gates failed, NEAR_AI_API_KEY is not set, or the call failed).</p>';
+  h += '</div>';
+  if (ai) h += `<div class="ai"><b>NEAR AI analyst</b> · ${esc(ai.action)} confidence ${n(ai.confidence)} · risk ${esc(ai.risk_level)} · quality ${ai.quality_score ?? '–'} <span class="muted">(${esc(ai.model)})</span>${(ai.reasons || []).length ? '<ul class="flags">' + ai.reasons.map((x) => `<li>${esc(x)}</li>`).join('') + '</ul>' : ''}${(ai.red_flags || []).length ? '<p class="a"><b>Red flags</b></p><ul class="flags">' + ai.red_flags.map((x) => `<li>${esc(x)}</li>`).join('') + '</ul>' : ''}</div>`;
+  else h += '<div class="card muted">No AI review (the gates failed, NEAR_AI_API_KEY is not set, or the call failed).</div>';
   const ig = f.intel?.early_buyer_groups;
-  if (ig) h += `<h3>Entity intelligence</h3><p>Early buying by group verdict: <span class="g">good ${pct(ig.good.share)} (${ig.good.wallets} w)</span> · <span class="r">dangerous ${pct(ig.bad.share)} (${ig.bad.wallets} w)</span> · bots/losers ${pct(ig.bots_losers?.share)} · neutral ${pct(ig.neutral.share)} · unknown ${pct(ig.unknown.share)} · creator's earlier rugs: ${f.intel.creator_prior_rugs_or_dumps}/${f.intel.creator_prior_launches}</p>`;
-  h += `<h3>Key numbers</h3><table>${[['Pool', n(f.pool?.nearReserve, 1) + ' N · ' + (f.pool?.quoteSymbol || '') + ' · ' + (f.pool?.route || '')], ['Market cap', '$' + n(f.market?.mcapUsd, 0)], ['Buyers / sellers', `${f.trading?.uniqueBuyers} / ${f.trading?.uniqueSellers}`], ['Bought / sold', `${n(f.trading?.buyNear, 0)} / ${n(f.trading?.sellNear, 0)} N`], ['Price vs first trade', 'x' + f.trading?.priceMultipleSinceFirstTrade], ['Linked buyer share', pct(f.wallets?.linkedBuyerShare)], ['Creator sold', f.trading?.creatorSold ? 'yes' : 'no'], ['Tax', JSON.stringify(f.launch?.tax)], ['Contract matches template', String(f.contract?.matchesTemplate)], ['Top-10 holders', pct(f.holders?.top10ShareExPool, 1)]].map(([k, v]) => `<tr><td class="muted">${k}</td><td>${esc(v)}</td></tr>`).join('')}</table>`;
-  h += `<h3>All features</h3><pre style="white-space:pre-wrap;color:var(--muted)">${esc(JSON.stringify(f, null, 1))}</pre>`;
-  openDrawer(h);
+  if (ig) {
+    h += `<div class="card"><h2>Entity intelligence <span class="muted">early buying by group verdict at the time of the check</span></h2><p class="small"><span class="g">good ${pct(ig.good.share)} (${ig.good.wallets} w)</span> · <span class="r">dangerous ${pct(ig.bad.share)} (${ig.bad.wallets} w)</span> · bots/losers ${pct(ig.bots_losers?.share)} · neutral ${pct(ig.neutral.share)} · unknown ${pct(ig.unknown.share)} · creator's earlier rugs: ${f.intel.creator_prior_rugs_or_dumps}/${f.intel.creator_prior_launches}</p></div>`;
+  }
+  h += `<div class="grid2"><div class="card"><h2>Key numbers</h2><table class="kv">${[['Pool', n(f.pool?.nearReserve, 1) + ' N · ' + (f.pool?.quoteSymbol || '') + ' · ' + (f.pool?.route || '')], ['Market cap', '$' + n(f.market?.mcapUsd, 0)], ['Buyers / sellers', `${f.trading?.uniqueBuyers} / ${f.trading?.uniqueSellers}`], ['Bought / sold', `${n(f.trading?.buyNear, 0)} / ${n(f.trading?.sellNear, 0)} N`], ['Price vs first trade', 'x' + f.trading?.priceMultipleSinceFirstTrade], ['Linked buyer share', pct(f.wallets?.linkedBuyerShare)], ['Creator sold', f.trading?.creatorSold ? 'yes' : 'no'], ['Tax', JSON.stringify(f.launch?.tax)], ['Contract matches template', String(f.contract?.matchesTemplate)], ['Top-10 holders', pct(f.holders?.top10ShareExPool, 1)]].map(([k, v]) => `<tr><td>${k}</td><td class="wrap">${esc(v)}</td></tr>`).join('')}</table></div>
+    <div class="card"><h2>All features</h2><pre style="white-space:pre-wrap;color:var(--muted);max-height:520px">${esc(JSON.stringify(f, null, 1))}</pre></div></div>`;
+  return h;
 }
 
-// ------------------------------------------------------------------ configuration (read-only)
-views.config = async () => {
-  const c = await get('/api/config');
-  const block = (title, o) => `<section><h2>${title}</h2><table>${Object.entries(o).map(([k, v]) => `<tr><td class="muted">${esc(k)}</td><td>${esc(JSON.stringify(v))}</td></tr>`).join('')}</table></section>`;
-  return `<section class="muted">Read-only view of the settings in .env (never any secret). AI: ${c.ai.enabled ? 'NEAR AI ' + esc(c.ai.model) : 'off'} · database ${esc(c.db)} · launchpads ${esc(c.launchpads.join(', '))}</section>${block('Scanner timing', c.scan)}${block('Hard gates', c.rules)}${block('AI analyst', c.analyst)}${block('Simulated wallet', c.sim)}${block('Follow-up reviews', c.followUp)}${block('Early-investor tracking', { entry: c.entry, outcome: c.outcome })}`;
-};
-
-// ------------------------------------------------------------------ entities (exchange wallets, services, funders, destinations)
-views.entities = async () => {
-  const S = ST.entities, j = await get('/api/entities', { type: S.type, q: S.q, sort: S.sort, limit: 50, offset: S.offset });
-  const sel = (k, v, l) => `<option value="${v}" ${S[k] === v ? 'selected' : ''}>${l}</option>`;
-  return `<section><div class="bar"><h2 style="margin:0">Entities</h2><span class="muted">exchange wallets, services, funders and destinations around the early investors</span>
-    <select onchange="ST.entities.type=this.value;ST.entities.offset=0;render()">${sel('type', '', 'all types')}${['exchange', 'service', 'bridge', 'wallet', 'other', 'unknown'].map((v) => sel('type', v, v)).join('')}</select>
-    <select onchange="ST.entities.sort=this.value;render()">${sel('sort', 'funded', 'by wallets funded')}${sel('sort', 'near', 'by NEAR funded')}${sel('sort', 'sink', 'by NEAR received')}${sel('sort', 'tokens', 'by tokens')}${sel('sort', 'pnl', 'by funded P&L')}</select>
-    <input id="eq" type="search" placeholder="account / label" value="${esc(S.q)}" onkeydown="if(event.key==='Enter'){ST.entities.q=this.value;ST.entities.offset=0;render()}">
-    <span class="muted">${n(j.total, 0)} entities (${j.types.map((t) => t.type + ' ' + t.n).join(' · ')})</span>
-    <button ${S.offset ? '' : 'disabled'} onclick="ST.entities.offset=Math.max(0,ST.entities.offset-50);render()">◀</button><button ${S.offset + 50 < j.total ? '' : 'disabled'} onclick="ST.entities.offset+=50;render()">▶</button></div>
-    <table><tr><th>Entity</th><th>Label</th><th>Type</th><th>Roles</th><th>Txs</th><th>Funded</th><th>NEAR funded</th><th>Their groups</th><th>Tokens</th><th>Funded P&amp;L N</th><th>NEAR received</th></tr>
-    ${j.rows.map((e) => `<tr class="click" data-id="${esc(e.id)}" onclick="openEntity(this.dataset.id)"><td>${acct(e.id, 26)}</td><td>${esc(e.label || '–')}</td><td>${esc(e.type)}</td><td>${tags(e.roles)}</td><td>${e.tx_count ?? '–'}</td><td>${e.funded_n || '–'}</td><td>${e.funded_near ? n(e.funded_near, 0) : '–'}</td>
-      <td>${e.funded_n ? `<span class="g">${e.funded_verdicts.good}</span>/<span class="r">${e.funded_verdicts.bad}</span>/<span class="a">${e.funded_verdicts.neutral}</span>/<span class="muted">${e.funded_verdicts.unknown + e.funded_verdicts.solo}</span>` : '–'}</td><td>${e.tokens_n || '–'}</td><td class="${roiCls(e.funded_pnl_near)}">${e.funded_n ? n(e.funded_pnl_near, 1) : '–'}</td><td>${e.sink_near ? n(e.sink_near, 0) + ' (' + e.sink_senders_n + ' w)' : '–'}</td></tr>`).join('') || '<tr><td colspan="11" class="muted">no entities yet</td></tr>'}</table>
-    <p class="muted">"Their groups" = funded early wallets whose group is good / bad / neutral / unknown-or-solo.</p></section>`;
-};
-
-async function openEntity(id) {
-  setUrl('/entities/' + encodeURIComponent(id));
-  const e = await get('/api/entity', { id });
-  const v = e.funded_verdicts || {};
-  let h = `<h2 style="color:var(--text);font-size:15px">${esc(e.label || short(e.id, 30))} <span class="tag">${esc(e.type)}</span> ${tags(e.roles)}</h2><p>${nb(e.id)} · kind ${esc(e.kind)} · ${e.tx_count ?? '–'} txs${e.label_source ? ' · label from ' + esc(e.label_source) : ''}</p>`;
-  if (e.type === 'exchange') h += '<p class="muted">An exchange wallet funds many unrelated customers, so funding from it links nothing by itself. The numbers below show how much early-market flow came out of it.</p>';
-  if (e.funded_n) h += `<p>Funded <b>${e.funded_n}</b> early wallets with <b>${n(e.funded_near, 0)} N</b> → they bought <b>${e.tokens_n}</b> tokens early · groups: <span class="g">${v.good} good</span> / <span class="r">${v.bad} bad</span> / <span class="a">${v.neutral} neutral</span> / ${v.unknown + v.solo} unknown or solo · funded wallets' P&amp;L <span class="${roiCls(e.funded_pnl_near)}">${n(e.funded_pnl_near, 1)} N</span> (${pct(e.funded_roi)}) · ${e.funded_winners}/${e.funded_judged} winning wallets</p>`;
-  if (e.funded_wallets?.length) h += '<h3>Early wallets it funded</h3><table><tr><th>Wallet</th><th>NEAR</th><th>Hop</th><th>When</th><th>Tx</th><th>Via</th><th>Group</th></tr>' + e.funded_wallets.map((f) => `<tr class="click" data-id="${esc(f.wallet)}" onclick="openWallet(this.dataset.id)"><td>${acct(f.wallet, 26)}</td><td>${n(f.near, 2)}</td><td>${f.hop}</td><td>${when(f.ts)}</td><td>${txl(f.hash)}</td><td>${esc(f.via || 'transfer')}</td><td>${f.cluster_id ? vb(f.verdict) + ' ' + esc(f.cluster_id) : '<span class="muted">solo</span>'}</td></tr>`).join('') + '</table>';
-  if (e.sink_wallets?.length) h += `<h3>Early wallets that sent NEAR to it (${n(e.sink_near, 0)} N)</h3><table><tr><th>Wallet</th><th>NEAR</th><th>Transfers</th></tr>` + e.sink_wallets.map((f) => `<tr class="click" data-id="${esc(f.wallet)}" onclick="openWallet(this.dataset.id)"><td>${acct(f.wallet, 26)}</td><td>${n(f.near, 2)}</td><td>${f.n}</td></tr>`).join('') + '</table>';
-  h += '<p class="muted">Name this account: <code>node src/cli.js label ' + esc(e.id) + ' "Binance"  exchange</code></p>';
-  openDrawer(h);
-}
-
-// ------------------------------------------------------------------ wallets
-views.wallets = async () => {
-  const S = ST.wallets, j = await get('/api/wallets', { q: S.q, verdict: S.verdict, sort: S.sort, limit: 50, offset: S.offset });
-  const sel = (k, v, l) => `<option value="${v}" ${S[k] === v ? 'selected' : ''}>${l}</option>`;
-  return `<section><div class="bar"><h2 style="margin:0">Early wallets</h2>
-    <input id="wq" type="search" placeholder="wallet contains…" value="${esc(S.q)}" onkeydown="if(event.key==='Enter'){ST.wallets.q=this.value;ST.wallets.offset=0;render()}">
-    <select onchange="ST.wallets.verdict=this.value;ST.wallets.offset=0;render()">${sel('verdict', '', 'all groups')}${['good', 'bad', 'neutral', 'unknown'].map((v) => sel('verdict', v, 'group ' + v)).join('')}</select>
-    <select onchange="ST.wallets.sort=this.value;render()">${sel('sort', 'tokens', 'by tokens')}${sel('sort', 'pnl', 'by P&L')}${sel('sort', 'roi', 'by ROI')}${sel('sort', 'recent', 'newest')}</select>
-    <span class="muted">${n(j.total, 0)} wallets</span>
-    <button ${S.offset ? '' : 'disabled'} onclick="ST.wallets.offset=Math.max(0,ST.wallets.offset-50);render()">◀</button><button ${S.offset + 50 < j.total ? '' : 'disabled'} onclick="ST.wallets.offset+=50;render()">▶</button></div>
-    <table><tr><th>Wallet</th><th>Group</th><th>Funded by</th><th>Age</th><th>Txs</th><th>Tokens</th><th>Win</th><th>ROI</th><th>P&amp;L N</th><th>Rug</th></tr>
-    ${j.rows.map((w) => `<tr class="click" data-id="${esc(w.id)}" onclick="openWallet(this.dataset.id)"><td>${acct(w.id, 28)}</td><td>${w.cluster_id ? vb(w.cluster_verdict) + ' ' + esc(w.cluster_id) : '<span class="muted">solo</span>'}</td><td>${acct(w.funder, 18)} <span class="muted">${esc(w.funder_kind || '')}</span></td>
-      <td>${w.created_ts ? ago(Date.now() - w.created_ts) : '–'}</td><td>${w.tx_count ?? '–'}</td><td>${w.stats?.tokens_n ?? '–'}</td><td>${pct(w.stats?.win_rate)}</td><td class="${roiCls(w.stats?.roi_weighted)}">${pct(w.stats?.roi_weighted)}</td><td class="${roiCls(w.stats?.pnl_near)}">${n(w.stats?.pnl_near, 1)}</td><td>${pct(w.stats?.rug_share)}</td></tr>`).join('')}</table></section>`;
-};
-
-async function openWallet(id) {
-  setUrl('/wallets/' + encodeURIComponent(id));
-  const w = await get('/api/wallet', { id });
-  let h = `<h2 style="color:var(--text);font-size:15px">${esc(w.id)}</h2><p>${nb(w.id)} · ${esc(w.kind || '')} · ${w.tx_count ?? '–'} txs · created ${when(w.created_ts)}</p>`;
-  if (w.cluster) h += `<p>Group <a href="/groups/${encodeURIComponent(w.cluster.id)}" onclick="openGroup('${esc(w.cluster.id)}');return false">${esc(w.cluster.id)}</a> ${vb(w.cluster.verdict)} ${esc(w.cluster.ai?.label || '')} · ${w.cluster.size} wallets ${tags(w.cluster.rule?.tags)}</p>`;
-  h += '<h3>Who funded it (first meaningful inflows, earliest first)</h3><table><tr><th>Account</th><th>Kind</th><th>NEAR</th><th>When</th><th>Tx</th><th>Via</th></tr>' + (w.funders || []).map((f) => `<tr class="click" data-id="${esc(f.account)}" onclick="openEntity(this.dataset.id)"><td>${nb(f.account)}</td><td>${esc(f.kind)}${f.creator_only ? ' <span class="tag">creator only</span>' : ''}</td><td>${n(f.near, 2)}</td><td>${when(f.ts)}</td><td>${txl(f.hash)}</td><td>${esc(f.via || 'transfer')}</td></tr>`).join('') + '</table>';
-  h += '<h3>Funding chain</h3><table><tr><th>Hop</th><th>Account</th><th>Kind</th><th>NEAR</th><th>Txs</th></tr>' + (w.chain || []).map((c) => `<tr><td>${c.hop}</td><td>${nb(c.account)}</td><td>${esc(c.kind)}</td><td>${n(c.near, 2)}</td><td>${c.tx_count ?? '–'}</td></tr>`).join('') + '</table>';
-  h += '<h3>Where its NEAR went (recent outflows)</h3><table><tr><th>To</th><th>NEAR</th><th>Transfers</th><th>Last</th></tr>' + (w.flow_out || []).map((f) => `<tr><td>${nb(f.to)}</td><td>${n(f.near, 2)}</td><td>${f.n}</td><td>${when(f.last_ts)}</td></tr>`).join('') + '</table>';
-  h += '<h3>Early entries</h3><table><tr><th>Bought</th><th>Tx</th><th>Token</th><th>Rank</th><th>Delay</th><th>NEAR in</th><th>ROI 1h</th><th>ROI 6h</th><th>ROI 24h</th><th>Now</th><th>Rug</th></tr>' + w.entries.map((e) => `<tr class="click" data-id="${esc(e.token)}" onclick="openToken(this.dataset.id)"><td>${when(e.first_buy_ts)}</td><td>${txl(e.first_buy_hash)}</td><td><b>${esc(e.symbol || '')}</b> ${tokLink(e.token, e.launchpad, 22)}${e.is_creator ? ' <span class="tag">creator</span>' : ''}</td><td>#${e.rank}</td><td>${e.delay_s}s</td><td>${n(e.buy_near, 1)}</td>
-      ${['60', '360', '1440'].map((m) => `<td class="${roiCls(e.roi?.[m])}">${pct(e.roi?.[m])}</td>`).join('')}<td class="${roiCls(e.roi_now)}">${pct(e.roi_now)}</td><td class="${e.rugged ? 'r' : 'muted'}">${e.rugged ? 'RUG' : '–'}</td></tr>`).join('') + '</table>';
-  openDrawer(h);
-}
-
-// ------------------------------------------------------------------ tokens
-views.tokens = async () => {
-  const S = ST.tokens, j = await get('/api/tokens', { q: S.q, status: S.status, rugged: S.rugged, limit: 50, offset: S.offset });
-  const sel = (k, v, l) => `<option value="${v}" ${S[k] === v ? 'selected' : ''}>${l}</option>`;
-  return `<section><div class="bar"><h2 style="margin:0">Tokens</h2>
-    <input id="tq" type="search" placeholder="symbol / token / creator" value="${esc(S.q)}" onkeydown="if(event.key==='Enter'){ST.tokens.q=this.value;ST.tokens.offset=0;render()}">
-    <select onchange="ST.tokens.status=this.value;ST.tokens.offset=0;render()">${sel('status', '', 'any status')}${['new', 'entries_open', 'tracking', 'done'].map((v) => sel('status', v, v)).join('')}</select>
-    <select onchange="ST.tokens.rugged=this.value;ST.tokens.offset=0;render()">${sel('rugged', '', 'all')}${sel('rugged', '1', 'rugged only')}</select>
-    <span class="muted">${n(j.total, 0)} tokens</span>
-    <button ${S.offset ? '' : 'disabled'} onclick="ST.tokens.offset=Math.max(0,ST.tokens.offset-50);render()">◀</button><button ${S.offset + 50 < j.total ? '' : 'disabled'} onclick="ST.tokens.offset+=50;render()">▶</button></div>
-    <table><tr><th>Live</th><th>Symbol</th><th>Token</th><th>Pad</th><th>Status</th><th>Early</th><th>Buyers</th><th>Peak x</th><th>Now x</th><th>Rug</th><th>Creator sold</th></tr>
-    ${j.rows.map((t) => `<tr class="click" data-id="${esc(t.id)}" onclick="openToken(this.dataset.id)"><td>${when(t.live_ts)}</td><td><b>${esc(t.symbol || '')}</b></td><td>${tokLink(t.id, t.launchpad, 30)}</td><td>${esc(t.launchpad)}</td><td>${esc(t.status)}</td><td>${t.entries_n ?? '–'}</td><td>${t.outcome?.buyers ?? '–'}</td>
-      <td>${n(t.outcome?.peak_multiple, 1)}</td><td>${n(t.outcome?.last_multiple, 1)}</td><td class="${t.outcome?.rugged ? 'r' : 'muted'}">${t.outcome?.rugged ? 'RUG' : '–'}</td><td>${t.outcome?.creator_sold ? 'yes' : '–'}</td></tr>`).join('')}</table></section>`;
-};
-
-async function openToken(id) {
-  setUrl('/tokens/' + encodeURIComponent(id));
-  const t = await get('/api/token', { id }), o = t.outcome || {};
-  let h = `<h2 style="color:var(--text);font-size:15px">${esc(t.symbol || '')} ${esc(t.name || '')} ${o.rugged ? '<span class="v bad">RUG</span>' : ''}</h2><p>${tokLink(t.id, t.launchpad)} · ${esc(t.launchpad)} · creator ${t.creator ? nb(t.creator) : '–'} · live ${when(t.live_ts)} · launch tx ${txl(t.live_tx)}</p>`;
-  h += `<p class="muted">peak x${n(o.peak_multiple, 1)} · now x${n(o.last_multiple, 1)} · drawdown ${pct(o.drawdown)} · buyers ${o.buyers ?? '–'} · bought ${n(o.buy_near, 0)} N · sold ${n(o.sell_near, 0)} N · creator sold ${o.creator_sold ? 'yes (' + n(o.creator_sell_near, 1) + ' N)' : 'no'}</p>`;
-  const au = t.audit;
-  h += '<h3>Contract audit</h3>' + (au?.available ? `<p><span class="v ${au.risk_level === 'low' ? 'good' : au.risk_level === 'medium' ? 'neutral' : 'bad'}">risk ${au.risk_score} · ${esc(au.risk_level)}</span> <span class="v ${au.trust_level === 'high' ? 'good' : 'unknown'}">trust ${au.trust_score}</span> · full-access keys ${au.full_access_keys ?? '–'} · ${(au.confirmed_malicious || []).length ? '<span class="r">confirmed: ' + au.confirmed_malicious.map((c) => esc(c.key)).join(', ') + '</span>' : 'no confirmed malicious finding'}</p>${(au.findings || []).length ? '<ul class="flags">' + au.findings.map((f) => `<li>${esc(f.key)} (+${f.weight})${f.detail ? ' <span class="muted">' + esc(f.detail) + '</span>' : ''}</li>`).join('') + '</ul>' : ''}` : '<p class="muted">Not audited yet.</p>') + `<p><a href="/audit/${encodeURIComponent(t.id)}" onclick="closeDrawer();return nav(event,'/audit/${encodeURIComponent(t.id)}')">Open the full audit →</a></p>`;
-  h += '<h3>Early buyers</h3><table><tr><th>#</th><th>Wallet</th><th>Group</th><th>Delay</th><th>Buy tx</th><th>NEAR in</th><th>Wallet age</th><th>Funded by</th><th>ROI 1h</th><th>ROI 24h</th><th>Now</th></tr>' + t.entries.map((e) => `<tr class="click" data-id="${esc(e.wallet)}" onclick="openWallet(this.dataset.id)"><td>${e.rank}</td><td>${acct(e.wallet, 24)}${e.is_creator ? ' <span class="tag">creator</span>' : ''}</td>
-    <td>${e.cluster ? `${vb(e.cluster.verdict)} ${esc(e.cluster.label || e.cluster.id)} (${e.cluster.size})` : '<span class="muted">solo / unknown</span>'}</td><td>${e.delay_s}s</td><td>${txl(e.first_buy_hash)}</td><td>${n(e.buy_near, 1)}</td><td>${e.wallet_age_days != null ? e.wallet_age_days + ' d' : '–'}</td><td>${esc(e.funder_kind || '–')}</td>
-    <td class="${roiCls(e.roi?.['60'])}">${pct(e.roi?.['60'])}</td><td class="${roiCls(e.roi?.['1440'])}">${pct(e.roi?.['1440'])}</td><td class="${roiCls(e.roi_now)}">${pct(e.roi_now)}</td></tr>`).join('') + '</table>';
-  openDrawer(h);
-}
-
-// ------------------------------------------------------------------ logs
+// ================================================================== SYSTEM
 views.logs = async () => {
   const j = await get('/api/logs', { level: ST.logs.level, limit: 300 });
-  return `<section><div class="bar"><h2 style="margin:0">Log</h2><select onchange="ST.logs.level=this.value;render()"><option value="">all</option>${['INFO', 'WARN', 'ERROR'].map((l) => `<option ${ST.logs.level === l ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
-    <table>${j.rows.map((r) => `<tr class="${r.level === 'ERROR' ? 'r' : r.level === 'WARN' ? 'a' : ''}"><td class="muted">${when(r.ts)}</td><td>${esc(r.level)}</td><td class="wrap">${esc(r.msg)}</td></tr>`).join('')}</table></section>`;
+  return `<div class="card"><div class="bar">${seg('logs', 'level', [['', 'All'], ['INFO', 'Info'], ['WARN', 'Warn'], ['ERROR', 'Error']])}</div>
+    <table>${j.rows.map((r) => `<tr><td class="muted">${when(r.ts)}</td><td>${r.level === 'ERROR' ? '<span class="v bad">error</span>' : r.level === 'WARN' ? '<span class="v neutral">warn</span>' : '<span class="v unknown">info</span>'}</td><td class="wrap">${esc(r.msg)}</td></tr>`).join('') || empty(3, 'no log entries')}</table></div>`;
+};
+views.config = async () => {
+  const c = await get('/api/config');
+  const block = (title, o) => `<div class="card"><h2>${title}</h2><table class="kv">${Object.entries(o).map(([k, v]) => `<tr><td>${esc(k)}</td><td class="wrap mono small">${esc(JSON.stringify(v))}</td></tr>`).join('')}</table></div>`;
+  return `<div class="card muted">Read-only view of the settings in .env (never any secret). AI: ${c.ai.enabled ? 'NEAR AI ' + esc(c.ai.model) : 'off'} · database ${esc(c.db)} · launchpads ${esc(c.launchpads.join(', '))}</div>
+    <div class="grid2"><div>${block('Scanner timing', c.scan)}${block('AI analyst', c.analyst)}${block('Simulated wallet', c.sim)}</div><div>${block('Hard gates', c.rules)}${block('Follow-up reviews', c.followUp)}${block('Early-investor tracking', { entry: c.entry, outcome: c.outcome })}</div></div>`;
 };
 
-// ------------------------------------------------------------------ shell + router (History API: /config, /groups/<id>, no #)
-const TABS = ['audit', 'monitor', 'sim', 'scans', 'overview', 'signals', 'groups', 'entities', 'wallets', 'tokens', 'logs', 'config'];
-const ICONS = {
-  monitor: '<polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>', sim: '<polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/>',
-  audit: '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><polyline points="9 12 11 14 15 10"/>',
-  scans: '<polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>', overview: '<rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/>',
-  signals: '<polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>', groups: '<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>',
-  entities: '<circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/>',
-  wallets: '<rect x="1" y="4" width="22" height="16" rx="2" ry="2"/><line x1="1" y1="10" x2="23" y2="10"/>', tokens: '<polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/>',
-  logs: '<polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/>', config: '<line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/>',
-};
-const NAV = [
-  ['Scanner', [['monitor', 'Monitor'], ['sim', 'Simulated wallet'], ['scans', 'Evaluations'], ['audit', 'Contract audit']]],
-  ['Early investors', [['overview', 'Overview'], ['signals', 'Signals'], ['groups', 'Groups'], ['entities', 'Entities'], ['wallets', 'Wallets'], ['tokens', 'Tokens']]],
-  ['System', [['logs', 'Log'], ['config', 'Settings']]],
+// ================================================================== search
+const SEARCH_ICON = '<svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>';
+function searchBox(id, cls = '') {
+  return `<div class="search ${cls}">${SEARCH_ICON}<input id="${id}" type="search" autocomplete="off" spellcheck="false" placeholder="Search a token, wallet or group…  ( / )" oninput="searchInput(this)" onfocus="searchInput(this)" onkeydown="searchKey(event,this)"><div class="sr" id="${id}-r"></div></div>`;
+}
+let sTimer = null, sSeq = 0;
+function searchInput(el) {
+  clearTimeout(sTimer);
+  const q = el.value.trim(), box = $(el.id + '-r');
+  if (q.length < 2) { box.classList.remove('open'); return; }
+  sTimer = setTimeout(async () => {
+    const my = ++sSeq, r = await get('/api/search', { q }).catch(() => null);
+    if (!r || my !== sSeq) return;
+    box.innerHTML = searchHtml(r, q); box.classList.add('open');
+  }, 200);
+}
+function searchHtml(r, q) {
+  const sec = (title, items) => (items.length ? `<div class="sr-h">${title}</div>${items.join('')}` : '');
+  const item = (path, icon, main, sub) => `<a class="sr-i" href="${esc(path)}" onmousedown="event.preventDefault()" onclick="closeSearch();return navA(event,this)">${icon}<span><b>${main}</b><small>${sub}</small></span></a>`;
+  let h = sec('Tokens', r.tokens.map((t) => item(P.tok(t.id), avatar(t.id, t.symbol, 28), esc(t.symbol || short(t.id, 20)), `<span class="acct">${esc(short(t.id, 36))}</span> · ${esc(t.launchpad)} · ${since(t.live_ts)}${t.outcome?.rugged ? ' · <span class="r">rug</span>' : ''}`)))
+    + sec('Wallets', r.wallets.map((w) => item(P.wal(w.id), avatar(w.id, w.id, 28), `<span class="acct">${esc(short(w.id, 40))}</span>`, `${w.cluster_id ? vb(w.cluster_verdict) + ' group ' + esc(short(w.cluster_id, 18)) : 'unlinked'} · ${w.stats?.tokens_n ?? 0} tokens`)))
+    + sec('Groups', r.groups.map((c) => item(P.grp(c.id), avatar(c.id, c.ai?.label || c.id, 28), esc(c.ai?.label || c.id), `${vb(c.verdict)} ${c.size} wallets · <span class="acct">${esc(short(c.id, 22))}</span>`)));
+  if (ACCT_RE.test(q) && q.includes('.')) h += sec('Contract', [item(P.audit(q), '<span class="av" style="--h:170;width:28px;height:28px;font-size:11px">⛨</span>', 'Audit ' + esc(q), 'access keys, code, tax, sell behaviour')]);
+  return h || `<div class="sr-empty">Nothing found for “${esc(q)}”.</div>`;
+}
+function searchKey(e, el) {
+  const box = $(el.id + '-r'), items = [...box.querySelectorAll('a.sr-i')], i = items.findIndex((a) => a.classList.contains('on'));
+  if (e.key === 'Escape') { closeSearch(); el.blur(); }
+  else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); if (!items.length) return; items.forEach((a) => a.classList.remove('on')); const j = e.key === 'ArrowDown' ? Math.min(items.length - 1, i + 1) : Math.max(0, i - 1); items[j].classList.add('on'); items[j].scrollIntoView({ block: 'nearest' }); }
+  else if (e.key === 'Enter') { const a = items[Math.max(0, i)]; if (a && box.classList.contains('open')) { closeSearch(); el.blur(); nav(null, a.getAttribute('href')); } }
+}
+function closeSearch() { clearTimeout(sTimer); document.querySelectorAll('.sr.open').forEach((x) => x.classList.remove('open')); }
+document.addEventListener('click', (e) => { if (!e.target.closest('.search')) closeSearch(); });
+document.addEventListener('keydown', (e) => { if (e.key === '/' && !['INPUT', 'SELECT', 'TEXTAREA'].includes(document.activeElement?.tagName)) { e.preventDefault(); $('topQ').focus(); } });
+
+// ================================================================== shell + router (History API: /tokens/<id>, /groups/<id>, no #)
+const SECTIONS = [
+  { label: 'Explore', views: [['explore', 'Explore']] },
+  { label: 'Tokens', views: [['tokens', 'All tokens'], ['signals', 'Smart-money signals']] },
+  { label: 'Wallets & Groups', views: [['groups', 'Groups'], ['wallets', 'Wallets'], ['entities', 'Funders & entities']] },
+  { label: 'Scanner', views: [['monitor', 'Monitor'], ['sim', 'Simulated wallet'], ['scans', 'Evaluations'], ['audit', 'Contract audit']] },
+  { label: 'System', views: [['logs', 'Log'], ['config', 'Settings']] },
 ];
 const TITLES = {
-  monitor: ['Monitor', 'Every new launch: first check, hard gates and the AI analyst\'s decision'], sim: ['Simulated wallet', 'Paper trading with real pool quotes: equity, open and closed positions'],
-  audit: ['Contract audit', 'Access keys, code, tax and sell behaviour of any NEAR token or contract, scored for risk and trust'],
-  scans: ['Evaluations', 'Every gate check and AI review, with the reasons'], overview: ['Overview', 'What the tracker has learned about early investors so far'],
-  signals: ['Signals', 'Recent tokens where known good or dangerous groups were among the early buyers'], groups: ['Groups', 'Wallets linked by funding, money flow and co-buying, judged good or bad'],
-  entities: ['Entities', 'Exchange wallets, services, funders and destinations around the early investors'], wallets: ['Early wallets', 'Who bought early, who funded them and how they did'],
-  tokens: ['Tokens', 'Every launch with its outcome and early buyers'], logs: ['Log', 'Worker activity'], config: ['Settings', 'Read-only view of the configuration in use'],
+  explore: ['Explore', ''], tokens: ['Tokens', 'Every launch, with the share of its early money that came from good, dangerous and unknown wallet groups'],
+  signals: ['Smart-money signals', 'Recent tokens where known good or dangerous groups were among the early buyers'],
+  groups: ['Groups', 'Wallets linked by funding, money flow and co-buying, judged good or dangerous from how their early buys turned out'],
+  wallets: ['Wallets', 'Every early buyer: its group, who funded it and how it did'], entities: ['Funders & entities', 'Exchange wallets, services, funders and destinations around the early investors'],
+  monitor: ['Monitor', "Every new launch: first check, hard gates and the AI analyst's decision"], sim: ['Simulated wallet', 'Paper trading with real pool quotes: equity, open and closed positions'],
+  scans: ['Evaluations', 'Every gate check and AI review, with the reasons'], audit: ['Contract audit', 'Access keys, code, tax and sell behaviour of any NEAR token or contract, scored for risk and trust'],
+  logs: ['Log', 'Worker activity'], config: ['Settings', 'Read-only view of the configuration in use'],
 };
-const OPENERS = { audit: (id) => runAudit(id), groups: (id) => openGroup(id), wallets: (id) => openWallet(id), tokens: (id) => openToken(id), entities: (id) => openEntity(id), scans: (id) => openScan(id), sim: (id) => openSimPosition(id) };
-function openDrawer(html) { $('drawerBody').innerHTML = html; $('drawer').classList.add('open'); }
+const DETAIL = { tokens: tokenPage, wallets: walletPage, groups: groupPage, entities: entityPage, scans: scanPage, sim: simPage };
 function setUrl(path) { if (location.pathname !== path) history.pushState(null, '', path); }
-function closeDrawer() {
-  $('drawer').classList.remove('open');
-  const seg = location.pathname.split('/').filter(Boolean);
-  if (seg.length > 1) setUrl('/' + seg[0]); // back to the list page
-}
 /** Link / tab click: change the path without reloading the page. */
 function nav(e, path) {
   if (e && (e.metaKey || e.ctrlKey || e.shiftKey || e.button)) return true; // let "open in new tab" work
   if (e) e.preventDefault();
-  $('drawer').classList.remove('open');
-  setUrl(path);
-  render();
+  setUrl(path); window.scrollTo(0, 0); render();
   return false;
 }
+const navA = (e, a) => nav(e, a.getAttribute('href'));
+function rowNav(e, el) {
+  if (!el.dataset.href || e.target.closest('a,button,input,select')) return;
+  if (e.metaKey || e.ctrlKey) { window.open(el.dataset.href, '_blank'); return; }
+  nav(null, el.dataset.href);
+}
+function toggleTheme() { const t = document.documentElement.dataset.theme === 'light' ? 'dark' : 'light'; document.documentElement.dataset.theme = t; try { localStorage.setItem('theme', t); } catch {} }
 let seq = 0;
 async function render() {
+  closeSearch();
   const seg = location.pathname.split('/').filter(Boolean).map(decodeURIComponent);
-  const view = views[seg[0]] ? seg[0] : 'monitor';
-  const id = seg.length > 1 ? seg.slice(1).join('/') : null;
-  if (!seg.length) history.replaceState(null, '', '/' + view); // "/" is shown as /monitor
-  $('nav').innerHTML = NAV.map(([group, items]) => `<div class="nav-group">${group}</div>` + items.map(([t, label]) => `<a href="/${t}" onclick="return nav(event,'/${t}')" class="${t === view ? 'on' : ''}"><svg viewBox="0 0 24 24">${ICONS[t]}</svg>${label}</a>`).join('')).join('');
-  $('pageTitle').textContent = TITLES[view][0]; $('pageSub').textContent = TITLES[view][1]; document.title = `${TITLES[view][0]} · NEAR Entity Tracker`;
+  let view = seg[0] === 'overview' ? 'explore' : seg[0];
+  if (!views[view]) view = 'explore';
+  if (!seg.length || seg[0] === 'overview') history.replaceState(null, '', '/' + view);
+  const id = seg.length > 1 ? seg.slice(1).join('/') : null, detail = id && DETAIL[view];
+  const sec = SECTIONS.find((s) => s.views.some(([v]) => v === view));
+  $('nav').innerHTML = SECTIONS.map((s) => `<a href="/${s.views[0][0]}" onclick="return navA(event,this)" class="${s === sec ? 'on' : ''}">${s.label}</a>`).join('');
+  $('subnav').innerHTML = sec.views.map(([v, l]) => `<a href="/${v}" onclick="return navA(event,this)" class="${v === view ? 'on' : ''}">${l}</a>`).join('');
+  $('subnav').hidden = sec.views.length < 2;
+  $('pagehead').hidden = !!detail || view === 'explore';
+  $('pageTitle').textContent = TITLES[view][0]; $('pageSub').textContent = TITLES[view][1];
+  document.title = `${detail ? short(id, 30) : TITLES[view][0]} · NEAR Entity Tracker`;
   const my = ++seq;
   $('main').classList.add('loading');
-  try { const html = await views[view](); if (my === seq) $('main').innerHTML = html; }
-  catch (e) { if (my === seq) $('main').innerHTML = `<section class="r">${esc(e.message)}</section>`; }
-  if (my !== seq) return;
-  $('main').classList.remove('loading');
-  if (id && OPENERS[view]) { try { await OPENERS[view](id); } catch (e) { openDrawer(`<p class="r">${esc(e.message)}</p>`); } }
-  else $('drawer').classList.remove('open');
+  try {
+    const html = detail ? await DETAIL[view](id) : await views[view]();
+    if (my === seq) { $('main').innerHTML = html; if (view === 'audit' && id) runAudit(id); }
+  } catch (e) { if (my === seq) $('main').innerHTML = `<div class="card err">${esc(e.message)}</div>`; }
+  if (my === seq) $('main').classList.remove('loading');
 }
+$('topSearch').outerHTML = searchBox('topQ');
+const loadStatus = () => get('/api/monitor').then((m) => setStatus(m.worker, m.now, m.ai)).catch(() => {});
+loadStatus(); setInterval(loadStatus, 60000);
 window.addEventListener('popstate', render);
-document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeDrawer(); });
 loadMemeIds().then(render);
 setInterval(loadMemeIds, 600000);
-setInterval(() => { if (!$('drawer').classList.contains('open') && !['INPUT', 'SELECT'].includes(document.activeElement?.tagName)) render(); }, 30000);
+// list pages refresh every 30 s; detail pages, open search results and focused inputs are left alone
+setInterval(() => { if (location.pathname.split('/').filter(Boolean).length < 2 && !document.querySelector('.sr.open') && !['INPUT', 'SELECT'].includes(document.activeElement?.tagName)) render(); }, 30000);
 </script>
 </body>
 </html>

@@ -6,14 +6,14 @@ import fs from 'node:fs';
 import crypto from 'node:crypto';
 import { col, metaGet, getDb } from '../db.js';
 import { config } from '../config.js';
-import { recentLogs, info } from '../log.js';
+import { recentLogs, info, error } from '../log.js';
 import { aiEnabled, aiStatus } from '../ai/nearai.js';
 import { simSell, ensureAccount } from '../sim/portfolio.js';
 import { auditNearContract, getCachedAudit, validNearAddress, summarizeAudit } from '../audit/service.js';
 
 const page = fs.readFileSync(new URL('./index.html', import.meta.url), 'utf8');
 // pages of the single-page UI; each is served the same HTML and the browser routes with the History API (no # in URLs)
-const UI_VIEWS = new Set(['audit', 'monitor', 'sim', 'scans', 'overview', 'signals', 'groups', 'entities', 'wallets', 'tokens', 'logs', 'config']);
+const UI_VIEWS = new Set(['explore', 'audit', 'monitor', 'sim', 'scans', 'overview', 'signals', 'groups', 'entities', 'wallets', 'tokens', 'logs', 'config']);
 const auditHits = new Map(); // ip -> [timestamps]
 function auditAllowed(ip) {
   const now = Date.now(), list = (auditHits.get(ip) || []).filter((t) => now - t < 10 * 60e3);
@@ -24,34 +24,43 @@ const clamp = (v, d, max) => Math.min(max, Math.max(1, Number(v) || d));
 const rx = (s) => ({ $regex: String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), $options: 'i' });
 const strip = ({ _id, ...r }) => ({ id: _id, ...r });
 
+const VERDICTS = ['good', 'bad', 'neutral', 'unknown', 'solo'];
+/** For each token: how its early NEAR splits across groups judged good / bad / neutral / unknown and solo wallets, plus the groups involved. */
+async function earlyMix(tokenIds) {
+  const out = new Map();
+  if (!tokenIds.length) return out;
+  const entries = await col('entries').find({ token: { $in: tokenIds } }, { projection: { token: 1, wallet: 1, buy_near: 1 } }).toArray();
+  const wallets = await col('wallets').find({ _id: { $in: [...new Set(entries.map((e) => e.wallet))] } }, { projection: { cluster_id: 1 } }).toArray();
+  const wmap = new Map(wallets.map((w) => [w._id, w]));
+  const cids = [...new Set(wallets.map((w) => w.cluster_id).filter(Boolean))];
+  const clusters = await col('clusters').find({ _id: { $in: cids } }, { projection: { verdict: 1, size: 1, 'ai.label': 1, 'rule.tags': 1 } }).toArray();
+  const cmap = new Map(clusters.map((c) => [c._id, c]));
+  for (const t of tokenIds) out.set(t, { wallets: 0, total_near: 0, ...Object.fromEntries(VERDICTS.map((v) => [v, { w: 0, near: 0 }])), groups: new Map() });
+  for (const e of entries) {
+    const m = out.get(e.token), w = wmap.get(e.wallet), c = w?.cluster_id ? cmap.get(w.cluster_id) : null;
+    const v = c ? (VERDICTS.includes(c.verdict) ? c.verdict : 'unknown') : 'solo';
+    m.wallets++; m.total_near += e.buy_near; m[v].w++; m[v].near += e.buy_near;
+    if (c) { const g = m.groups.get(c._id) || { id: c._id, verdict: c.verdict, label: c.ai?.label || c.rule?.tags?.[0] || null, size: c.size, wallets: 0, near: 0 }; g.wallets++; g.near += e.buy_near; m.groups.set(c._id, g); }
+  }
+  for (const m of out.values()) m.groups = [...m.groups.values()].sort((a, b) => b.near - a.near);
+  return out;
+}
+
 /** For each recent token: who among its early buyers belongs to groups judged good / bad. */
 async function buildSignals(hours = 72, limit = 60) {
   const since = Date.now() - hours * 3600e3;
   const tokens = await col('tokens').find({ live_ts: { $gt: since }, entries_n: { $gt: 0 } }).sort({ live_ts: -1 }).limit(limit).toArray();
-  if (!tokens.length) return [];
-  const entries = await col('entries').find({ token: { $in: tokens.map((t) => t._id) } }).toArray();
-  const wallets = await col('wallets').find({ _id: { $in: [...new Set(entries.map((e) => e.wallet))] } }, { projection: { cluster_id: 1, cluster_verdict: 1 } }).toArray();
-  const wmap = new Map(wallets.map((w) => [w._id, w]));
-  const cids = [...new Set(wallets.map((w) => w.cluster_id).filter(Boolean))];
-  const clusters = await col('clusters').find({ _id: { $in: cids } }, { projection: { verdict: 1, size: 1, 'ai.label': 1, 'ai.archetype': 1, 'rule.tags': 1, score: 1 } }).toArray();
-  const cmap = new Map(clusters.map((c) => [c._id, c]));
+  const mix = await earlyMix(tokens.map((t) => t._id));
   const out = [];
   for (const t of tokens) {
-    const es = entries.filter((e) => e.token === t._id);
-    const total = es.reduce((s, e) => s + e.buy_near, 0) || 1;
-    const agg = { good: { w: 0, near: 0 }, bad: { w: 0, near: 0 }, other: { w: 0, near: 0 } };
-    const groups = new Map();
-    for (const e of es) {
-      const w = wmap.get(e.wallet), c = w?.cluster_id ? cmap.get(w.cluster_id) : null;
-      const v = c?.verdict === 'good' ? 'good' : c?.verdict === 'bad' ? 'bad' : 'other';
-      agg[v].w++; agg[v].near += e.buy_near;
-      if (c && v !== 'other') { const g = groups.get(c._id) || { id: c._id, verdict: c.verdict, label: c.ai?.label || c.rule?.tags?.[0] || null, wallets: 0, near: 0 }; g.wallets++; g.near += e.buy_near; groups.set(c._id, g); }
-    }
-    const badShare = agg.bad.near / total, goodShare = agg.good.near / total;
-    const assessment = badShare >= 0.25 ? 'warning' : agg.good.w >= 2 && badShare < 0.1 ? 'bullish' : agg.good.w + agg.bad.w ? 'mixed' : 'no-known-groups';
+    const m = mix.get(t._id), total = m.total_near || 1;
+    const other = { w: m.neutral.w + m.unknown.w + m.solo.w, near: m.neutral.near + m.unknown.near + m.solo.near };
+    const badShare = m.bad.near / total, goodShare = m.good.near / total;
+    const assessment = badShare >= 0.25 ? 'warning' : m.good.w >= 2 && badShare < 0.1 ? 'bullish' : m.good.w + m.bad.w ? 'mixed' : 'no-known-groups';
     if (assessment === 'no-known-groups') continue;
-    out.push({ token: t._id, symbol: t.symbol, launchpad: t.launchpad, live_ts: t.live_ts, status: t.status, early_wallets: es.length, total_near: total, good: agg.good, bad: agg.bad, good_share: goodShare, bad_share: badShare, assessment,
-      groups: [...groups.values()].sort((a, b) => b.near - a.near), outcome: t.outcome ? { rugged: t.outcome.rugged, peak_multiple: t.outcome.peak_multiple, last_multiple: t.outcome.last_multiple, age_min: t.outcome.age_min } : null });
+    out.push({ token: t._id, symbol: t.symbol, launchpad: t.launchpad, live_ts: t.live_ts, status: t.status, early_wallets: m.wallets, total_near: total, good: m.good, bad: m.bad, other, good_share: goodShare, bad_share: badShare, assessment,
+      mix: Object.fromEntries(VERDICTS.map((v) => [v, m[v]])), groups: m.groups.filter((g) => g.verdict === 'good' || g.verdict === 'bad'),
+      outcome: t.outcome ? { rugged: t.outcome.rugged, peak_multiple: t.outcome.peak_multiple, last_multiple: t.outcome.last_multiple, age_min: t.outcome.age_min } : null });
   }
   return out;
 }
@@ -253,7 +262,8 @@ const routes = {
     if (u.searchParams.get('rugged') === '1') f['outcome.rugged'] = true;
     const limit = clamp(u.searchParams.get('limit'), 50, 200), offset = Math.max(0, Number(u.searchParams.get('offset')) || 0);
     const [total, rows] = await Promise.all([col('tokens').countDocuments(f), col('tokens').find(f, { projection: { pool: 0 } }).sort({ live_ts: -1 }).skip(offset).limit(limit).toArray()]);
-    return { total, rows: rows.map(strip) };
+    const mix = await earlyMix(rows.map((t) => t._id));
+    return { total, rows: rows.map((t) => { const m = mix.get(t._id); return { ...strip(t), mix: Object.fromEntries(VERDICTS.map((v) => [v, m[v]])), groups: m.groups.slice(0, 3) }; }) };
   },
 
   '/api/token': async (u) => {
@@ -271,6 +281,18 @@ const routes = {
     return { id: _id, ...rest, audit, entries: entries.map((e) => { const w = wmap.get(e.wallet), c = w?.cluster_id ? cmap.get(w.cluster_id) : null;
       return { wallet: e.wallet, first_buy_hash: e.first_buy_hash || null, rank: e.rank, delay_s: e.delay_s, buy_near: e.buy_near, roi: e.roi, roi_now: e.roi_now, sold_share: e.sold_share, is_creator: e.is_creator, kind: w?.kind || null, funder_kind: w?.funder_kind || null,
         wallet_age_days: w?.created_ts ? Math.round((e.first_buy_ts - w.created_ts) / 86400e3) : null, cluster: c ? { id: c._id, size: c.size, verdict: c.verdict, label: c.ai?.label || c.rule?.tags?.[0] || null } : null }; }) };
+  },
+
+  /** One box for everything: tokens by symbol / account, wallets by account, groups by id / AI label. */
+  '/api/search': async (u) => {
+    const q = (u.searchParams.get('q') || '').trim().slice(0, 80);
+    if (q.length < 2) return { tokens: [], wallets: [], groups: [] };
+    const [tokens, wallets, groups] = await Promise.all([
+      col('tokens').find({ $or: [{ symbol: rx(q) }, { _id: rx(q) }] }, { projection: { symbol: 1, launchpad: 1, live_ts: 1, 'outcome.rugged': 1 } }).sort({ live_ts: -1 }).limit(6).toArray(),
+      col('wallets').find({ _id: rx(q), is_early: true }, { projection: { cluster_id: 1, cluster_verdict: 1, 'stats.tokens_n': 1 } }).limit(6).toArray(),
+      col('clusters').find({ $or: [{ _id: rx(q) }, { 'ai.label': rx(q) }, { members: q }] }, { projection: { verdict: 1, size: 1, 'ai.label': 1 } }).sort({ size: -1 }).limit(6).toArray(),
+    ]);
+    return { tokens: tokens.map(strip), wallets: wallets.map(strip), groups: groups.map(strip) };
   },
 
   '/api/signals': async (u) => ({ rows: await buildSignals(clamp(u.searchParams.get('hours'), 72, 720), 60) }),
@@ -313,7 +335,7 @@ export function startWeb() {
         return;
       }
       if (req.method !== 'GET') { res.writeHead(405).end(); return; }
-      if (u.pathname === '/' || u.pathname === '/index.html') { res.writeHead(302, { location: '/monitor' }).end(); return; }
+      if (u.pathname === '/' || u.pathname === '/index.html') { res.writeHead(302, { location: '/explore' }).end(); return; }
       if (UI_VIEWS.has(u.pathname.split('/')[1])) { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' }).end(page); return; } // client-side routes: /config, /groups/<id> ...
       const route = routes[u.pathname];
       if (!route) { res.writeHead(404).end('not found'); return; }

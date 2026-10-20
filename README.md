@@ -78,7 +78,7 @@ Ported from the TrustFlow backend (`contractAuditService`, `nearContractAnalysis
 - **Behaviour:** recent sells (do holders' sells succeed, across how many wallets) and privileged accounts calling non-standard methods on other holders' accounts.
 - **Tax:** the launchpad's `get_tax` (buy / sell bps).
 
-Where it is used: the scanner audits every token it checks (cached 1 h) and puts a summary in `features.audit`; a confirmed malicious finding or a risk score at or above `AUDIT_MAX_RISK` (70) fails the `contract_audit_ok` gate, the risk also lowers the rule score, and the AI analyst reads the findings. The **Contract audit** page (`/audit`, `/audit/<account>`) audits any NEAR account on demand, the token drawer shows its audit, and `node src/cli.js audit <account> [--force] [--json]` does it from the command line. Results are stored in the `audits` collection. Checked against NEARDOGE (`doge.neardogecoin.near`: critical 92, fake `storage_unstake` called 24 times on holders), `wrap.near` (risk 0, trust 100) and a nearly.trade token (risk 0, only the launchpad's tax methods noted).
+Where it is used: the scanner audits every token it checks (cached 1 h) and puts a summary in `features.audit`; a confirmed malicious finding or a risk score at or above `AUDIT_MAX_RISK` (70) fails the `contract_audit_ok` gate, the risk also lowers the rule score, and the AI analyst reads the findings. The **Contract audit** page (`/audit`, `/audit/<account>`) audits any NEAR account on demand, the token page shows its audit, and `node src/cli.js audit <account> [--force] [--json]` does it from the command line. Results are stored in the `audits` collection. Checked against NEARDOGE (`doge.neardogecoin.near`: critical 92, fake `storage_unstake` called 24 times on holders), `wrap.near` (risk 0, trust 100) and a nearly.trade token (risk 0, only the launchpad's tax methods noted).
 
 ## Entities (exchange wallets included)
 
@@ -88,9 +88,17 @@ Names come from built-in patterns (Binance, OKX, Bybit, Meteor, Intear ...), the
 
 ## Web UI
 
-Tabs: **Contract audit** · **Monitor** (launches, first-check state, gates, decisions) · **Sim** (simulated wallet: equity curve, open and closed positions, simulated sell buttons) · **Evaluations** (every gate check and AI analyst review, with the AI's reasons) · **Config** (read-only settings) · **Overview** (counts, top good / bad groups, latest launches) · **Signals** (recent tokens where known good or bad groups were among the early buyers, with a bullish / warning / mixed assessment) · **Groups** (filter, sort, open one for the AI review, metrics, funding / money-flow graph, wallets, tokens and verdict history) · **Entities** (exchange wallets, services, funders, destinations) · **Wallets** · **Tokens** (early buyers with their group verdicts) · **Logs**.
+The UI is organised around two ways in, **tokens** and **wallets / groups**, plus the scanner. A search box at the top (press `/`) finds tokens by symbol or account, early wallets by account, and groups by id, AI label or member wallet. A NEAR account it doesn't know can still be sent to the contract audit. Dark by default, with a light theme toggle.
 
-The UI is a single-page app with clean paths (History API, no `#`): `/monitor`, `/sim`, `/scans`, `/overview`, `/signals`, `/groups`, `/entities`, `/wallets`, `/tokens`, `/logs`, `/config`, and deep links to a detail drawer such as `/groups/<id>`, `/wallets/<id>`, `/tokens/<id>`, `/scans/<id>`. `/` redirects to `/monitor`.
+| Section | Pages |
+|---|---|
+| **Explore** (`/explore`, home) | Headline counts, tokens where known groups bought early (cards with an early-money bar), best and largest dangerous groups, latest launches. |
+| **Tokens** | `/tokens`: every launch, with a bar showing how its early NEAR splits between good, dangerous, neutral and unjudged groups and unlinked wallets, plus the groups involved. `/signals`: recent tokens grouped into good money in / dangerous money in / mixed. `/tokens/<id>`: outcome tiles, early money by group, a **bubble map** of the early buyers clustered by group (bubble size = NEAR in; click a bubble or group to open it), early buyers with their groups, contract audit summary. |
+| **Wallets & Groups** | `/groups`, `/groups/<id>`: verdict, AI review, track record, tokens bought early, members, funding / money-flow graph, why the wallets are linked, verdict history. `/wallets`, `/wallets/<id>`: group membership, track record, early entries, funders, funding chain, outflows. `/entities`, `/entities/<id>`: exchange wallets, services, funders and destinations. |
+| **Scanner** | `/monitor`, `/sim` (simulated wallet with simulated sell buttons), `/scans` and `/scans/<id>` (gate checks and AI reviews), `/audit` and `/audit/<account>`. |
+| **System** | `/logs`, `/config` (read-only settings). |
+
+Every token, wallet, group and entity has its own page at a clean path (History API, no `#`); external links go to the token's launchpad page and NearBlocks. `/` and `/overview` open `/explore`.
 
 The UI and API are read-only except the simulated sell button (`POST /api/sim/sell`, paper positions only, same-origin + header check + Basic auth when exposed). `npm run web` serves the UI alone, `npm run worker` runs only the background loop, `npm start` runs both in one process.
 
