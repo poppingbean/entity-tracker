@@ -75,6 +75,8 @@ Names come from built-in patterns (Binance, OKX, Bybit, Meteor, Intear ...), the
 
 Tabs: **Monitor** (launches, first-check state, gates, decisions) · **Sim** (simulated wallet: equity curve, open and closed positions, simulated sell buttons) · **Evaluations** (every gate check and AI analyst review, with the AI's reasons) · **Config** (read-only settings) · **Overview** (counts, top good / bad groups, latest launches) · **Signals** (recent tokens where known good or bad groups were among the early buyers, with a bullish / warning / mixed assessment) · **Groups** (filter, sort, open one for the AI review, metrics, funding / money-flow graph, wallets, tokens and verdict history) · **Entities** (exchange wallets, services, funders, destinations) · **Wallets** · **Tokens** (early buyers with their group verdicts) · **Logs**.
 
+The UI is a single-page app with clean paths (History API, no `#`): `/monitor`, `/sim`, `/scans`, `/overview`, `/signals`, `/groups`, `/entities`, `/wallets`, `/tokens`, `/logs`, `/config`, and deep links to a detail drawer such as `/groups/<id>`, `/wallets/<id>`, `/tokens/<id>`, `/scans/<id>`. `/` redirects to `/monitor`.
+
 The UI and API are read-only except the simulated sell button (`POST /api/sim/sell`, paper positions only, same-origin + header check + Basic auth when exposed). `npm run web` serves the UI alone, `npm run worker` runs only the background loop, `npm start` runs both in one process.
 
 ## Deploying online (e.g. Railway)

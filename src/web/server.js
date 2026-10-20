@@ -11,6 +11,8 @@ import { aiEnabled, aiStatus } from '../ai/nearai.js';
 import { simSell, ensureAccount } from '../sim/portfolio.js';
 
 const page = fs.readFileSync(new URL('./index.html', import.meta.url), 'utf8');
+// pages of the single-page UI; each is served the same HTML and the browser routes with the History API (no # in URLs)
+const UI_VIEWS = new Set(['monitor', 'sim', 'scans', 'overview', 'signals', 'groups', 'entities', 'wallets', 'tokens', 'logs', 'config']);
 const clamp = (v, d, max) => Math.min(max, Math.max(1, Number(v) || d));
 const rx = (s) => ({ $regex: String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), $options: 'i' });
 const strip = ({ _id, ...r }) => ({ id: _id, ...r });
@@ -278,7 +280,8 @@ export function startWeb() {
         return;
       }
       if (req.method !== 'GET') { res.writeHead(405).end(); return; }
-      if (u.pathname === '/' || u.pathname === '/index.html') { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' }).end(page); return; }
+      if (u.pathname === '/' || u.pathname === '/index.html') { res.writeHead(302, { location: '/monitor' }).end(); return; }
+      if (UI_VIEWS.has(u.pathname.split('/')[1])) { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' }).end(page); return; } // client-side routes: /config, /groups/<id> ...
       const route = routes[u.pathname];
       if (!route) { res.writeHead(404).end('not found'); return; }
       res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' }).end(JSON.stringify(await route(u)));

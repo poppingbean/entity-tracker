@@ -119,6 +119,7 @@ views.groups = async () => {
 };
 
 async function openGroup(id) {
+  setUrl('/groups/' + encodeURIComponent(id));
   const [c, g] = await Promise.all([get('/api/cluster', { id }), get('/api/graph', { id })]);
   const m = c.metrics, ai = c.ai;
   let h = `<h2 style="color:var(--text);font-size:15px">${esc(c.id)} ${vb(c.verdict)} ${c.verdict_source === 'ai' ? '<span class="tag">by NEAR AI</span>' : '<span class="tag">by rules</span>'} ${tags(c.rule?.tags)}</h2>`;
@@ -219,6 +220,7 @@ views.sim = async () => {
 };
 
 async function openSimPosition(id) {
+  setUrl('/sim/' + encodeURIComponent(id));
   const p = await get('/api/sim/position', { id });
   let h = `<h2 style="color:var(--text);font-size:15px">${esc(p.symbol || '')} · simulated position ${p.status === 'open' ? '<span class="v neutral">open</span>' : '<span class="v unknown">closed</span>'}</h2><p>${tokLink(p.token, p.launchpad)} · opened ${when(p.opened_ts)} · ${esc(p.origin || '')} · route ${esc(p.route || '')}</p>`;
   h += `<p>cost ${n(p.cost_near)} N · value ${n(p.value_near, 3)} N · ROI <b class="${roiCls(p.roi)}">${pct(p.roi)}</b> · realized ${n(p.realized_near, 3)} N · held ${n(p.held_tokens, 0)} tokens${p.exit ? ' · exit: ' + esc(p.exit.reason) : ''}</p>`;
@@ -244,6 +246,7 @@ views.scans = async () => {
 };
 
 async function openScan(id) {
+  setUrl('/scans/' + encodeURIComponent(id));
   const s = await get('/api/scan', { id }), f = s.features || {}, ai = s.ai;
   let h = `<h2 style="color:var(--text);font-size:15px">${esc(s.symbol || '')} · ${esc(s.kind)}${s.kind === 'followup' ? ' +' + s.minutes + ' min' : ''} · score <span class="b">${s.score}</span> · gates <span class="${s.pass ? 'g' : 'r'}">${s.pass ? 'PASS' : 'FAIL'}</span></h2><p>${tokLink(s.token, s.launchpad)} · ${when(s.ts)} · ${esc(s.decision || '')}</p>`;
   if (s.trade) h += `<p>Simulated trade: <b class="${s.trade.status === 'bought' ? 'g' : ''}">${esc(s.trade.status)}</b> ${s.trade.near ? s.trade.near + ' N' : ''} ${esc(s.trade.reason || '')}</p>`;
@@ -281,6 +284,7 @@ views.entities = async () => {
 };
 
 async function openEntity(id) {
+  setUrl('/entities/' + encodeURIComponent(id));
   const e = await get('/api/entity', { id });
   const v = e.funded_verdicts || {};
   let h = `<h2 style="color:var(--text);font-size:15px">${esc(e.label || short(e.id, 30))} <span class="tag">${esc(e.type)}</span> ${tags(e.roles)}</h2><p>${nb(e.id)} · kind ${esc(e.kind)} · ${e.tx_count ?? '–'} txs${e.label_source ? ' · label from ' + esc(e.label_source) : ''}</p>`;
@@ -308,9 +312,10 @@ views.wallets = async () => {
 };
 
 async function openWallet(id) {
+  setUrl('/wallets/' + encodeURIComponent(id));
   const w = await get('/api/wallet', { id });
   let h = `<h2 style="color:var(--text);font-size:15px">${esc(w.id)}</h2><p>${nb(w.id)} · ${esc(w.kind || '')} · ${w.tx_count ?? '–'} txs · created ${when(w.created_ts)}</p>`;
-  if (w.cluster) h += `<p>Group <a href="#" onclick="openGroup('${esc(w.cluster.id)}');return false">${esc(w.cluster.id)}</a> ${vb(w.cluster.verdict)} ${esc(w.cluster.ai?.label || '')} · ${w.cluster.size} wallets ${tags(w.cluster.rule?.tags)}</p>`;
+  if (w.cluster) h += `<p>Group <a href="/groups/${encodeURIComponent(w.cluster.id)}" onclick="openGroup('${esc(w.cluster.id)}');return false">${esc(w.cluster.id)}</a> ${vb(w.cluster.verdict)} ${esc(w.cluster.ai?.label || '')} · ${w.cluster.size} wallets ${tags(w.cluster.rule?.tags)}</p>`;
   h += '<h3>Who funded it (first meaningful inflows, earliest first)</h3><table><tr><th>Account</th><th>Kind</th><th>NEAR</th><th>When</th><th>Via</th></tr>' + (w.funders || []).map((f) => `<tr class="click" data-id="${esc(f.account)}" onclick="openEntity(this.dataset.id)"><td>${nb(f.account)}</td><td>${esc(f.kind)}${f.creator_only ? ' <span class="tag">creator only</span>' : ''}</td><td>${n(f.near, 2)}</td><td>${when(f.ts)}</td><td>${esc(f.via || 'transfer')}</td></tr>`).join('') + '</table>';
   h += '<h3>Funding chain</h3><table><tr><th>Hop</th><th>Account</th><th>Kind</th><th>NEAR</th><th>Txs</th></tr>' + (w.chain || []).map((c) => `<tr><td>${c.hop}</td><td>${nb(c.account)}</td><td>${esc(c.kind)}</td><td>${n(c.near, 2)}</td><td>${c.tx_count ?? '–'}</td></tr>`).join('') + '</table>';
   h += '<h3>Where its NEAR went (recent outflows)</h3><table><tr><th>To</th><th>NEAR</th><th>Transfers</th><th>Last</th></tr>' + (w.flow_out || []).map((f) => `<tr><td>${nb(f.to)}</td><td>${n(f.near, 2)}</td><td>${f.n}</td><td>${when(f.last_ts)}</td></tr>`).join('') + '</table>';
@@ -335,6 +340,7 @@ views.tokens = async () => {
 };
 
 async function openToken(id) {
+  setUrl('/tokens/' + encodeURIComponent(id));
   const t = await get('/api/token', { id }), o = t.outcome || {};
   let h = `<h2 style="color:var(--text);font-size:15px">${esc(t.symbol || '')} ${esc(t.name || '')} ${o.rugged ? '<span class="v bad">RUG</span>' : ''}</h2><p>${tokLink(t.id, t.launchpad)} · ${esc(t.launchpad)} · creator ${t.creator ? nb(t.creator) : '–'} · live ${when(t.live_ts)}</p>`;
   h += `<p class="muted">peak x${n(o.peak_multiple, 1)} · now x${n(o.last_multiple, 1)} · drawdown ${pct(o.drawdown)} · buyers ${o.buyers ?? '–'} · bought ${n(o.buy_near, 0)} N · sold ${n(o.sell_near, 0)} N · creator sold ${o.creator_sold ? 'yes (' + n(o.creator_sell_near, 1) + ' N)' : 'no'}</p>`;
@@ -351,20 +357,40 @@ views.logs = async () => {
     <table>${j.rows.map((r) => `<tr class="${r.level === 'ERROR' ? 'r' : r.level === 'WARN' ? 'a' : ''}"><td class="muted">${when(r.ts)}</td><td>${esc(r.level)}</td><td class="wrap">${esc(r.msg)}</td></tr>`).join('')}</table></section>`;
 };
 
-// ------------------------------------------------------------------ shell
-function openDrawer(html) { $('drawerBody').innerHTML = html; $('drawer').classList.add('open'); }
-function closeDrawer() { $('drawer').classList.remove('open'); }
+// ------------------------------------------------------------------ shell + router (History API: /config, /groups/<id>, no #)
 const TABS = ['monitor', 'sim', 'scans', 'overview', 'signals', 'groups', 'entities', 'wallets', 'tokens', 'logs', 'config'];
+const OPENERS = { groups: (id) => openGroup(id), wallets: (id) => openWallet(id), tokens: (id) => openToken(id), entities: (id) => openEntity(id), scans: (id) => openScan(id), sim: (id) => openSimPosition(id) };
+function openDrawer(html) { $('drawerBody').innerHTML = html; $('drawer').classList.add('open'); }
+function setUrl(path) { if (location.pathname !== path) history.pushState(null, '', path); }
+function closeDrawer() {
+  $('drawer').classList.remove('open');
+  const seg = location.pathname.split('/').filter(Boolean);
+  if (seg.length > 1) setUrl('/' + seg[0]); // back to the list page
+}
+/** Link / tab click: change the path without reloading the page. */
+function nav(e, path) {
+  if (e && (e.metaKey || e.ctrlKey || e.shiftKey || e.button)) return true; // let "open in new tab" work
+  if (e) e.preventDefault();
+  $('drawer').classList.remove('open');
+  setUrl(path);
+  render();
+  return false;
+}
 let seq = 0;
 async function render() {
-  const v = (location.hash || '#monitor').slice(1);
-  const view = views[v] ? v : 'monitor';
-  $('nav').innerHTML = TABS.map((t) => `<a href="#${t}" class="${t === view ? 'on' : ''}">${t}</a>`).join('');
+  const seg = location.pathname.split('/').filter(Boolean).map(decodeURIComponent);
+  const view = views[seg[0]] ? seg[0] : 'monitor';
+  const id = seg.length > 1 ? seg.slice(1).join('/') : null;
+  if (!seg.length) history.replaceState(null, '', '/' + view); // "/" is shown as /monitor
+  $('nav').innerHTML = TABS.map((t) => `<a href="/${t}" onclick="return nav(event,'/${t}')" class="${t === view ? 'on' : ''}">${t}</a>`).join('');
   const my = ++seq;
   try { const html = await views[view](); if (my === seq) $('main').innerHTML = html; }
   catch (e) { if (my === seq) $('main').innerHTML = `<section class="r">${esc(e.message)}</section>`; }
+  if (my !== seq) return;
+  if (id && OPENERS[view]) { try { await OPENERS[view](id); } catch (e) { openDrawer(`<p class="r">${esc(e.message)}</p>`); } }
+  else $('drawer').classList.remove('open');
 }
-window.addEventListener('hashchange', render);
+window.addEventListener('popstate', render);
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeDrawer(); });
 render();
 setInterval(() => { if (!$('drawer').classList.contains('open') && !['INPUT', 'SELECT'].includes(document.activeElement?.tagName)) render(); }, 30000);
