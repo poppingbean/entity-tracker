@@ -18,7 +18,7 @@ export const runtime = { startedTs: Date.now(), cycles: 0, lastCycleTs: null, st
 /** One pass of the pipeline. Returns what it did, so callers (the CLI) can loop until idle. */
 export async function cycle({ evaluate = true } = {}) {
   const found = await discover();
-  const processed = await processDue(8);
+  const processed = await processDue();
   let scanned = 0, followed = 0;
   if (config.scan.enabled) { scanned = await scanTick(); followed = await followUpTick(); }
   if (config.sim.enabled && Date.now() - runtime.lastPositionCheck > config.sim.positionCheckSeconds * 1000) { runtime.lastPositionCheck = Date.now(); await managePositions(blacklistCreator); }

@@ -43,16 +43,23 @@ export async function processToken(t) {
   return { entries: entries.length, done };
 }
 
-/** Process every token that is due, a few at a time. Returns how many were processed. */
-export async function processDue(limit = 8) {
-  const due = await col('tokens').find({ status: { $nin: ['done', 'skipped_quote', 'awaiting_pool', 'no_pool'] }, next_process_ts: { $lte: Date.now() } }).sort({ next_process_ts: 1 }).limit(limit).toArray();
-  let n = 0;
-  for (const t of due) {
-    try { await processToken(t); n++; }
-    catch (e) {
-      warn(`process ${t._id} failed: ${e.message}`);
-      try { await col('tokens').updateOne({ _id: t._id }, { $set: { next_process_ts: Date.now() + 5 * MIN, last_error: e.message.slice(0, 300) } }); } catch {} // the database itself may be the problem
+/**
+ * Process the tokens that are due, newest launch first (a fresh launch must not wait behind an old backlog), a few at a time.
+ * Returns how many were processed.
+ */
+export async function processDue(limit = 16, concurrency = 4) {
+  const due = await col('tokens').find({ status: { $nin: ['done', 'skipped_quote', 'awaiting_pool', 'no_pool'] }, next_process_ts: { $lte: Date.now() } }).sort({ live_ts: -1 }).limit(limit).toArray();
+  let n = 0, idx = 0;
+  const worker = async () => {
+    while (idx < due.length) {
+      const t = due[idx++];
+      try { await processToken(t); n++; }
+      catch (e) {
+        warn(`process ${t._id} failed: ${e.message}`);
+        try { await col('tokens').updateOne({ _id: t._id }, { $set: { next_process_ts: Date.now() + 5 * MIN, last_error: e.message.slice(0, 300) } }); } catch {} // the database itself may be the problem
+      }
     }
-  }
+  };
+  await Promise.all(Array.from({ length: Math.max(1, concurrency) }, worker));
   return n;
 }

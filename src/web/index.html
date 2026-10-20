@@ -445,6 +445,18 @@ async function startFetch(id) {
   } catch (e) { show(`<span class="r">${esc(e.message)}</span>`); }
 }
 
+/** When the token's data was last synced and when it is next; "Sync now" reads it from the chain right away and re-runs the analysis. */
+function syncBanner(t) {
+  const due = t.next_process_ts != null && t.next_process_ts <= Date.now();
+  let txt, cls = 'unrated';
+  if (t.status === 'awaiting_pool') txt = 'Waiting for its pool: checked again every 10 minutes.';
+  else if (t.status === 'skipped_quote') txt = 'Not synced: its pool is quoted in a token that cannot be valued in NEAR.';
+  else if (!t.processed_ts) { txt = 'Not synced yet: queued for its first sync (the newest launches go first). Trades and early buyers appear after it.'; cls = 'win30'; }
+  else if (t.status === 'done') txt = `Fully synced (24 h of history) · last ${since(t.processed_ts)}`;
+  else txt = `Last synced ${since(t.processed_ts)} · next sync ${due ? 'due now' : 'in ' + ago(t.next_process_ts - Date.now())}${t.status === 'entries_open' ? ' · early window open, synced every minute' : ''}`;
+  return `<div class="banner"><span class="v ${cls}">sync</span><div style="flex:1;min-width:0"><span class="small">${esc(txt)}</span><div id="fetchState" class="small"></div></div>${t.status === 'awaiting_pool' || t.status === 'skipped_quote' ? '' : `<button onclick="startFetch('${esc(t.id)}')">Sync now</button>`}</div>`;
+}
+
 async function tokenPage(id) {
   let t0;
   try { t0 = await get('/api/token', { id }); } catch (e) { if (/not found/.test(e.message)) return fetchPage(id); throw e; }
@@ -465,6 +477,7 @@ async function tokenPage(id) {
       ${tile('Buyers', o.buyers ?? '–', `${n(o.buy_near, 0)} N in · ${n(o.sell_near, 0)} N out`)}${tile('Early wallets', es.length, `${n(total, 0)} N in the first minutes`)}
       ${tile('From winners (win80 / win50)', pct(total ? (mix.win80.near + mix.win50.near) / total : null), `${mix.win80.w + mix.win50.w} wallets`, 'g')}${tile('From loss wallets', pct(total ? mix.loss.near / total : null), `${mix.loss.w} wallets`, 'r')}
       ${tile('Creator sold', o.creator_sold ? 'yes' : 'no', o.creator_sold ? n(o.creator_sell_near, 1) + ' N' : null, o.creator_sold ? 'r' : 'g')}${tile('Contract risk', au?.available ? au.risk_score : '–', au?.available ? au.risk_level : 'not audited', riskCls)}</div></div>`;
+  h += syncBanner(t);
   h += `<div class="grid2 wide-l"><div class="card"><h2>Early money by tag <span class="muted">who put NEAR in during the first minutes</span></h2>${mixBar(mix, 'lg')}${mixLegend(mix)}
       <h3>Groups in this token (${gl.length})</h3>${gl.length ? `<div class="glist">${gl.map((g) => { const r = wavg(g.roi); return `<div class="gitem" ${row(P.grp(g.id))}>${tg(g.tag)}<div style="min-width:0"><b>${esc(g.label || g.id)}</b><small>${g.wallets} of ${g.size} wallets · ${n(g.near, 1)} N (${pct(total ? g.near / total : null)})</small></div><span class="${roiCls(r)}" title="NEAR-weighted ROI now">${pct(r)}</span></div>`; }).join('')}</div>` : '<p class="muted">None of the early buyers belongs to a known group yet.</p>'}</div>
     <div class="card"><h2>Bubble map <span class="muted">early buyers clustered by group · size = NEAR in · click a bubble</span></h2>${bubbleMap(es)}
