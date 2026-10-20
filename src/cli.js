@@ -3,6 +3,7 @@
 //   node src/cli.js process                            process everything that is pending, then regroup (and review with NEAR AI)
 //   node src/cli.js reprofile                          profile every early wallet again, then regroup
 //   node src/cli.js label <account> "<name>" [type]    name an exchange / service wallet (type: exchange|service|bridge|fund|other)
+//   node src/cli.js audit <account> [--force] [--json]  audit any NEAR contract / token (access keys, code, tax, sell behaviour)
 //   node src/cli.js import-scanner [state.json] [--dry]  copy the live scanner's data (launches, evaluations, blacklist, positions) here
 //   node src/cli.js scan <token> [--features]          run the gates + AI analyst on any stored token (no buying)
 //   node src/cli.js sim-reset                          reset the simulated wallet
@@ -21,6 +22,7 @@ import { evaluateGroups, reviewPending } from './evaluate/run.js';
 import { buildEntities } from './evaluate/entities.js';
 import { scanDry, blacklistCreator } from './scanner/pipeline.js';
 import { importScanner } from './import/scanner.js';
+import { auditNearContract, summarizeAudit } from './audit/service.js';
 import { resetSim, simBuy, managePositions } from './sim/portfolio.js';
 import { checkAi, aiEnabled, aiStatus } from './ai/nearai.js';
 
@@ -78,6 +80,15 @@ try {
     await col('labels').replaceOne({ _id: account }, { _id: account, label: name, type, ts: Date.now() }, { upsert: true });
     await buildEntities();
     info(`labelled ${account} as "${name}" (${type})`);
+  } else if (cmd === 'audit') {
+    const doc = await auditNearContract(args[0], { force: args.includes('--force') });
+    if (doc.notFound) { console.log(`${doc.address}: no contract on this account`); }
+    else {
+      console.log(`${doc.address} (${doc.kind}${doc.tokenSymbol ? ' ' + doc.tokenSymbol : ''}) · risk ${doc.risk.score}/100 ${doc.risk.level} · trust ${doc.trust.score}/100 ${doc.trust.level}`);
+      for (const f of doc.risk.factors.filter((x) => x.hit && x.weight > 0).sort((a, b) => b.weight - a.weight)) console.log(`  [${f.category} +${f.weight}] ${f.label}${f.detail ? ' - ' + f.detail : ''}`);
+      console.log('  passed:', doc.risk.factors.filter((x) => !x.hit && x.weight > 0).map((x) => x.key).join(', ') || '-');
+      if (args.includes('--json')) console.log(JSON.stringify(summarizeAudit(doc), null, 1));
+    }
   } else if (cmd === 'import-scanner') {
     const file = args.find((a) => !a.startsWith('--')) || '../near-launch-scanner/data/state.json';
     const r = await importScanner(file, { dry: args.includes('--dry') });

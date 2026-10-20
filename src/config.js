@@ -107,7 +107,9 @@ export const config = {
   web: {
     // On a host (Railway sets PORT / RAILWAY_*) the UI listens publicly on 8080 unless PORT says otherwise; locally it stays on 127.0.0.1:8790.
     hosted: !!(process.env.PORT || process.env.RAILWAY_ENVIRONMENT || process.env.RAILWAY_PROJECT_ID),
-    port: num(process.env.DASHBOARD_PORT, num(process.env.PORT, process.env.RAILWAY_ENVIRONMENT || process.env.RAILWAY_PROJECT_ID ? 8080 : 8790)),
+    // DASHBOARD_PORT forces one port. Hosted: 8080 plus $PORT when the host sets a different one. Local: 8790.
+    ports: [...new Set((process.env.DASHBOARD_PORT ? [Number(process.env.DASHBOARD_PORT)] : (process.env.PORT || process.env.RAILWAY_ENVIRONMENT || process.env.RAILWAY_PROJECT_ID) ? [8080, num(process.env.PORT, 8080)] : [8790]).filter((p) => p > 0))],
+    get port() { return this.ports[0]; },
     host: process.env.DASHBOARD_HOST || (process.env.PORT || process.env.RAILWAY_ENVIRONMENT || process.env.RAILWAY_PROJECT_ID ? '0.0.0.0' : '127.0.0.1'),
     password: process.env.DASHBOARD_PASSWORD || '', // optional: when set, the UI asks for it (HTTP Basic auth, any username)
   },

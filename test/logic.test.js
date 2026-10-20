@@ -132,3 +132,69 @@ test('groups: an exchange wallet paying the same odd amount to two wallets withi
   assert.notEqual(walletGroup.get('c'), walletGroup.get('d'), 'round amounts are everyone');
   assert.notEqual(walletGroup.get('a'), walletGroup.get('e'), 'hours apart');
 });
+
+// ---------------------------------------------------------------- contract audit
+import { staticAnalysis, codeFactors } from '../src/audit/analysis.js';
+import { nearFactors, nearTaxFactors, scoreFromFactors, trustScoreFromFactors, sellBehaviourFactors, hasBackdoor } from '../src/audit/factors.js';
+import { summarizeAudit } from '../src/audit/service.js';
+import { applyRules } from '../src/scanner/rules.js';
+
+/** A tiny valid WASM module that exports the given (empty) functions, to exercise the real code analysis. */
+function wasmWith(names) {
+  const leb = (n) => [n]; // all counts / sizes in these tests are < 128
+  const enc = (s) => [...Buffer.from(s)];
+  const section = (id, body) => [id, ...leb(body.length), ...body];
+  const types = section(1, [1, 0x60, 0, 0]);
+  const funcs = section(3, [names.length, ...names.map(() => 0)]);
+  const exports = section(7, [names.length, ...names.flatMap((n, i) => [n.length, ...enc(n), 0x00, i])]);
+  const code = section(10, [names.length, ...names.flatMap(() => [2, 0, 0x0b])]);
+  return Buffer.from([0x00, 0x61, 0x73, 0x6d, 1, 0, 0, 0, ...types, ...funcs, ...exports, ...code]);
+}
+
+test('audit: WASM analysis finds a fake storage method and privileged methods, ignores getters and standards', () => {
+  const stat = staticAnalysis(wasmWith(['ft_transfer', 'ft_balance_of', 'storage_deposit', 'storage_unstake', 'blacklist_add', 'get_owner', 'on_transfer_callback']), true);
+  assert.deepEqual(stat.fakeStorage, ['storage_unstake']);
+  assert.deepEqual(stat.privilegedNames, ['blacklist_add']);
+  assert.equal(stat.nonStandard.length, 0, 'standard methods, getters and callbacks are not "non-standard"');
+  assert.equal(staticAnalysis(Buffer.from('not wasm'), true), null);
+});
+
+test('audit: a locked contract with a backdoor is critical and earns no trust; a clean locked contract earns trust', () => {
+  const stat = staticAnalysis(wasmWith(['ft_transfer', 'storage_unstake']), true);
+  const beh = { sellOk: 55, sellFail: 14, buys: 30, blockedSellers: 0, successfulSellers: 20, privilegedCalls: 24, topPrivileged: { who: 'owner.near', method: 'storage_unstake', count: 24 } };
+  const cf = codeFactors(stat, beh);
+  assert.equal(hasBackdoor(cf), true);
+  const factors = [...nearFactors([], { backdoor: hasBackdoor(cf) }), ...cf];
+  const risk = scoreFromFactors(factors), trust = trustScoreFromFactors(factors);
+  assert.ok(risk.score >= 70 && risk.level === 'critical', `risk ${risk.score}`);
+  assert.ok(trust.score <= 10, 'confirmed malicious caps trust');
+  assert.equal(factors.find((f) => f.key === 'noFullAccessKey').hit, false, 'immutability is not reassuring when the code has a backdoor');
+
+  const clean = nearFactors([], { backdoor: false });
+  assert.equal(clean.find((f) => f.key === 'noFullAccessKey').hit, true);
+  assert.equal(scoreFromFactors(clean).level, 'low');
+});
+
+test('audit: a full-access key is a critical finding; honeypot sell pattern needs several blocked wallets', () => {
+  const withKey = nearFactors([{ public_key: 'k', access_key: { permission: 'FullAccess' } }]);
+  assert.equal(withKey.find((f) => f.key === 'fullAccessKeyExists').hit, true);
+  assert.ok(scoreFromFactors(withKey).score >= 35);
+  const f = (beh) => Object.fromEntries(sellBehaviourFactors(beh).map((x) => [x.key, x.hit]));
+  assert.equal(f({ sellOk: 0, sellFail: 6, buys: 10, blockedSellers: 4, successfulSellers: 0 }).sellsFailing, true);
+  assert.equal(f({ sellOk: 30, sellFail: 6, buys: 10, blockedSellers: 4, successfulSellers: 20 }).sellsFailing, false, 'selling works for others: not a honeypot');
+  assert.equal(nearTaxFactors({ buy_bps: 200, sell_bps: 200, pairs: [1] }).find((x) => x.key === 'taxLow').hit, true);
+  assert.equal(nearTaxFactors({ buy_bps: 3500, sell_bps: 100 }).find((x) => x.key === 'taxExtreme').hit, true);
+});
+
+test('audit: summary for the gates, and the contract_audit_ok gate', () => {
+  assert.equal(summarizeAudit({ notFound: true }).available, false);
+  const factors = [...nearFactors([]), ...codeFactors(staticAnalysis(wasmWith(['ft_transfer', 'storage_unstake']), true), null)];
+  const doc = { notFound: false, risk: scoreFromFactors(factors), trust: trustScoreFromFactors(factors), raw: { accessKeys: [], code: { privilegedNames: [], nonStandard: [] }, behaviour: null }, fetchedAt: 1 };
+  const sum = summarizeAudit(doc);
+  assert.equal(sum.available, true); assert.deepEqual(sum.confirmed_malicious.map((c) => c.key), ['fakeStorageMethod']);
+
+  const base = { pool: { quoteAccepted: true, route: 'direct', lpLocked: true, nearReserve: 200, quoteSymbol: 'wNEAR', quoteForBuy: { tokensOut: 1 } }, contract: { matchesTemplate: true }, market: { mcapUsd: 20000 },
+    trading: { uniqueBuyers: 30, creatorSold: false, priceMultipleSinceFirstTrade: 1, buyNear: 100, sellNear: 10, syncBuyClusters: 0 }, launch: { tax: null }, wallets: { linkedBuyerShare: 0, creatorFundedBuyers: [], creator: null }, intel: null };
+  assert.equal(applyRules({ ...base, audit: { available: false } }).gates.find((g) => g.id === 'contract_audit_ok').ok, true, 'no audit: not blocked');
+  assert.equal(applyRules({ ...base, audit: sum }).gates.find((g) => g.id === 'contract_audit_ok').ok, false, 'a confirmed backdoor fails the gate');
+});

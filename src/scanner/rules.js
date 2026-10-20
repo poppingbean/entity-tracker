@@ -22,6 +22,10 @@ export function applyRules(f) {
   const early = f.market.mcapUsd != null && f.market.mcapUsd < R.ignoreRunupBelowMcapUsd;
   gate(early || f.trading.priceMultipleSinceFirstTrade <= R.maxPriceMultipleSinceLaunch, 'not_overextended', `price already ${f.trading.priceMultipleSinceFirstTrade}x since first trade at market cap $${(f.market.mcapUsd ?? 0).toLocaleString('en-US')}`);
   gate(f.pool.quoteForBuy.tokensOut > 0, 'quote_available', 'no executable quote for the buy size');
+  // contract audit: confirmed malicious findings (fake storage backdoor, sells failing, owner wiping holders ...) or a critical risk score
+  const au = f.audit;
+  gate(!au?.available || (au.confirmed_malicious.length === 0 && au.risk_score < R.auditMaxRisk), 'contract_audit_ok',
+    au?.available ? `contract audit: risk ${au.risk_score}/100 ${au.risk_level}${au.confirmed_malicious.length ? '; confirmed: ' + au.confirmed_malicious.map((c) => c.key).join(', ') : ''}` : 'contract audit unavailable');
   // entity intelligence
   gate((f.intel?.creator_prior_rugs_or_dumps ?? 0) === 0, 'creator_clean_history', `the creator already launched ${f.intel?.creator_prior_rugs_or_dumps} token(s) that were rugged or dumped by them (${(f.intel?.creator_prior_rug_symbols || []).join(', ')})`);
   const badShare = f.intel?.early_buyer_groups?.bad?.share ?? 0;
@@ -37,6 +41,8 @@ export function applyRules(f) {
   score -= f.wallets.linkedBuyerShare * 20;
   score += Math.min(8, (f.intel?.early_buyer_groups?.good?.share ?? 0) * 16); // known good money among the early buyers
   score -= Math.min(15, badShare * 30);
+  if (f.audit?.available) score -= Math.min(15, Math.round(f.audit.risk_score / 5)); // risk 0-100 costs up to 15 points
+  if (f.audit?.available && f.audit.trust_score >= 70) score += 3;
   score = Math.max(0, Math.min(100, Math.round(score)));
 
   const failed = gates.filter((g) => !g.ok);

@@ -8,6 +8,7 @@ import { priceSeries } from '../collect/analyze.js';
 import { INFRA } from '../collect/trades.js';
 import { profileWallet, isGenericKind } from '../graph/profile.js';
 import { poolSnapshot } from './pool.js';
+import { auditNearContract, summarizeAudit } from '../audit/service.js';
 
 // Token code each launchpad deploys (observed on-chain). A code that a launchpad has deployed for >= 3 different tokens is learned too.
 const KNOWN_CODE = {
@@ -73,9 +74,11 @@ async function intelFor(buyers, creator, tokenId) {
 export async function collectFeatures(t, buyNear, now = Date.now()) {
   const q = t.pool.quote;
   const devBuyNear = t.dev_buy_near ?? (t.dev_buy_quote_raw ? await quoteToNear(q, t.dev_buy_quote_raw).catch(() => null) : 0);
-  const [pool, spot, tradesAll, code, top, nearUsd] = await Promise.all([
+  const withTimeout = (p, ms) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error('audit timed out')), ms))]);
+  const auditP = config.audit.enabled ? withTimeout(auditNearContract(t._id), config.audit.timeoutSeconds * 1000).then(summarizeAudit).catch((e) => ({ available: false, reason: e.message })) : Promise.resolve({ available: false, reason: 'audit disabled' });
+  const [pool, spot, tradesAll, code, top, nearUsd, audit] = await Promise.all([
     poolSnapshot(t, buyNear), poolSnapshot(t, 0.1).catch(() => null), col('trades').find({ token: t._id }).sort({ ts: 1 }).toArray(),
-    codeHashCheck(t), fastnearGet(`/v1/ft/${t._id}/top`), nearUsdPrice(),
+    codeHashCheck(t), fastnearGet(`/v1/ft/${t._id}/top`), nearUsdPrice(), auditP,
   ]);
   const trades = tradesAll.filter((x) => x.ts >= t.live_ts && x.ts <= now);
   const ext = trades.filter((x) => x.trader !== t.creator);
@@ -122,6 +125,7 @@ export async function collectFeatures(t, buyNear, now = Date.now()) {
     },
     launch: { devBuyNear: devBuyNear == null ? null : +devBuyNear.toFixed(2), tax: t.tax || null, creator: t.creator },
     contract: code,
+    audit,
     market: { priceNear, totalSupply: supply, mcapNear: mcapNear != null ? +mcapNear.toFixed(1) : null, nearUsd, mcapUsd: mcapNear != null && nearUsd ? Math.round(mcapNear * nearUsd) : null },
     trading: {
       firstTradeDelaySeconds: trades[0] ? Math.round((trades[0].ts - t.live_ts) / 1000) : null,

@@ -239,6 +239,51 @@ function graphSvg(g) {
   return `<svg class="graph" viewBox="0 0 ${W} ${H}">${edgeSvg}${nodeSvg}</svg>`;
 }
 
+// ------------------------------------------------------------------ contract audit
+const LV = { low: 'good', medium: 'neutral', high: 'bad', critical: 'bad', unrated: 'unknown', high_trust: 'good' };
+const CAT = { critical: 'Critical', ownership: 'Ownership & control', trading: 'Trading', liquidity: 'Liquidity', trust: 'Trust signals' };
+const gauge = (label, score, level, kind) => {
+  const v = score ?? 0, col = kind === 'risk' ? (v >= 70 ? '#dc2626' : v >= 45 ? '#ea580c' : v >= 20 ? '#d97706' : '#16a34a') : (v >= 70 ? '#16a34a' : v >= 40 ? '#0ea5e9' : v >= 15 ? '#d97706' : '#94a3b8');
+  return `<div class="kpi"><span>${label}</span><b style="color:${col}">${score ?? '–'}<span class="muted" style="font-size:13px;font-weight:500"> / 100 · ${esc(level || '–')}</span></b><div style="height:7px;border-radius:5px;background:#e6f1fb;margin-top:8px;overflow:hidden"><div style="height:100%;width:${v}%;background:${col}"></div></div></div>`;
+};
+function auditBody(a) {
+  if (a.error) return `<section class="r">${esc(a.error)}</section>`;
+  if (a.notFound) return `<section class="a">${esc(a.address)}: there is no contract deployed on this account (a plain wallet), nothing to audit.</section>`;
+  const sum = a.summary || {};
+  let h = `<section><div class="bar"><h2 style="margin:0">${esc(a.address)}${a.tokenSymbol ? ' · ' + esc(a.tokenSymbol) : ''} <span class="tag">${esc(a.kind)}</span></h2><span class="muted">audited ${when(a.fetchedAt)}${a.cached ? ' (cached ≤ 1 h)' : ''}</span><button onclick="runAudit('${esc(a.address)}',true)">Re-run</button></div>
+    <div class="grid">${gauge('Risk score (higher = riskier)', a.risk.score, a.risk.level, 'risk')}${gauge('Trust score', a.trust.score, a.trust.level, 'trust')}
+    <div class="kpi"><span>Full-access keys</span><b>${sum.full_access_keys ?? '–'}</b></div><div class="kpi"><span>Confirmed malicious findings</span><b class="${(sum.confirmed_malicious || []).length ? 'r' : 'g'}">${(sum.confirmed_malicious || []).length}</b></div>
+    <div class="kpi"><span>Recent sells</span><b>${sum.sells ? sum.sells.ok + ' ok / ' + sum.sells.failed + ' failed' : '–'}</b></div></div>`;
+  if ((sum.confirmed_malicious || []).length) h += `<p class="r"><b>Confirmed:</b> ${sum.confirmed_malicious.map((c) => esc(c.key) + (c.detail ? ' (' + esc(c.detail) + ')' : '')).join(' · ')}</p>`;
+  h += '</section>';
+  const all = [...a.risk.factors, ...a.trust.factors.filter((f) => !a.risk.factors.some((x) => x.key === f.key))];
+  const groups = {};
+  for (const f of all) (groups[f.category] ||= []).push(f);
+  h += '<section><h2>Checklist <span class="muted">every criterion that was evaluated, not only the ones that tripped</span></h2><table><tr><th>Result</th><th>Check</th><th>Weight</th><th>Detail</th></tr>' +
+    ['critical', 'ownership', 'trading', 'liquidity', 'trust'].filter((c) => groups[c]).map((c) => `<tr><td colspan="4" style="background:var(--primary-50);font-weight:700;color:var(--primary-700)">${CAT[c]}</td></tr>` + groups[c].map((f) => `<tr><td>${f.category === 'trust' ? (f.hit ? '<span class="v good">earned</span>' : '<span class="v unknown">not earned</span>') : f.hit ? (f.weight > 0 ? '<span class="v bad">hit</span>' : '<span class="v unknown">note</span>') : '<span class="v good">pass</span>'}</td><td class="wrap">${esc(f.label)}</td><td class="${f.hit && f.weight > 0 ? 'r' : 'muted'}">${f.weight > 0 ? '+' : ''}${f.weight}</td><td class="wrap muted">${esc(f.detail || '')}</td></tr>`).join('')).join('') + '</table></section>';
+  const code = a.raw?.code;
+  if (code) h += `<section><h2>Code <span class="muted">${code.exports.length} exported functions</span></h2>${code.fakeStorage.length ? `<p class="r">Fake storage methods: ${code.fakeStorage.map(esc).join(', ')}</p>` : ''}${(code.privilegedNames || []).length ? `<p class="a">Privileged methods: ${code.privilegedNames.map(esc).join(', ')}</p>` : ''}${code.nonStandard.length ? `<p>Non-standard methods: ${code.nonStandard.map(esc).join(', ')}</p>` : '<p class="muted">No methods outside the standards.</p>'}</section>`;
+  if (a.raw?.tax) h += `<section><h2>Launchpad tax</h2><pre>${esc(JSON.stringify(a.raw.tax, null, 1))}</pre></section>`;
+  return h;
+}
+async function runAudit(address, force) {
+  address = (address || '').trim();
+  if (!address) return;
+  $('auditResult').innerHTML = '<section class="muted">Auditing ' + esc(address) + ' … reading keys, code and recent transactions (10-30 s on a fresh contract)</section>';
+  setUrl('/audit/' + encodeURIComponent(address));
+  const a = await get('/api/audit', { address, force: force ? '1' : '' }).catch((e) => ({ error: e.message }));
+  $('auditResult').innerHTML = auditBody(a);
+  $('auditInput').value = address;
+}
+views.audit = async () => {
+  const recent = await get('/api/audits', { limit: 25 });
+  return `<section><div class="bar"><h2 style="margin:0">Audit a NEAR contract</h2>
+      <input id="auditInput" type="search" style="min-width:380px" placeholder="token or contract account, e.g. doge.neardogecoin.near" onkeydown="if(event.key==='Enter')runAudit(this.value)"><button onclick="runAudit($('auditInput').value)">Audit</button></div>
+      <p class="muted" style="margin:0">Checks access keys (a full-access key can redeploy or drain the contract), WASM exports (fake NEP-145 storage methods are the classic honeypot backdoor, privileged methods), the launchpad buy/sell tax and recent sell behaviour. Tokens are also audited automatically when the scanner checks them, and a confirmed finding fails the <code>contract_audit_ok</code> gate.</p></section>
+    <div id="auditResult"></div>
+    <section><h2>Recent audits</h2><table><tr><th>When</th><th>Account</th><th>Kind</th><th>Risk</th><th>Trust</th></tr>${recent.rows.map((r) => `<tr class="click" data-id="${esc(r.id)}" onclick="runAudit(this.dataset.id)"><td>${when(r.fetchedAt)}</td><td>${esc(short(r.id, 34))} ${r.tokenSymbol ? '<b>' + esc(r.tokenSymbol) + '</b>' : ''}</td><td>${esc(r.kind)}</td><td>${r.notFound ? '<span class="muted">no contract</span>' : `<span class="v ${LV[r.risk.level] || 'unknown'}">${r.risk.score} · ${esc(r.risk.level)}</span>`}</td><td>${r.notFound ? '–' : `<span class="v ${r.trust.level === 'high' ? 'good' : r.trust.level === 'unrated' ? 'unknown' : 'neutral'}">${r.trust.score} · ${esc(r.trust.level)}</span>`}</td></tr>`).join('') || '<tr><td colspan="5" class="muted">none yet</td></tr>'}</table></section>`;
+};
+
 // ------------------------------------------------------------------ scanner monitor
 const lineSvg = (pts, { fmt = (v) => n(v, 2), base = null } = {}) => {
   if (pts.length < 2) return '<p class="muted">not enough data points yet (a point is stored every 5 minutes while the worker runs)</p>';
@@ -423,6 +468,8 @@ async function openToken(id) {
   const t = await get('/api/token', { id }), o = t.outcome || {};
   let h = `<h2 style="color:var(--text);font-size:15px">${esc(t.symbol || '')} ${esc(t.name || '')} ${o.rugged ? '<span class="v bad">RUG</span>' : ''}</h2><p>${tokLink(t.id, t.launchpad)} · ${esc(t.launchpad)} · creator ${t.creator ? nb(t.creator) : '–'} · live ${when(t.live_ts)}</p>`;
   h += `<p class="muted">peak x${n(o.peak_multiple, 1)} · now x${n(o.last_multiple, 1)} · drawdown ${pct(o.drawdown)} · buyers ${o.buyers ?? '–'} · bought ${n(o.buy_near, 0)} N · sold ${n(o.sell_near, 0)} N · creator sold ${o.creator_sold ? 'yes (' + n(o.creator_sell_near, 1) + ' N)' : 'no'}</p>`;
+  const au = t.audit;
+  h += '<h3>Contract audit</h3>' + (au?.available ? `<p><span class="v ${au.risk_level === 'low' ? 'good' : au.risk_level === 'medium' ? 'neutral' : 'bad'}">risk ${au.risk_score} · ${esc(au.risk_level)}</span> <span class="v ${au.trust_level === 'high' ? 'good' : 'unknown'}">trust ${au.trust_score}</span> · full-access keys ${au.full_access_keys ?? '–'} · ${(au.confirmed_malicious || []).length ? '<span class="r">confirmed: ' + au.confirmed_malicious.map((c) => esc(c.key)).join(', ') + '</span>' : 'no confirmed malicious finding'}</p>${(au.findings || []).length ? '<ul class="flags">' + au.findings.map((f) => `<li>${esc(f.key)} (+${f.weight})${f.detail ? ' <span class="muted">' + esc(f.detail) + '</span>' : ''}</li>`).join('') + '</ul>' : ''}` : '<p class="muted">Not audited yet.</p>') + `<p><a href="/audit/${encodeURIComponent(t.id)}" onclick="closeDrawer();return nav(event,'/audit/${encodeURIComponent(t.id)}')">Open the full audit →</a></p>`;
   h += '<h3>Early buyers</h3><table><tr><th>#</th><th>Wallet</th><th>Group</th><th>Delay</th><th>NEAR in</th><th>Wallet age</th><th>Funded by</th><th>ROI 1h</th><th>ROI 24h</th><th>Now</th></tr>' + t.entries.map((e) => `<tr class="click" data-id="${esc(e.wallet)}" onclick="openWallet(this.dataset.id)"><td>${e.rank}</td><td>${esc(short(e.wallet, 24))}${e.is_creator ? ' <span class="tag">creator</span>' : ''}</td>
     <td>${e.cluster ? `${vb(e.cluster.verdict)} ${esc(e.cluster.label || e.cluster.id)} (${e.cluster.size})` : '<span class="muted">solo / unknown</span>'}</td><td>${e.delay_s}s</td><td>${n(e.buy_near, 1)}</td><td>${e.wallet_age_days != null ? e.wallet_age_days + ' d' : '–'}</td><td>${esc(e.funder_kind || '–')}</td>
     <td class="${roiCls(e.roi?.['60'])}">${pct(e.roi?.['60'])}</td><td class="${roiCls(e.roi?.['1440'])}">${pct(e.roi?.['1440'])}</td><td class="${roiCls(e.roi_now)}">${pct(e.roi_now)}</td></tr>`).join('') + '</table>';
@@ -437,9 +484,10 @@ views.logs = async () => {
 };
 
 // ------------------------------------------------------------------ shell + router (History API: /config, /groups/<id>, no #)
-const TABS = ['monitor', 'sim', 'scans', 'overview', 'signals', 'groups', 'entities', 'wallets', 'tokens', 'logs', 'config'];
+const TABS = ['audit', 'monitor', 'sim', 'scans', 'overview', 'signals', 'groups', 'entities', 'wallets', 'tokens', 'logs', 'config'];
 const ICONS = {
   monitor: '<polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>', sim: '<polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/>',
+  audit: '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><polyline points="9 12 11 14 15 10"/>',
   scans: '<polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>', overview: '<rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/>',
   signals: '<polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>', groups: '<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>',
   entities: '<circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/>',
@@ -447,18 +495,19 @@ const ICONS = {
   logs: '<polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/>', config: '<line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/>',
 };
 const NAV = [
-  ['Scanner', [['monitor', 'Monitor'], ['sim', 'Simulated wallet'], ['scans', 'Evaluations']]],
+  ['Scanner', [['monitor', 'Monitor'], ['sim', 'Simulated wallet'], ['scans', 'Evaluations'], ['audit', 'Contract audit']]],
   ['Early investors', [['overview', 'Overview'], ['signals', 'Signals'], ['groups', 'Groups'], ['entities', 'Entities'], ['wallets', 'Wallets'], ['tokens', 'Tokens']]],
   ['System', [['logs', 'Log'], ['config', 'Settings']]],
 ];
 const TITLES = {
   monitor: ['Monitor', 'Every new launch: first check, hard gates and the AI analyst\'s decision'], sim: ['Simulated wallet', 'Paper trading with real pool quotes: equity, open and closed positions'],
+  audit: ['Contract audit', 'Access keys, code, tax and sell behaviour of any NEAR token or contract, scored for risk and trust'],
   scans: ['Evaluations', 'Every gate check and AI review, with the reasons'], overview: ['Overview', 'What the tracker has learned about early investors so far'],
   signals: ['Signals', 'Recent tokens where known good or dangerous groups were among the early buyers'], groups: ['Groups', 'Wallets linked by funding, money flow and co-buying, judged good or bad'],
   entities: ['Entities', 'Exchange wallets, services, funders and destinations around the early investors'], wallets: ['Early wallets', 'Who bought early, who funded them and how they did'],
   tokens: ['Tokens', 'Every launch with its outcome and early buyers'], logs: ['Log', 'Worker activity'], config: ['Settings', 'Read-only view of the configuration in use'],
 };
-const OPENERS = { groups: (id) => openGroup(id), wallets: (id) => openWallet(id), tokens: (id) => openToken(id), entities: (id) => openEntity(id), scans: (id) => openScan(id), sim: (id) => openSimPosition(id) };
+const OPENERS = { audit: (id) => runAudit(id), groups: (id) => openGroup(id), wallets: (id) => openWallet(id), tokens: (id) => openToken(id), entities: (id) => openEntity(id), scans: (id) => openScan(id), sim: (id) => openSimPosition(id) };
 function openDrawer(html) { $('drawerBody').innerHTML = html; $('drawer').classList.add('open'); }
 function setUrl(path) { if (location.pathname !== path) history.pushState(null, '', path); }
 function closeDrawer() {

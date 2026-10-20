@@ -69,6 +69,17 @@ Everything is stored in MongoDB (`scans`, `followups`, `sim_account`, `sim_posit
 
 `node src/cli.js import-scanner [path/to/state.json] [--dry]` (default `../near-launch-scanner/data/state.json`) copies what the scanner already knows: its launches become `tokens` (new ones are queued so the tracker reads their trades and early buyers), its evaluations and follow-up reviews become `scans` (source `scanner`, with gates, scores, AI verdicts and features), its creator blacklist feeds the tracker's creator gate, its code-hash counts merge into `templates`, and its **real** positions and spend go to `scanner_positions` / `scanner_spend`, kept apart so they never touch the simulated wallet. Imported launches are marked scanned, so the simulated wallet never buys them. Safe to re-run; existing tracker data is not overwritten.
 
+## Contract audit
+
+Ported from the TrustFlow backend (`contractAuditService`, `nearContractAnalysis`, `nearRpcClient`): a NEAR token / contract audit scored into a **risk** (0-100, higher = riskier: low / medium / high / critical) and a separate **trust** score, with the full checklist (passed checks are listed too):
+
+- **Access keys:** a full-access key lets its holder redeploy or drain the contract; "locked" only counts as trust when the code has no backdoor.
+- **Code:** the WASM exports are analysed offline. A fake NEP-145 `storage_*` method is the classic honeypot backdoor (NEARDOGE's `storage_unstake`); privileged methods (blacklist / freeze / pause / mint / upgrade ...), owner-only guards and non-standard methods are flagged, standards, getters and callbacks are not.
+- **Behaviour:** recent sells (do holders' sells succeed, across how many wallets) and privileged accounts calling non-standard methods on other holders' accounts.
+- **Tax:** the launchpad's `get_tax` (buy / sell bps).
+
+Where it is used: the scanner audits every token it checks (cached 1 h) and puts a summary in `features.audit`; a confirmed malicious finding or a risk score at or above `AUDIT_MAX_RISK` (70) fails the `contract_audit_ok` gate, the risk also lowers the rule score, and the AI analyst reads the findings. The **Contract audit** page (`/audit`, `/audit/<account>`) audits any NEAR account on demand, the token drawer shows its audit, and `node src/cli.js audit <account> [--force] [--json]` does it from the command line. Results are stored in the `audits` collection. Checked against NEARDOGE (`doge.neardogecoin.near`: critical 92, fake `storage_unstake` called 24 times on holders), `wrap.near` (risk 0, trust 100) and a nearly.trade token (risk 0, only the launchpad's tax methods noted).
+
 ## Entities (exchange wallets included)
 
 A **group** is a set of early investors; an **entity** is any account in their funding and money-flow graph: exchange hot wallets, NEAR Intents accounts, relayers / wallet services, ordinary funder wallets and the destinations their NEAR goes to. The `entities` collection (and the **Entities** tab) records for each one: its kind and label, how many early wallets it funded and how much, which tokens those wallets bought, how they performed, which good / bad groups they belong to, and how much early-investor NEAR it received. An exchange wallet is shown like any other entity, with a note that funding from it links nothing by itself.
@@ -77,7 +88,7 @@ Names come from built-in patterns (Binance, OKX, Bybit, Meteor, Intear ...), the
 
 ## Web UI
 
-Tabs: **Monitor** (launches, first-check state, gates, decisions) · **Sim** (simulated wallet: equity curve, open and closed positions, simulated sell buttons) · **Evaluations** (every gate check and AI analyst review, with the AI's reasons) · **Config** (read-only settings) · **Overview** (counts, top good / bad groups, latest launches) · **Signals** (recent tokens where known good or bad groups were among the early buyers, with a bullish / warning / mixed assessment) · **Groups** (filter, sort, open one for the AI review, metrics, funding / money-flow graph, wallets, tokens and verdict history) · **Entities** (exchange wallets, services, funders, destinations) · **Wallets** · **Tokens** (early buyers with their group verdicts) · **Logs**.
+Tabs: **Contract audit** · **Monitor** (launches, first-check state, gates, decisions) · **Sim** (simulated wallet: equity curve, open and closed positions, simulated sell buttons) · **Evaluations** (every gate check and AI analyst review, with the AI's reasons) · **Config** (read-only settings) · **Overview** (counts, top good / bad groups, latest launches) · **Signals** (recent tokens where known good or bad groups were among the early buyers, with a bullish / warning / mixed assessment) · **Groups** (filter, sort, open one for the AI review, metrics, funding / money-flow graph, wallets, tokens and verdict history) · **Entities** (exchange wallets, services, funders, destinations) · **Wallets** · **Tokens** (early buyers with their group verdicts) · **Logs**.
 
 The UI is a single-page app with clean paths (History API, no `#`): `/monitor`, `/sim`, `/scans`, `/overview`, `/signals`, `/groups`, `/entities`, `/wallets`, `/tokens`, `/logs`, `/config`, and deep links to a detail drawer such as `/groups/<id>`, `/wallets/<id>`, `/tokens/<id>`, `/scans/<id>`. `/` redirects to `/monitor`.
 
@@ -93,7 +104,7 @@ The UI and API are read-only except the simulated sell button (`POST /api/sim/se
 
 ## MongoDB collections
 
-`tokens` (launches, outcome, status) · `trades` (swaps) · `transfers` (token hand-offs between wallets) · `entries` (early wallet × token, with ROI per checkpoint) · `wallets` (profile, funding chain, outflows, track record, group) · `edges` (funding and flow edges) · `scans` (gate checks + AI reviews) · `followups` · `sim_account` / `sim_positions` / `sim_fills` / `sim_equity` (simulated wallet) · `blacklist` · `templates` · `entities` (every funder / destination account incl. exchange wallets) · `labels` (hand-set names) · `clusters` (groups: members, links, metrics, tokens, rule + AI verdicts) · `cluster_history` · `events` (30-day log) · `meta` (cursors, worker heartbeat).
+`tokens` (launches, outcome, status) · `trades` (swaps) · `transfers` (token hand-offs between wallets) · `entries` (early wallet × token, with ROI per checkpoint) · `wallets` (profile, funding chain, outflows, track record, group) · `edges` (funding and flow edges) · `audits` (contract audits) · `scans` (gate checks + AI reviews) · `followups` · `sim_account` / `sim_positions` / `sim_fills` / `sim_equity` (simulated wallet) · `blacklist` · `templates` · `entities` (every funder / destination account incl. exchange wallets) · `labels` (hand-set names) · `clusters` (groups: members, links, metrics, tokens, rule + AI verdicts) · `cluster_history` · `events` (30-day log) · `meta` (cursors, worker heartbeat).
 
 ## Configuration
 

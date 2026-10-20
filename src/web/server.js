@@ -4,15 +4,22 @@
 import http from 'node:http';
 import fs from 'node:fs';
 import crypto from 'node:crypto';
-import { col, metaGet } from '../db.js';
+import { col, metaGet, getDb } from '../db.js';
 import { config } from '../config.js';
 import { recentLogs, info } from '../log.js';
 import { aiEnabled, aiStatus } from '../ai/nearai.js';
 import { simSell, ensureAccount } from '../sim/portfolio.js';
+import { auditNearContract, getCachedAudit, validNearAddress, summarizeAudit } from '../audit/service.js';
 
 const page = fs.readFileSync(new URL('./index.html', import.meta.url), 'utf8');
 // pages of the single-page UI; each is served the same HTML and the browser routes with the History API (no # in URLs)
-const UI_VIEWS = new Set(['monitor', 'sim', 'scans', 'overview', 'signals', 'groups', 'entities', 'wallets', 'tokens', 'logs', 'config']);
+const UI_VIEWS = new Set(['audit', 'monitor', 'sim', 'scans', 'overview', 'signals', 'groups', 'entities', 'wallets', 'tokens', 'logs', 'config']);
+const auditHits = new Map(); // ip -> [timestamps]
+function auditAllowed(ip) {
+  const now = Date.now(), list = (auditHits.get(ip) || []).filter((t) => now - t < 10 * 60e3);
+  if (list.length >= 30) { auditHits.set(ip, list); return false; }
+  list.push(now); auditHits.set(ip, list); return true;
+}
 const clamp = (v, d, max) => Math.min(max, Math.max(1, Number(v) || d));
 const rx = (s) => ({ $regex: String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), $options: 'i' });
 const strip = ({ _id, ...r }) => ({ id: _id, ...r });
@@ -194,6 +201,24 @@ const routes = {
 
   '/api/config': async () => ({ scan: config.scan, rules: config.rules, analyst: config.analyst, sim: config.sim, followUp: config.followUp, entry: config.entry, outcome: config.outcome, launchpads: config.launchpads, ai: { enabled: aiEnabled(), model: config.ai.model }, db: config.mongo.dbName }),
 
+  // ------------------------------------------------------------ contract audit
+  '/api/audit': async (u, req) => {
+    const address = (u.searchParams.get('address') || '').trim().toLowerCase();
+    if (!validNearAddress(address)) return { error: 'invalid NEAR account id' };
+    const force = u.searchParams.get('force') === '1';
+    const cached = await getCachedAudit(address);
+    const fresh = cached && Date.now() - cached.fetchedAt < 3600e3;
+    if (!(fresh && !force) && !auditAllowed(req.socket.remoteAddress || 'ip')) return { error: 'too many audits, try again in a few minutes' };
+    const doc = await auditNearContract(address, { force });
+    const { _id, ...rest } = doc;
+    return { id: _id, ...rest, summary: summarizeAudit(doc), cached: !!(fresh && !force) };
+  },
+
+  '/api/audits': async (u) => {
+    const rows = await col('audits').find({}, { projection: { raw: 0, 'risk.factors': 0, 'trust.factors': 0 } }).sort({ fetchedAt: -1 }).limit(clamp(u.searchParams.get('limit'), 30, 100)).toArray();
+    return { rows: rows.map(strip) };
+  },
+
   '/api/wallets': async (u) => {
     const f = { is_early: true };
     const q = (u.searchParams.get('q') || '').trim(); if (q) f._id = rx(q);
@@ -239,7 +264,8 @@ const routes = {
     const clusters = await col('clusters').find({ _id: { $in: cids } }, { projection: { size: 1, verdict: 1, 'ai.label': 1, 'rule.tags': 1 } }).toArray();
     const cmap = new Map(clusters.map((c) => [c._id, c]));
     const { _id, ...rest } = t;
-    return { id: _id, ...rest, entries: entries.map((e) => { const w = wmap.get(e.wallet), c = w?.cluster_id ? cmap.get(w.cluster_id) : null;
+    const audit = summarizeAudit(await getCachedAudit(id));
+    return { id: _id, ...rest, audit, entries: entries.map((e) => { const w = wmap.get(e.wallet), c = w?.cluster_id ? cmap.get(w.cluster_id) : null;
       return { wallet: e.wallet, rank: e.rank, delay_s: e.delay_s, buy_near: e.buy_near, roi: e.roi, roi_now: e.roi_now, sold_share: e.sold_share, is_creator: e.is_creator, kind: w?.kind || null, funder_kind: w?.funder_kind || null,
         wallet_age_days: w?.created_ts ? Math.round((e.first_buy_ts - w.created_ts) / 86400e3) : null, cluster: c ? { id: c._id, size: c.size, verdict: c.verdict, label: c.ai?.label || c.rule?.tags?.[0] || null } : null }; }) };
   },
@@ -252,7 +278,7 @@ const routes = {
     return { rows };
   },
 
-  '/api/health': async () => ({ ok: true, now: Date.now(), ai: { enabled: aiEnabled(), ok: aiStatus.ok }, recent: recentLogs.length }),
+  '/api/health': async () => { let db = false; try { getDb(); db = true; } catch {} return { ok: true, db, now: Date.now(), ai: { enabled: aiEnabled(), ok: aiStatus.ok }, recent: recentLogs.length, port: config.web.ports }; },
 };
 
 const safeEq = (a, b) => a.length === b.length && crypto.timingSafeEqual(Buffer.from(a), Buffer.from(b));
@@ -285,9 +311,22 @@ export function startWeb() {
       if (UI_VIEWS.has(u.pathname.split('/')[1])) { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' }).end(page); return; } // client-side routes: /config, /groups/<id> ...
       const route = routes[u.pathname];
       if (!route) { res.writeHead(404).end('not found'); return; }
-      res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' }).end(JSON.stringify(await route(u)));
+      res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' }).end(JSON.stringify(await route(u, req)));
     } catch (e) { res.writeHead(500, { 'content-type': 'application/json' }).end(JSON.stringify({ error: e.message })); }
   });
-  server.listen(config.web.port, config.web.host, () => info(`web UI: http://${exposed() ? config.web.host : 'localhost'}:${config.web.port}${exposed() ? (config.web.password ? ' (password protected)' : ' (public, no password: read-only, simulated sells disabled)') : ''}`));
+  // A host routes its public domain to ONE port (Railway: the service's target port, 8080 by default, or $PORT). Listen on all of them
+  // so the app answers whichever one the domain points at.
+  const ports = config.web.ports;
+  const mode = exposed() ? (config.web.password ? ' (password protected)' : ' (public, no password: read-only, simulated sells disabled)') : '';
+  server.listen(ports[0], config.web.host, () => info(`web UI: http://${exposed() ? config.web.host : 'localhost'}:${ports[0]}${mode}`));
+  server.on('error', (e) => error(`web server ${ports[0]}: ${e.message}`));
+  const extra = ports.slice(1).map((p) => {
+    const s2 = http.createServer(server.listeners('request')[0]);
+    s2.on('error', (e) => error(`web server ${p}: ${e.message}`));
+    s2.listen(p, config.web.host, () => info(`web UI also on port ${p}`));
+    return s2;
+  });
+  const close = server.close.bind(server);
+  server.close = (...a) => { extra.forEach((s2) => s2.close()); return close(...a); };
   return server;
 }
