@@ -35,6 +35,8 @@ export const config = {
     rugDrawdown: num(process.env.RUG_DRAWDOWN, 0.9),
     roundTripPeak: num(process.env.ROUND_TRIP_PEAK, 3),          // a token that pumped to this multiple of its launch price ...
     roundTripBack: num(process.env.ROUND_TRIP_BACK, 1.25),       // ... and is back at or below this multiple of it counts as a rug (round trip)
+    creatorExitShare: num(process.env.CREATOR_EXIT_SHARE, 0.8),  // creator sold this share of their dev buy within the first hour ...
+    creatorExitBack: num(process.env.CREATOR_EXIT_BACK, 1.5),    // ... and the price is at or below this multiple of the launch price = rug (creator exit)
     softRugDrawdown: num(process.env.SOFT_RUG_DRAWDOWN, 0.7),    // a fall this deep counts as a rug when the creator also sold at least 1 NEAR
     winRoi: num(process.env.WIN_ROI, 0.2),
   },
@@ -118,6 +120,9 @@ export const config = {
     get port() { return this.ports[0]; },
     host: process.env.DASHBOARD_HOST || (process.env.PORT || process.env.RAILWAY_ENVIRONMENT || process.env.RAILWAY_PROJECT_ID ? '0.0.0.0' : '127.0.0.1'),
     password: process.env.DASHBOARD_PASSWORD || '', // optional: when set, the UI asks for it (HTTP Basic auth, any username)
+    // A public dashboard must not teach a rugger what is checked: thresholds, rule names, reasons and gate ids are removed from the API (web/redact.js).
+    // Default: on for a public deployment (hosted, no password); HIDE_CRITERIA=1 / 0 forces it.
+    get hideCriteria() { const v = process.env.HIDE_CRITERIA; return v != null && v !== '' ? /^(1|true|yes|on)$/i.test(v) : this.hosted && !this.password; },
   },
 
 };

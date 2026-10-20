@@ -43,17 +43,24 @@ export function buildOutcome(token, trades, now, cfg) {
   // Why a token counts as rugged: its price collapsed from the peak, its creator dumped into a deep fall, or it was flagged from outside
   // (the scanner's dev-rug blacklist: the creator emptied their balance while a position was held).
   const creatorSellNear = sum(creatorSells, (t) => t.near);
+  // creator exit: how much of the creator's dev buy came back out within the first hour, and how soon the first sale was. Not a rug by itself
+  // (most launches show it and the price rarely moves), but the clearest early sign of a creator leaving.
+  const devBuy = token.dev_buy_near || 0, firstSell = creatorSells[0];
+  const exitSold = sum(creatorSells.filter((t) => t.ts <= live + 60 * MIN), (t) => t.near);
+  const creatorExit = firstSell && devBuy >= 1 ? { share: exitSold / devBuy, minutes: Math.max(0, Math.round((firstSell.ts - live) / MIN)), sold_near: exitSold, dev_buy_near: devBuy } : null;
   const rugKinds = [];
   if (settled && drawdown != null && drawdown >= cfg.rugDrawdown) rugKinds.push('price_crash');
   else if (settled && drawdown != null && drawdown >= (cfg.softRugDrawdown ?? 0.7) && creatorSellNear >= 1) rugKinds.push('creator_dump');
   // round trip: it pumped (peak at least roundTripPeak x the launch price) and is back near where it started (at most roundTripBack x): everyone who bought after launch is flat or under
   const first0 = series[0]?.price;
   if (settled && first0 && peak && last != null && peak / first0 >= (cfg.roundTripPeak ?? 3) && last / first0 <= (cfg.roundTripBack ?? 1.25) && !rugKinds.length) rugKinds.push('round_trip');
+  // creator exit: the creator took (all of) their dev buy out within the hour and the token is not much above its launch price (at most creatorExitBack x), so holders are flat or under
+  if (creatorExit && creatorExit.share >= (cfg.creatorExitShare ?? 0.8) && first0 && last != null && last / first0 <= (cfg.creatorExitBack ?? 1.5) && !rugKinds.length) rugKinds.push('creator_exit');
   if (token.rug?.flagged) rugKinds.push('flagged');
   return {
     first_price: first, peak_price: peak, peak_ts: peakTs, last_price: last,
     peak_multiple: first && peak ? peak / first : null, last_multiple: first && last != null ? last / first : null,
-    drawdown, rugged: rugKinds.length > 0, rug_kinds: rugKinds, rug_reason: token.rug?.reason || null, cp, final_cp: finalM,
+    drawdown, rugged: rugKinds.length > 0, rug_kinds: rugKinds, rug_reason: token.rug?.reason || null, creator_exit: creatorExit, cp, final_cp: finalM,
     buy_near: sum(buys, (t) => t.near), sell_near: sum(sells, (t) => t.near), buyers: new Set(buys.map((t) => t.trader)).size, sellers: new Set(sells.map((t) => t.trader)).size,
     trades: inHorizon.length, creator_buy_near: sum(creatorBuys, (t) => t.near), creator_sell_near: sum(creatorSells, (t) => t.near), creator_sold: creatorSells.length > 0,
     age_min: Math.round(ageMin), complete: ageMin >= cfg.minutes[cfg.minutes.length - 1],

@@ -6,6 +6,7 @@ import { buildGroups } from '../src/graph/cluster.js';
 import { computeMetrics, ruleVerdict, winTag } from '../src/evaluate/metrics.js';
 import { extractJson } from '../src/ai/nearai.js';
 import { positionPnl } from '../src/sim/portfolio.js';
+import { redact } from '../src/web/redact.js';
 import { normaliseReview } from '../src/ai/review.js';
 
 const MIN = 60e3;
@@ -292,4 +293,53 @@ test('rugs: a token that pumped and came back to its launch price is a round-tri
   // pumped 2x only, or still well above launch: not a rug
   assert.equal(buildOutcome(token, [trade('a', true, 10, 1000, 1), trade('b', true, 20, 1000, 5), trade('x', false, 11, 1000, 80)], T0 + 120 * MIN, lcfg).rugged, false);
   assert.equal(buildOutcome(token, [trade('a', true, 10, 1000, 1), trade('b', true, 40, 1000, 5), trade('x', false, 25, 1000, 80)], T0 + 120 * MIN, lcfg).rugged, false);
+});
+
+test('creator exit: share of the dev buy sold in the first hour and how soon, without calling it a rug', () => {
+  const lcfg = { minutes: cfg.minutes, rugDrawdown: 0.9 };
+  const tr = [trade('a', true, 20, 2000, 0.1), trade('creator.near', false, 19, 1900, 3), trade('b', true, 30, 1000, 4)]; // price 3x the launch price afterwards
+  const o = buildOutcome({ ...token, dev_buy_near: 20 }, tr, T0 + 50 * MIN, lcfg);
+  assert.ok(o.creator_exit.share > 0.9 && o.creator_exit.minutes === 3);
+  assert.equal(o.rugged, false, 'exit while holders are well in profit: a warning only');
+  assert.equal(buildOutcome(token, tr, T0 + 50 * MIN, lcfg).creator_exit, null, 'no dev buy known: no share');
+});
+
+test('rugs: creator exit (80 %+ of the dev buy sold in the first hour) with the price now at most 1.5x launch is a rug', () => {
+  const lcfg = { minutes: cfg.minutes, rugDrawdown: 0.9, creatorExitShare: 0.8 };
+  const tr = (lastNear) => [trade('a', true, 20, 2000, 0.1), trade('creator.near', false, 19, 1900, 3), trade('b', true, 5, 500, 4), trade('x', false, lastNear, 500, 30)];
+  // launch price 0.01; the last sale at 0.0092 -> below launch
+  const down = buildOutcome({ ...token, dev_buy_near: 20 }, tr(4.6), T0 + 50 * MIN, lcfg);
+  assert.equal(down.rugged, true); assert.deepEqual(down.rug_kinds, ['creator_exit']);
+  // price a little above launch (1.1x): still a rug; well above (1.6x): only the warning
+  assert.equal(buildOutcome({ ...token, dev_buy_near: 20 }, tr(5.5), T0 + 50 * MIN, lcfg).rugged, true);
+  assert.equal(buildOutcome({ ...token, dev_buy_near: 20 }, tr(8), T0 + 50 * MIN, lcfg).rugged, false);
+});
+
+test('rugs: creator exit (80 %+ of the dev buy sold in the first hour) with the price at or below launch is a rug; above launch it is not', () => {
+  const lcfg = { minutes: cfg.minutes, rugDrawdown: 0.9, creatorExitShare: 0.8, creatorExitBack: 1 };
+  const t0 = { ...token, dev_buy_near: 20 };
+  // launch 0.01; creator sells 19 N at minute 3; last trade at 0.0093: price below launch
+  const down = [trade('a', true, 20, 2000, 0.1), trade('creator.near', false, 19, 2000, 3), trade('x', false, 9.3, 1000, 10)];
+  const o = buildOutcome(t0, down, T0 + 20 * MIN, lcfg);
+  assert.deepEqual(o.rug_kinds, ['creator_exit']); assert.equal(o.rugged, true);
+  // same exit but the price is above the launch price: warning only
+  const up = [trade('a', true, 20, 2000, 0.1), trade('creator.near', false, 19, 2000, 3), trade('x', true, 12, 1000, 10)];
+  const o2 = buildOutcome(t0, up, T0 + 20 * MIN, lcfg);
+  assert.equal(o2.rugged, false); assert.ok(o2.creator_exit.share >= 0.8);
+  // a small creator sale is not an exit
+  assert.equal(buildOutcome(t0, [trade('a', true, 20, 2000, 0.1), trade('creator.near', false, 3, 300, 3), trade('x', false, 9.3, 1000, 10)], T0 + 20 * MIN, lcfg).rugged, false);
+});
+
+test('public mode: thresholds, rule names, reasons and gate ids are removed from API responses', () => {
+  const tok = redact('/api/token', { id: 't', rug: { flagged: true, reason: 'creator sold at launch' }, outcome: { rugged: true, rug_kinds: ['creator_exit'], rug_reason: 'x', creator_exit: { share: 0.99, minutes: 3 }, peak_multiple: 2 },
+    scan: { score: 70, pass: false, failed: ['min_mcap', 'min_buyers'], decision: 'rules failed: min_mcap' }, audit: { available: true, findings: [{ key: 'fullAccessKeyExists', weight: 35, detail: '1 key' }] },
+    creator_info: { launches: 3, rugged: 1, blacklisted: { ts: 1, reason: 'creator balance fell 100% while we held', source: 'scanner', token: 'a', symbol: 'A' }, tokens: [{ id: 'a', kinds: ['flagged'] }] } });
+  assert.equal(tok.rug, undefined); assert.equal(tok.outcome.rug_kinds, undefined); assert.equal(tok.outcome.rug_reason, undefined); assert.equal(tok.outcome.creator_exit, true); assert.equal(tok.outcome.rugged, true); assert.equal(tok.outcome.peak_multiple, 2);
+  assert.equal(tok.scan.failed, undefined); assert.equal(tok.scan.failed_n, 2); assert.ok(!/min_mcap/.test(JSON.stringify(tok)));
+  assert.equal(tok.audit.findings[0].weight, undefined); assert.equal(tok.creator_info.blacklisted.reason, undefined); assert.equal(tok.creator_info.blacklisted.source, undefined); assert.equal(tok.creator_info.tokens[0].kinds, undefined);
+  const cl = redact('/api/cluster', { id: 'c', rule: { score: 70, verdict: 'bad', tags: ['insider'] }, links: [{ type: 'cobuy' }, { type: 'deep_link', depth: 3 }], ai: { label: 'L', summary: 'S', reasons: ['r'], red_flags: ['f'], verdict: 'bad' }, metrics: { win_rate: 0.5, fresh_share: 0.9, sync_share: 0.8, creator_linked_share: 0.3 }, history: [{ ts: 1, verdict: 'bad', score: 40, tags: ['x'] }] });
+  assert.equal(cl.rule, undefined); assert.equal(cl.links, undefined); assert.equal(cl.links_n, 2); assert.equal(cl.ai.reasons, undefined); assert.equal(cl.ai.label, 'L'); assert.equal(cl.metrics.fresh_share, undefined); assert.equal(cl.metrics.win_rate, 0.5); assert.equal(cl.history[0].tags, undefined);
+  const au = redact('/api/audit', { risk: { score: 50, factors: [{ key: 'a', hit: true, weight: 30 }, { key: 'b', hit: false, weight: 12 }] }, trust: { score: 10, factors: [] }, summary: { available: true, findings: [] } });
+  assert.deepEqual(au.risk.factors, [{ key: 'a', hit: true }]);
+  assert.deepEqual(redact('/api/health', { ok: true }), { ok: true });
 });
