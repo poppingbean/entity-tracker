@@ -34,8 +34,9 @@ const clamp = (v, d, max) => Math.min(max, Math.max(1, Number(v) || d));
 const rx = (s) => ({ $regex: String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), $options: 'i' });
 const strip = ({ _id, ...r }) => ({ id: _id, ...r });
 
-// win-rate tags: win80 / win50 / win30 = profitable in 80 / 50 / 30 %+ of the tokens bought early, loss = below 30 %, unrated = too few tokens judged yet
-const TAGS = ['win80', 'win50', 'win30', 'loss', 'unrated'];
+// tags: loss = lost money overall; net profit: win80 / win50 / win30 = profitable in 80 / 50 / 30 %+ of the tokens bought early, sniper = under
+// 30 % (a few big wins); unrated = too few tokens judged yet
+const TAGS = ['win80', 'win50', 'win30', 'sniper', 'loss', 'unrated'];
 const tagOf = (t) => (TAGS.includes(t) ? t : 'unrated');
 /** For each token: how its early NEAR splits across win-rate tags (a wallet counts with its group's tag, or its own when it has no group), plus the groups involved. */
 async function earlyMix(tokenIds) {
@@ -58,7 +59,7 @@ async function earlyMix(tokenIds) {
   return out;
 }
 
-/** For each recent token: how much of its early money comes from winners (win80 / win50) and from loss wallets. */
+/** For each recent token: how much of its early money comes from winners (win80 / win50 / sniper) and from loss wallets. */
 async function buildSignals(hours = 72, limit = 60) {
   const since = Date.now() - hours * 3600e3;
   const tokens = await col('tokens').find({ live_ts: { $gt: since }, entries_n: { $gt: 0 } }).sort({ live_ts: -1 }).limit(limit).toArray();
@@ -66,7 +67,7 @@ async function buildSignals(hours = 72, limit = 60) {
   const out = [];
   for (const t of tokens) {
     const m = mix.get(t._id), total = m.total_near || 1;
-    const win = { w: m.win80.w + m.win50.w, near: m.win80.near + m.win50.near }, loss = m.loss;
+    const win = { w: m.win80.w + m.win50.w + m.sniper.w, near: m.win80.near + m.win50.near + m.sniper.near }, loss = m.loss; // money makers: high hit rate or snipers
     const lossShare = loss.near / total, winShare = win.near / total;
     const assessment = lossShare >= 0.25 ? 'warning' : win.w >= 2 && lossShare < 0.1 ? 'bullish' : win.w + loss.w + m.win30.w ? 'mixed' : 'no-known-groups';
     if (assessment === 'no-known-groups') continue;
@@ -87,7 +88,7 @@ const routes = {
       col('clusters').aggregate([{ $group: { _id: '$tag', n: { $sum: 1 }, wallets: { $sum: '$size' } } }]).toArray(),
       col('wallets').countDocuments({ is_early: true }), col('wallets').countDocuments({ is_early: true, profiled: true }), col('entries').estimatedDocumentCount(),
       metaGet('worker'), col('tokens').find({}, { projection: { symbol: 1, launchpad: 1, live_ts: 1, status: 1, entries_n: 1, 'outcome.rugged': 1, 'outcome.peak_multiple': 1 } }).sort({ live_ts: -1 }).limit(10).toArray(),
-      col('clusters').find({ tag: { $in: ['win80', 'win50'] } }, { projection: { tag: 1, size: 1, score: 1, 'metrics.tokens_n': 1, 'metrics.profit_rate': 1, 'metrics.pnl_near': 1, 'ai.label': 1 } }).sort({ 'metrics.profit_rate': -1, 'metrics.pnl_near': -1 }).limit(5).toArray(),
+      col('clusters').find({ tag: { $in: ['win80', 'win50', 'sniper'] } }, { projection: { tag: 1, size: 1, score: 1, 'metrics.tokens_n': 1, 'metrics.profit_rate': 1, 'metrics.pnl_near': 1, 'ai.label': 1 } }).sort({ 'metrics.profit_rate': -1, 'metrics.pnl_near': -1 }).limit(5).toArray(),
       col('clusters').find({ tag: 'loss' }, { projection: { tag: 1, size: 1, score: 1, 'metrics.tokens_n': 1, 'metrics.profit_rate': 1, 'metrics.pnl_near': 1, 'metrics.rug_share': 1, 'rule.tags': 1, 'ai.label': 1 } }).sort({ size: -1, 'metrics.pnl_near': 1 }).limit(5).toArray(),
       col('tokens').estimatedDocumentCount(), col('tokens').countDocuments({ 'outcome.rugged': true }), col('wallets').countDocuments({ net: true, profiled: true }),
       col('blacklist').estimatedDocumentCount(), col('clusters').countDocuments({ creator_flag: { $in: ['blacklisted', 'rugger'] } }),
@@ -101,7 +102,7 @@ const routes = {
 
   '/api/clusters': async (u) => {
     const f = {};
-    const v = u.searchParams.get('tag'); if (v) f.tag = v === 'unrated' ? { $nin: ['win80', 'win50', 'win30', 'loss'] } : v;
+    const v = u.searchParams.get('tag'); if (v) f.tag = v === 'unrated' ? { $nin: ['win80', 'win50', 'win30', 'sniper', 'loss'] } : v;
     const q = (u.searchParams.get('q') || '').trim(); if (q) f.$or = [{ members: q }, { 'network.account': q }, { _id: rx(q) }, { 'ai.label': rx(q) }];
     const minSize = Number(u.searchParams.get('minSize')); if (minSize) f.size = { $gte: minSize };
     const sort = { score: { score: -1 }, size: { size: -1 }, pnl: { 'metrics.pnl_near': -1 }, winrate: { 'metrics.profit_rate': -1, 'metrics.tokens_n': -1 }, recent: { 'metrics.last_entry_ts': -1 } }[u.searchParams.get('sort')] || { size: -1 };
@@ -276,7 +277,7 @@ const routes = {
   '/api/wallets': async (u) => {
     const f = { is_early: true };
     const q = (u.searchParams.get('q') || '').trim(); if (q) f._id = rx(q);
-    const v = u.searchParams.get('tag'); if (v) f.tag = v === 'unrated' ? { $nin: ['win80', 'win50', 'win30', 'loss'] } : v;
+    const v = u.searchParams.get('tag'); if (v) f.tag = v === 'unrated' ? { $nin: ['win80', 'win50', 'win30', 'sniper', 'loss'] } : v;
     const sort = { pnl: { 'stats.pnl_near': -1 }, winrate: { 'stats.profit_rate': -1, 'stats.tokens_n': -1 }, tokens: { 'stats.tokens_n': -1 }, roi: { 'stats.roi_weighted': -1 }, recent: { first_seen_ts: -1 } }[u.searchParams.get('sort')] || { 'stats.tokens_n': -1 };
     const limit = clamp(u.searchParams.get('limit'), 50, 200), offset = Math.max(0, Number(u.searchParams.get('offset')) || 0);
     const [total, rows] = await Promise.all([col('wallets').countDocuments(f), col('wallets').find(f, { projection: { chain: 0, flow_out: 0 } }).sort(sort).skip(offset).limit(limit).toArray()]);
