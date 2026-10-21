@@ -7,6 +7,7 @@
 //   node src/cli.js rugs                               flag known rugs (creator blacklist), re-apply the rug rules to every token, regroup
 //   node src/cli.js expand [batches]                   profile the wallets linked to the groups (3 hops out), then regroup
 //   node src/cli.js audit <account> [--force] [--json]  audit any NEAR contract / token (access keys, code, tax, sell behaviour)
+//   node src/cli.js ledger [token]                      read done tokens' trades up to today (all due tokens, or one token to the end)
 //   node src/cli.js import-scanner [state.json] [--dry]  copy the live scanner's data (launches, evaluations, blacklist, positions) here
 //   node src/cli.js scan <token> [--features]          run the gates + AI analyst on any stored token (no buying)
 //   node src/cli.js sim-reset                          reset the simulated wallet
@@ -20,6 +21,7 @@ import { connectDb, closeDb, col, metaGet } from './db.js';
 import { enableDbLog, flushLogs, info } from './log.js';
 import { backfill } from './collect/launches.js';
 import { processToken } from './collect/process.js';
+import { followToken, followDue } from './collect/ledger.js';
 import { profilePending } from './graph/profile.js';
 import { evaluateGroups, reviewPending } from './evaluate/run.js';
 import { buildEntities } from './evaluate/entities.js';
@@ -137,6 +139,13 @@ try {
     await buildEntities();
   } else if (cmd === 'evaluate') {
     await evaluateGroups();
+  } else if (cmd === 'ledger') {
+    // the full ledger: one token read to the end, or every due done token (newest first) until none is left
+    if (args[0]) {
+      let t = await col('tokens').findOne({ _id: args[0] });
+      if (t?.status !== 'done') throw new Error(`${args[0]}: not a token whose first 24 h are read (status ${t?.status ?? 'unknown'})`);
+      while (!(await followToken(t, { passes: 5 })).caughtUp) t = await col('tokens').findOne({ _id: args[0] });
+    } else { let n, total = 0; while ((n = await followDue(10, 3))) total += n; info(`ledger: ${total} passes, nothing left to read`); }
   } else if (cmd === 'review') {
     info(`reviewed ${await reviewPending(Number(args[0]) || 5)} groups`);
   } else if (cmd === 'check-ai') {
@@ -149,7 +158,7 @@ try {
     ]);
     console.log(JSON.stringify({ tokens, done, entries, wallets, profiled, clusters, byVerdict: Object.fromEntries(byVerdict.map((r) => [r._id, r.n])), ai: { enabled: aiEnabled(), model: config.ai.model, status: aiStatus.ok }, worker: await metaGet('worker') }, null, 1));
   } else {
-    console.log('commands: backfill <launchpad|all> <hours> | process | evaluate | review [n] | status | check-ai');
+    console.log('commands: backfill <launchpad|all> <hours> | process | ledger [token] | evaluate | review [n] | status | check-ai');
   }
 } finally { await flushLogs(); await closeDb(); }
 process.exit(0);

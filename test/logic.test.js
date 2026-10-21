@@ -1,7 +1,7 @@
 // Unit tests for the pure logic: early entries / outcomes, grouping, metrics + verdicts, AI reply parsing.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildEntries, buildOutcome, priceAt, priceSeries, evalRoi } from '../src/collect/analyze.js';
+import { buildEntries, buildOutcome, buildLedger, priceAt, priceSeries, evalRoi } from '../src/collect/analyze.js';
 import { buildGroups } from '../src/graph/cluster.js';
 import { computeMetrics, ruleVerdict, winTag } from '../src/evaluate/metrics.js';
 import { extractJson } from '../src/ai/nearai.js';
@@ -342,4 +342,31 @@ test('public mode: thresholds, rule names, reasons and gate ids are removed from
   const au = redact('/api/audit', { risk: { score: 50, factors: [{ key: 'a', hit: true, weight: 30 }, { key: 'b', hit: false, weight: 12 }] }, trust: { score: 10, factors: [] }, summary: { available: true, findings: [] } });
   assert.deepEqual(au.risk.factors, [{ key: 'a', hit: true }]);
   assert.deepEqual(redact('/api/health', { ok: true }), { ok: true });
+});
+
+test('full ledger: 24 h outcome ignores later trades; the ledger and roi_now follow them', () => {
+  const lcfg = { minutes: cfg.minutes, rugDrawdown: 0.9 };
+  const DAY = 1440;
+  const trades = [
+    trade('a', true, 10, 1000, 1),        // launch price 0.01
+    trade('b', true, 30, 1000, 60),       // 0.03 inside the first day
+    trade('c', true, 100, 1000, DAY + 600), // 0.1 on day 2: new all-time high
+    trade('c', false, 5, 1000, DAY * 5),  // 0.005 on day 6: collapsed
+  ];
+  const now = T0 + DAY * 6 * MIN;
+  const o = buildOutcome(token, trades, now, lcfg);
+  assert.ok(Math.abs(o.last_multiple - 3) < 1e-9, '24 h outcome stops at the last checkpoint');
+  assert.equal(o.rugged, false);
+  const L = buildLedger(token, trades, lcfg);
+  assert.ok(Math.abs(L.ath_multiple - 10) < 1e-9);
+  assert.equal(L.ath_after_cp, true);
+  assert.ok(Math.abs(L.last_multiple - 0.5) < 1e-9);
+  assert.ok(Math.abs(L.drawdown - 0.95) < 1e-9);
+  assert.equal(L.collapsed, true);
+  assert.equal(L.trades, 4);
+  assert.equal(L.after_cp.trades, 2);
+  assert.equal(L.last_trade_ts, T0 + DAY * 5 * MIN);
+  const a = buildEntries(token, trades, now, { ...cfg, minutes: cfg.minutes }).find((e) => e.wallet === 'a');
+  assert.ok(Math.abs(a.roi[1440] - 2) < 1e-9, 'checkpoint ROI (what verdicts use) is the 24 h one');
+  assert.ok(Math.abs(a.roi_now - (-0.5)) < 1e-9, 'roi_now uses the latest price');
 });

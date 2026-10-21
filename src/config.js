@@ -41,6 +41,18 @@ export const config = {
     winRoi: num(process.env.WIN_ROI, 0.2),
   },
 
+  // Full ledger: after a token's first 24 h are read, keep reading its trades up to today (current price, all-time high, each early buyer's
+  // current ROI). Verdicts and tags keep using the OUTCOME_MINUTES checkpoints, so groups stay comparable.
+  ledger: {
+    enabled: process.env.LEDGER_ENABLED !== 'false',
+    activeHours: num(process.env.LEDGER_ACTIVE_HOURS, 6),     // re-read a token that still trades this often ...
+    quietHours: num(process.env.LEDGER_QUIET_HOURS, 24),      // ... and one with no trade for LEDGER_QUIET_DAYS this often
+    quietDays: num(process.env.LEDGER_QUIET_DAYS, 2),
+    stopDays: num(process.env.LEDGER_STOP_DAYS, 14),          // stop following after this many days without a trade ("Sync now" still reads it)
+    perCycle: num(process.env.LEDGER_TOKENS_PER_CYCLE, 4),    // tokens followed per worker cycle (newest launch first)
+    rowsPerPass: num(process.env.LEDGER_ROWS_PER_PASS, 1000), // transactions read per token per pass; a long history is read over several passes
+  },
+
   graph: {
     fundingDepth: num(process.env.FUNDING_DEPTH, 3),
     flowLookbackTxs: num(process.env.FLOW_LOOKBACK_TXS, 60),

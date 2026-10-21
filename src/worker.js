@@ -4,6 +4,7 @@ import { config } from './config.js';
 import { info, warn, error } from './log.js';
 import { discover } from './collect/launches.js';
 import { processDue } from './collect/process.js';
+import { followDue, ledgerBacklog } from './collect/ledger.js';
 import { profilePending } from './graph/profile.js';
 import { expandNetworks } from './graph/expand.js';
 import { flagRugs } from './collect/rugs.js';
@@ -19,6 +20,7 @@ export const runtime = { startedTs: Date.now(), cycles: 0, lastCycleTs: null, st
 export async function cycle({ evaluate = true } = {}) {
   const found = await discover();
   const processed = await processDue();
+  const ledgered = await followDue().catch((e) => { warn(`ledger follow failed: ${e.message}`); return 0; }); // done tokens: trades after the first 24 h
   let scanned = 0, followed = 0;
   if (config.scan.enabled) { scanned = await scanTick(); followed = await followUpTick(); }
   if (config.sim.enabled && Date.now() - runtime.lastPositionCheck > config.sim.positionCheckSeconds * 1000) { runtime.lastPositionCheck = Date.now(); await managePositions(blacklistCreator); }
@@ -31,7 +33,7 @@ export async function cycle({ evaluate = true } = {}) {
     groups = (await evaluateGroups()).groups; runtime.lastEvalTs = Date.now();
   }
   if (evaluate && aiEnabled()) reviewed = await reviewPending(3);
-  return { found, processed, scanned, followed, profiled, expanded, groups, reviewed };
+  return { found, processed, ledgered, scanned, followed, profiled, expanded, groups, reviewed };
 }
 
 export async function runWorker() {
@@ -46,7 +48,8 @@ export async function runWorker() {
     } catch (e) { error(`cycle failed: ${e.message}`); }
     // sleep in short steps so a shutdown is prompt; work backlog continues without waiting
     const backlog = await col('tokens').countDocuments({ status: { $nin: ['done', 'skipped_quote', 'awaiting_pool', 'no_pool'] }, next_process_ts: { $lte: Date.now() } }).catch(() => 0);
-    const wait = backlog > 0 ? 2000 : config.pollSeconds * 1000;
+    const ledgerWait = backlog > 0 ? 0 : await ledgerBacklog().catch(() => 0);
+    const wait = backlog > 0 ? 2000 : ledgerWait > 0 ? 5000 : config.pollSeconds * 1000;
     for (let t = 0; t < wait && !runtime.stopping; t += 500) await sleep(500);
   }
 }
