@@ -44,11 +44,16 @@ export async function runWorker() {
   if (aiEnabled()) { checkAi().then((s) => (s.ok ? info(`NEAR AI ready (${config.ai.model})`) : warn(`NEAR AI NOT ready: ${s.error}`))); }
   else warn('NEAR_AI_API_KEY is not set: groups get rule-based verdicts only');
   info(`worker started · launchpads=${config.launchpads.join(',')} · early window ${config.entry.windowMinutes} min · outcomes at ${config.outcome.minutes.join('/')} min`);
+  // heartbeat: report every minute, also in the middle of a long cycle (a catch-up can take a while), so the dashboard can tell busy from stopped
+  let last = null;
+  const report = () => metaSet('worker', { ts: Date.now(), cycles: runtime.cycles, startedTs: runtime.startedTs, lastCycleTs: runtime.lastCycleTs, last, ai: { enabled: aiEnabled(), model: config.ai.model, ok: aiStatus.ok, error: aiStatus.error, calls: aiStatus.calls, failures: aiStatus.failures } }).catch(() => {});
+  const beat = setInterval(report, 60e3); beat.unref?.();
+  await report();
   while (!runtime.stopping) {
     try {
-      const r = await cycle();
+      last = await cycle();
       runtime.cycles++; runtime.lastCycleTs = Date.now();
-      await metaSet('worker', { ts: Date.now(), cycles: runtime.cycles, startedTs: runtime.startedTs, last: r, ai: { enabled: aiEnabled(), model: config.ai.model, ok: aiStatus.ok, error: aiStatus.error, calls: aiStatus.calls, failures: aiStatus.failures } });
+      await report();
     } catch (e) { error(`cycle failed: ${e.message}`); }
     // sleep in short steps so a shutdown is prompt; work backlog continues without waiting
     const backlog = await col('tokens').countDocuments({ status: { $nin: ['done', 'skipped_quote', 'awaiting_pool', 'no_pool'] }, next_process_ts: { $lte: Date.now() } }).catch(() => 0);

@@ -207,7 +207,6 @@
   footer { max-width:1440px; margin:0 auto; padding:0 24px 30px; color:var(--faint); font-size:12px; display:flex; justify-content:space-between; gap:12px; flex-wrap:wrap; }
   footer a { color:var(--muted); font-weight:600; }
 
-  @media (max-width:1100px) { .topbar .status span { display:none; } }
   @media (max-width:960px) {
     .topin { flex-wrap:wrap; gap:10px; padding:10px 16px; }
     .brand small { display:none; }
@@ -231,7 +230,7 @@
     </a>
     <nav id="nav"></nav>
     <div class="search" id="topSearch"></div>
-    <div class="status" title="worker / AI status"><i class="dot" id="statusDot"></i><span id="status"></span></div>
+    <div class="status" id="statusBox" title="Is NEAR AI evaluating the data?"><i class="dot" id="statusDot"></i><span id="status"></span></div>
     <button class="icon-btn" title="Light / dark" onclick="toggleTheme()"><svg viewBox="0 0 24 24"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg></button>
   </div>
   <nav id="subnav" hidden></nav>
@@ -333,10 +332,14 @@ const seg = (view, field, opts) => `<div class="seg">${opts.map(([v, l]) => `<bu
 const qbox = (view, ph) => `<input type="search" placeholder="${esc(ph)}" value="${esc(ST[view].q)}" onkeydown="if(event.key==='Enter')setSt('${view}','q',this.value)">`;
 const pager = (view, total, size = 50) => { const o = ST[view].offset; return `<span class="muted">${total ? `${n(o + 1, 0)}–${n(Math.min(total, o + size), 0)} of ${n(total, 0)}` : '0'}</span>
   <button ${o ? '' : 'disabled'} onclick="ST.${view}.offset=Math.max(0,ST.${view}.offset-${size});render()">◀</button><button ${o + size < total ? '' : 'disabled'} onclick="ST.${view}.offset+=${size};render()">▶</button>`; };
+/** One line: is NEAR AI evaluating the data right now? (the worker sends it the data; it reports every minute) */
 const setStatus = (w, now, ai) => {
-  const fresh = w && now - w.ts < 10 * 60e3;
-  $('statusDot').className = 'dot ' + (w ? (fresh ? 'ok' : 'bad') : '');
-  $('status').textContent = `worker ${w ? ago(now - w.ts) + ' ago' : 'not seen'} · AI ${ai.enabled ? (ai.ok === false ? 'error' : ai.model) : 'off'}`;
+  const alive = w && now - w.ts < 5 * 60e3;
+  const [cls, txt, why] = !ai.enabled ? ['', 'NEAR AI off', 'No NEAR AI key: groups get rule-based verdicts only']
+    : !alive ? ['bad', 'NEAR AI paused', w ? `The background worker has not reported since ${when(w.ts)}` : 'The background worker has not started yet']
+    : ai.ok === false ? ['bad', 'NEAR AI error', 'The last NEAR AI call failed; it is retried automatically']
+    : ['ok', 'NEAR AI evaluating', `Last report ${ago(now - w.ts)} ago`];
+  $('statusDot').className = 'dot ' + cls; $('status').textContent = txt; $('statusBox').title = why;
 };
 const aiBanner = (ai) => (!ai.enabled ? '<div class="card warn">NEAR AI is off (set NEAR_AI_API_KEY). Groups get rule-based verdicts only.</div>' : ai.ok === false ? `<div class="card err">NEAR AI error: ${esc(ai.error || '')}</div>` : '');
 const views = {};
@@ -586,7 +589,7 @@ async function groupPage(id) {
     <div class="tiles">${tile('Judged tokens', m.tokens_n ?? '–', `${m.entries_n ?? '–'} entries`)}${tile('Profitable tokens', pct(m.profit_rate), `${m.profit_tokens_n ?? 0} of ${m.tokens_n ?? 0} · gained 20 %+ in ${pct(m.win_rate)}`, (m.profit_rate ?? 0) >= 0.5 ? 'g' : (m.profit_rate ?? 1) < 0.3 ? 'r' : 'a')}${tile('P&L', signed(m.pnl_near) + ' N', `${n(m.total_buy_near, 1)} N bought`, roiCls(m.pnl_near))}${tile('Realized P&L', signed(m.realized_near) + ' N', 'taken out of the tokens sold', roiCls(m.realized_near))}${tile('Unrealized P&L', signed(m.unrealized_near) + ' N', 'still held, at the latest price', roiCls(m.unrealized_near))}
       ${tile('Weighted ROI', pct(m.roi_weighted), `median token ${pct(m.median_token_roi)}`, roiCls(m.roi_weighted))}${tile('Rugged tokens', pct(m.rug_share), `${m.rug_tokens_n ?? 0} tokens${m.win_rate_in_rugs !== undefined ? ' · win in rugs ' + pct(m.win_rate_in_rugs) : ''}`, (m.rug_share ?? 0) >= 0.4 ? 'r' : '')}
       ${m.creator_linked_share !== undefined ? tile('Creator-linked', pct(m.creator_linked_share), null, (m.creator_linked_share ?? 0) > 0.1 ? 'r' : '') : ''}${tile('Linked wallets', c.network_n ?? 0, 'around the members')}${tile('Token creators', c.creators_n ?? 0, `${c.creators_rugged ?? 0} rugged or blacklisted`, (c.creators_rugged ?? 0) ? 'r' : '')}${m.avg_delay_s !== undefined ? tile('Avg entry delay', n(m.avg_delay_s, 0) + ' s', `first-5 share ${pct(m.first_movers_share)}`) : ''}${m.fresh_share !== undefined ? tile('Fresh / synced', `${pct(m.fresh_share)} / ${pct(m.sync_share)}`, 'wallets < 3 d / synchronised buys') : ''}</div></div>`;
-  if (ai) h += `<div class="ai"><b>${esc(ai.label || 'AI review')}</b> · ${vb(ai.verdict)} confidence ${n(ai.confidence)} · ${esc(ai.archetype)} · advice <b>${esc(ai.follow_advice)}</b> <span class="muted">(${esc(ai.model)}, ${when(ai.ts)})</span>
+  if (ai) h += `<div class="ai"><b>${esc(ai.label || 'AI review')}</b> · ${vb(ai.verdict)} confidence ${n(ai.confidence)} · ${esc(ai.archetype)} · advice <b>${esc(ai.follow_advice)}</b> <span class="muted">(${when(ai.ts)})</span>
       <p>${esc(ai.summary)}</p>${(ai.reasons || []).length ? '<ul class="flags">' + ai.reasons.map((x) => `<li>${esc(x)}</li>`).join('') + '</ul>' : ''}${(ai.red_flags || []).length ? '<p class="a"><b>Caution</b></p><ul class="flags">' + ai.red_flags.map((x) => `<li>${esc(x)}</li>`).join('') + '</ul>' : ''}</div>`;
   else h += '<div class="card muted">No NEAR AI review yet (needs NEAR_AI_API_KEY and at least the minimum number of judged tokens).</div>';
   h += `<div class="card"><h2>Tokens the group bought early <span class="muted">${(c.tokens || []).length}</span></h2><table><tr><th>Token</th><th>Live</th><th class="num">Wallets</th><th class="num">Bought N</th><th class="num">ROI</th><th class="num">P&amp;L N</th><th class="num" title="NEAR taken out minus the cost of the tokens sold">Realized</th><th class="num" title="tokens still held, at the latest price, minus their cost">Unrealized</th><th class="num">Peak</th><th>Rug</th><th class="num">1st buy</th></tr>
@@ -795,7 +798,7 @@ async function scanPage(id) {
   if (s.trade) h += `<p>Simulated trade: <b class="${s.trade.status === 'bought' ? 'g' : ''}">${esc(s.trade.status)}</b> ${s.trade.near ? s.trade.near + ' N' : ''} ${esc(s.trade.reason || '')}</p>`;
   if ((s.failed || []).length) h += '<h3>Failed gates</h3><ul class="flags">' + s.failed.map((g) => `<li><span class="r">${esc(g.id)}</span> ${esc(g.why)}</li>`).join('') + '</ul>';
   h += '</div>';
-  if (ai) h += `<div class="ai"><b>NEAR AI analyst</b> · ${esc(ai.action)} confidence ${n(ai.confidence)} · risk ${esc(ai.risk_level)} · quality ${ai.quality_score ?? '–'} <span class="muted">(${esc(ai.model)})</span>${(ai.reasons || []).length ? '<ul class="flags">' + ai.reasons.map((x) => `<li>${esc(x)}</li>`).join('') + '</ul>' : ''}${(ai.red_flags || []).length ? '<p class="a"><b>Red flags</b></p><ul class="flags">' + ai.red_flags.map((x) => `<li>${esc(x)}</li>`).join('') + '</ul>' : ''}</div>`;
+  if (ai) h += `<div class="ai"><b>NEAR AI analyst</b> · ${esc(ai.action)} confidence ${n(ai.confidence)} · risk ${esc(ai.risk_level)} · quality ${ai.quality_score ?? '–'}${(ai.reasons || []).length ? '<ul class="flags">' + ai.reasons.map((x) => `<li>${esc(x)}</li>`).join('') + '</ul>' : ''}${(ai.red_flags || []).length ? '<p class="a"><b>Red flags</b></p><ul class="flags">' + ai.red_flags.map((x) => `<li>${esc(x)}</li>`).join('') + '</ul>' : ''}</div>`;
   else h += '<div class="card muted">No AI review (the gates failed, NEAR_AI_API_KEY is not set, or the call failed).</div>';
   const ig = f.intel?.early_buyer_groups;
   if (ig) {
@@ -865,7 +868,7 @@ views.logs = async () => {
 views.config = async () => {
   const c = await get('/api/config');
   const block = (title, o) => `<div class="card"><h2>${title}</h2><table class="kv">${Object.entries(o).map(([k, v]) => `<tr><td>${esc(k)}</td><td class="wrap mono small">${esc(JSON.stringify(v))}</td></tr>`).join('')}</table></div>`;
-  return `<div class="card muted">Read-only view of the settings in .env (never any secret). AI: ${c.ai.enabled ? 'NEAR AI ' + esc(c.ai.model) : 'off'} · database ${esc(c.db)} · launchpads ${esc(c.launchpads.join(', '))}</div>
+  return `<div class="card muted">Read-only view of the settings in .env (never any secret). AI: ${c.ai.enabled ? 'NEAR AI on' : 'off'} · database ${esc(c.db)} · launchpads ${esc(c.launchpads.join(', '))}</div>
     <div class="grid2"><div>${block('Scanner timing', c.scan)}${block('AI analyst', c.analyst)}${block('Simulated wallet', c.sim)}</div><div>${block('Hard gates', c.rules)}${block('Follow-up reviews', c.followUp)}${block('Early-investor tracking', { entry: c.entry, outcome: c.outcome })}</div></div>`;
 };
 
