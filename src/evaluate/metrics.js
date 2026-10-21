@@ -7,16 +7,18 @@ const clamp = (x, lo, hi) => Math.max(lo, Math.min(hi, x));
 const DAY = 86400e3;
 
 /**
- * Win-rate tag of a wallet or group: the share of the tokens it bought early where it ended in profit (ROI > 0 at the latest checkpoint).
- * win80 = profitable in 80 %+ of its tokens, win50 = 50 %+, win30 = 30 %+, loss = below 30 %. "unrated" until it has `minTokens` judged tokens.
+ * Tag of a wallet or group from its money and its hit rate (the share of the tokens it bought early that ended in profit, ROI > 0 at the
+ * latest checkpoint). loss = lost money overall (weighted ROI <= 0). Net profit: win80 = profitable in 80 %+ of its tokens, win50 = 50 %+,
+ * win30 = 30 %+, sniper = under 30 % (a few big wins pay for many small losses). "unrated" until it has `minTokens` judged tokens.
  */
-export const WIN_TAGS = ['win80', 'win50', 'win30', 'loss'];
-export function winTag(profitRate, tokensN, minTokens) {
+export const WIN_TAGS = ['win80', 'win50', 'win30', 'sniper', 'loss'];
+export function winTag(profitRate, tokensN, minTokens, roi = null) {
   if (profitRate == null || tokensN < minTokens) return 'unrated';
+  if (roi != null && roi <= 0) return 'loss'; // lost money overall, however many tokens ended in profit
   if (profitRate >= 0.8) return 'win80';
   if (profitRate >= 0.5) return 'win50';
   if (profitRate >= 0.3) return 'win30';
-  return 'loss';
+  return roi != null ? 'sniper' : 'loss'; // net profit from a few big wins while most tokens lost
 }
 
 /**

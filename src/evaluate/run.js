@@ -66,7 +66,7 @@ export async function evaluateGroups() {
     const net = Object.entries(g.nodeDepth).sort((a, b) => a[1] - b[1]).slice(0, 150).map(([account, depth]) => ({ account, depth }));
     docs.push({
       _id: id, members: g.members, size: g.members.length, nodes: g.nodes.slice(0, 200), links: g.links.slice(0, 200), metrics, tokens: tokenRows.slice(0, 40), rule,
-      tag: winTag(metrics.profit_rate, metrics.tokens_n, cfg.minTokens), network: net, network_n: Object.keys(g.nodeDepth).length,
+      tag: winTag(metrics.profit_rate, metrics.tokens_n, cfg.minTokens, metrics.roi_weighted), network: net, network_n: Object.keys(g.nodeDepth).length,
       creator_flag: creatorTop, creators_n: gc.length, creators_rugged: gc.filter((c) => c.rugged > 0 || c.blacklisted).length,
       creators: gc.slice(0, 30).map((c) => ({ account: c.account, role: memberSet.has(c.account) ? 'member' : 'linked', depth: g.nodeDepth[c.account] ?? 0, launches: c.launches, rugged: c.rugged, blacklisted: c.blacklisted ? { reason: c.blacklisted.reason, token: c.blacklisted.token, symbol: c.blacklisted.symbol, ts: c.blacklisted.ts } : null, tokens: c.tokens.slice(0, 6) })),
       ai, ai_print: prev?.ai_print || null, print, verdict: fv.verdict, verdict_source: fv.source, score: rule.score, updated_ts: Date.now(),
@@ -86,7 +86,7 @@ export async function evaluateGroups() {
     const es = entriesByWallet.get(w._id) || [];
     const { metrics } = computeMetrics([w._id], es, tokens, walletMap, insiderEntries, cfg);
     const c = cmap.get(w._id);
-    return { updateOne: { filter: { _id: w._id }, update: { $set: { cluster_id: c?._id ?? null, cluster_verdict: c?.verdict ?? null, cluster_tag: c?.tag ?? null, creator: creatorBrief(creators.get(w._id)), tag: winTag(metrics.profit_rate, metrics.tokens_n, cfg.minTokens), stats: { tokens_n: metrics.tokens_n, entries_n: metrics.entries_n, win_rate: metrics.win_rate, profit_rate: metrics.profit_rate, roi_weighted: metrics.roi_weighted, pnl_near: metrics.pnl_near, realized_near: metrics.realized_near, unrealized_near: metrics.unrealized_near, rug_share: metrics.rug_share, total_buy_near: metrics.total_buy_near } } } } };
+    return { updateOne: { filter: { _id: w._id }, update: { $set: { cluster_id: c?._id ?? null, cluster_verdict: c?.verdict ?? null, cluster_tag: c?.tag ?? null, creator: creatorBrief(creators.get(w._id)), tag: winTag(metrics.profit_rate, metrics.tokens_n, cfg.minTokens, metrics.roi_weighted), stats: { tokens_n: metrics.tokens_n, entries_n: metrics.entries_n, win_rate: metrics.win_rate, profit_rate: metrics.profit_rate, roi_weighted: metrics.roi_weighted, pnl_near: metrics.pnl_near, realized_near: metrics.realized_near, unrealized_near: metrics.unrealized_near, rug_share: metrics.rug_share, total_buy_near: metrics.total_buy_near } } } } };
   });
   for (let i = 0; i < ops.length; i += 500) await col('wallets').bulkWrite(ops.slice(i, i + 500), { ordered: false });
 
@@ -97,7 +97,7 @@ export async function evaluateGroups() {
     if (ids.length) await col('wallets').updateMany({ _id: { $in: ids }, net: true }, { $set: { net_cluster: d._id } });
   }
   const by = (t) => docs.filter((d) => d.tag === t).length;
-  info(`GROUPS ${docs.length} (win80 ${by('win80')}, win50 ${by('win50')}, win30 ${by('win30')}, loss ${by('loss')}, unrated ${by('unrated')}); ${cobuyPairs} co-buy links, ${deepLinks} deep links (${config.graph.deepDepth} hops); ${gone.deletedCount} stale removed`);
+  info(`GROUPS ${docs.length} (win80 ${by('win80')}, win50 ${by('win50')}, win30 ${by('win30')}, sniper ${by('sniper')}, loss ${by('loss')}, unrated ${by('unrated')}); ${cobuyPairs} co-buy links, ${deepLinks} deep links (${config.graph.deepDepth} hops); ${gone.deletedCount} stale removed`);
   await buildEntities();
   return { groups: docs.length };
 }

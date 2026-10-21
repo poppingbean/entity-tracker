@@ -240,6 +240,11 @@ test('tags: win80 / win50 / win30 / loss by the share of tokens ended in profit;
   assert.equal(winTag(0.35, 6, 3), 'win30'); assert.equal(winTag(0.3, 3, 3), 'win30');
   assert.equal(winTag(0.2, 5, 3), 'loss'); assert.equal(winTag(0, 3, 3), 'loss');
   assert.equal(winTag(1, 2, 3), 'unrated'); assert.equal(winTag(null, 0, 3), 'unrated');
+  // the money decides loss: a net profit with a low hit rate is a sniper, a net loss is a loss whatever the hit rate
+  assert.equal(winTag(0.18, 655, 3, 0.16), 'sniper', 'few big wins, net +16 %');
+  assert.equal(winTag(0.35, 6, 3, 0.4), 'win30');
+  assert.equal(winTag(0.9, 5, 3, -0.05), 'loss', 'mostly small wins but lost money overall');
+  assert.equal(winTag(0.2, 5, 3, 0), 'loss');
   const rois = [0.5, -0.2, 1.2, 0.1, -0.6];
   const { entries, tokens } = (function () { const t = new Map(), es = []; rois.forEach((r, i) => { const id = `p${i}`; t.set(id, { symbol: id, live_ts: T0 + i, creator: 'c', outcome: { rugged: false } }); es.push({ token: id, wallet: 'w1', rank: 2, delay_s: 20, buy_near: 10, roi: { 60: r }, sold_share: { 60: 0 }, first_buy_ts: T0 + i, token_rugged: false }); }); return { entries: es, tokens: t }; })();
   const { metrics } = computeMetrics(['w1'], entries, tokens, new Map([['w1', { _id: 'w1' }]]), new Set(), { minutes: [60], winRoi: 0.2, cobuySeconds: 15, minTokens: 3 });

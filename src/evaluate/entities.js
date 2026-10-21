@@ -79,7 +79,7 @@ export async function buildEntities() {
     const onlySink = [...e.roles].every((r) => r === 'sink' || r === 'creator_sink');
     if (onlySink && e.sinks.size + e.creatorSinks.size < 2 && isGenericKind(kind) === false) continue; // a destination one wallet paid once is noise
     const funded = [...e.funded.values()], sinkers = [...e.sinks.values()];
-    const verdicts = { win80: 0, win50: 0, win30: 0, loss: 0, unrated: 0 };
+    const verdicts = { win80: 0, win50: 0, win30: 0, sniper: 0, loss: 0, unrated: 0 };
     const tokens = new Set();
     let pnl = 0, buy = 0, wins = 0, judged = 0;
     for (const f of funded) {
