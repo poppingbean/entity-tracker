@@ -1,6 +1,7 @@
 // Everything the gates and the AI analyst need to know about a launch a couple of minutes after its pool opened.
 // Built from the tracker's own data (stored trades, wallet funding profiles, groups / entities) plus live pool quotes.
 import { col } from '../db.js';
+import { creatorNetwork } from '../evaluate/creators.js';
 import { config } from '../config.js';
 import { view, viewAccount, fastnearGet } from '../near/rpc.js';
 import { decimals, units, quoteNearPrice, quoteSymbol, isKnownQuote, nearUsdPrice, quoteToNear } from '../near/quotes.js';
@@ -65,7 +66,17 @@ async function intelFor(buyers, creator, tokenId) {
   const rugs = prior.filter((p) => p.outcome?.rugged || p.outcome?.creator_sold);
   const black = creator ? await col('blacklist').findOne({ _id: creator }) : null; // dumped a token while the simulated wallet held it
   if (black) rugs.push({ symbol: black.symbol || black.token });
+  // the creator's network: other creators tied to it by funding or payments, and what they launched
+  const net = creator ? await creatorNetwork(creator).catch(() => null) : null;
+  const creatorNet = net?.profiled ? {
+    traced: true, funder: (({ account, kind, label, type, hop }) => ({ account, kind, label, type, hop }))(net.funders.find((f) => f.link) || net.funders[0] || {}),
+    funder_creators_funded: (net.funders.find((f) => f.link) || {}).creators_funded_n ?? null, funder_creators_rugged: (net.funders.find((f) => f.link) || {}).creators_rugged_n ?? null,
+    other_creators: net.network.creators - 1, other_launches: net.network.others_launches, other_rugged_tokens: net.network.others_rugged,
+    rugger_creators: net.siblings.filter((s) => s.rugged > 0 || s.blacklisted).length,
+    ruggers: net.siblings.filter((s) => s.rugged > 0 || s.blacklisted).slice(0, 5).map((s) => ({ account: s.account, rugged: s.rugged, launches: s.launches, blacklisted: s.blacklisted, how: s.relations.map((r) => r.type) })),
+  } : { traced: false };
   return {
+    creator_network: creatorNet,
     early_buyer_groups: Object.fromEntries(Object.entries(agg).map(([k, v]) => [k, { wallets: v.wallets, near: +v.near.toFixed(1), share: total ? +(v.near / total).toFixed(3) : 0 }])),
     tracked_wallets: ws.length, creator_prior_launches: prior.length, creator_prior_rugs_or_dumps: rugs.length, creator_prior_rug_symbols: rugs.slice(0, 5).map((p) => p.symbol),
   };

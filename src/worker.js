@@ -9,16 +9,20 @@ import { profilePending } from './graph/profile.js';
 import { expandNetworks } from './graph/expand.js';
 import { flagRugs } from './collect/rugs.js';
 import { evaluateGroups, reviewPending } from './evaluate/run.js';
+import { profileCreators } from './evaluate/creators.js';
 import { checkAi, aiEnabled, aiStatus } from './ai/nearai.js';
 import { scanTick, followUpTick, blacklistCreator } from './scanner/pipeline.js';
 import { managePositions } from './sim/portfolio.js';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-export const runtime = { startedTs: Date.now(), cycles: 0, lastCycleTs: null, stopping: false, lastEvalTs: 0, lastPositionCheck: 0, lastRugCheck: 0 };
+export const runtime = { startedTs: Date.now(), cycles: 0, lastCycleTs: null, stopping: false, lastEvalTs: 0, lastPositionCheck: 0, lastRugCheck: 0, lastCreatorCheck: 0 };
 
 /** One pass of the pipeline. Returns what it did, so callers (the CLI) can loop until idle. */
 export async function cycle({ evaluate = true } = {}) {
   const found = await discover();
+  // trace who funded each token creator (new launches first), so the scanner sees the creator's network at its first check
+  let creators = 0;
+  if (found || Date.now() - runtime.lastCreatorCheck > 60e3) { runtime.lastCreatorCheck = Date.now(); creators = await profileCreators(found ? 12 : 6).catch((e) => { warn(`creator profiling failed: ${e.message}`); return 0; }); }
   const processed = await processDue();
   const ledgered = await followDue().catch((e) => { warn(`ledger follow failed: ${e.message}`); return 0; }); // done tokens: trades after the first 24 h
   let scanned = 0, followed = 0;
@@ -33,7 +37,7 @@ export async function cycle({ evaluate = true } = {}) {
     groups = (await evaluateGroups()).groups; runtime.lastEvalTs = Date.now();
   }
   if (evaluate && aiEnabled()) reviewed = await reviewPending(3);
-  return { found, processed, ledgered, scanned, followed, profiled, expanded, groups, reviewed };
+  return { found, creators, processed, ledgered, scanned, followed, profiled, expanded, groups, reviewed };
 }
 
 export async function runWorker() {

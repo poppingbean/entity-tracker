@@ -87,6 +87,7 @@ export const config = {
     maxTaxBps: num(process.env.MAX_TAX_BPS, 1000),
     maxLinkedBuyerShare: num(process.env.MAX_LINKED_BUYER_SHARE, 0.4),
     maxBadGroupShare: num(process.env.MAX_BAD_GROUP_SHARE, 0.4),
+    maxNetworkRuggers: num(process.env.CREATOR_NETWORK_MAX_RUGGERS, 0), // other creators tied to this one (funding / payments) allowed to have rugged; -1 = no gate
     auditMaxRisk: num(process.env.AUDIT_MAX_RISK, 70),
     maxPriceMultipleSinceLaunch: num(process.env.MAX_PRICE_MULTIPLE, 8),
     ignoreRunupBelowMcapUsd: num(process.env.IGNORE_RUNUP_BELOW_MCAP_USD, 10000),
