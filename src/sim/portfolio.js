@@ -59,7 +59,7 @@ export async function simBuy(t, nearAmount, meta = {}) {
   if (!r.modifiedCount) return { status: 'blocked', reason: 'not enough cash' };
   const now = Date.now();
   const id = `${t._id}|${now}`;
-  const creatorBase = t.creator ? (await ftBalance(t._id, t.creator)).toString() : null;
+  const creatorBase = t.creator ? (await ftBalance(t._id, t.creator))?.toString() ?? null : null;
   const pos = {
     _id: id, token: t._id, symbol: t.symbol || null, launchpad: t.launchpad, creator: t.creator || null, opened_ts: now, status: 'open', cost_near: nearAmount, held_raw: net.toString(), held_tokens: tokens,
     decimals: dec, entry_price: tokens > 0 ? nearAmount / tokens : null, realized_near: 0, value_near: nearAmount, roi: 0, checked_ts: now, route: snap.route.kind, tax: t.tax || null,
@@ -128,8 +128,11 @@ export async function managePositions(blacklistCreator) {
 
       // dev rug: the creator's balance fell by 20 % or more while we hold
       if (S().rugWatch && pos.creator && pos.creator_base_raw && BigInt(pos.creator_base_raw) > 0n) {
-        const bal = await ftBalance(pos.token, pos.creator), base = BigInt(pos.creator_base_raw);
-        if (bal * 10000n <= base * 8000n) {
+        const base = BigInt(pos.creator_base_raw), fell = (b) => b != null && b * 10000n <= base * 8000n;
+        // confirm with a second read a few seconds later: one bad RPC answer must not blacklist a creator
+        let bal = await ftBalance(pos.token, pos.creator);
+        if (fell(bal)) { await new Promise((r) => setTimeout(r, 5000)); bal = await ftBalance(pos.token, pos.creator); }
+        if (fell(bal)) {
           await blacklistCreator(pos.creator, { token: pos.token, symbol: pos.symbol, reason: `creator balance fell ${Number(((base - bal) * 10000n) / base) / 100}% while the simulated portfolio held it` });
           warn(`DEV RUG ${pos.symbol || ''} ${pos.token}: creator dumped, exiting the simulated position`);
           await simSell(t, pos, { share: 1, reason: 'dev rug' });
