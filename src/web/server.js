@@ -72,7 +72,7 @@ async function buildSignals(hours = 72, limit = 60) {
     if (assessment === 'no-known-groups') continue;
     out.push({ token: t._id, symbol: t.symbol, launchpad: t.launchpad, live_ts: t.live_ts, status: t.status, early_wallets: m.wallets, total_near: total, win, loss, win_share: winShare, loss_share: lossShare, assessment,
       mix: Object.fromEntries(TAGS.map((v) => [v, m[v]])), groups: m.groups.filter((g) => g.tag !== 'unrated'),
-      outcome: t.outcome ? { rugged: t.outcome.rugged, rug_kinds: t.outcome.rug_kinds || [], peak_multiple: t.outcome.peak_multiple, last_multiple: t.outcome.last_multiple, age_min: t.outcome.age_min } : null });
+      outcome: t.outcome ? { rugged: t.outcome.rugged, rug_kinds: t.outcome.rug_kinds || [], peak_multiple: t.outcome.peak_multiple, last_multiple: t.outcome.last_multiple, age_min: t.outcome.age_min, now_multiple: t.ledger?.last_multiple ?? null, done: t.status === 'done' } : null });
   }
   return out;
 }
@@ -173,7 +173,7 @@ const routes = {
   '/api/monitor': async () => {
     const now = Date.now(), day = now - 24 * 3600e3;
     const [recent, c24, scanned, passed, bought, polls, newTokens, ruggedTotal, tokensTotal] = await Promise.all([
-      col('tokens').find({}, { projection: { symbol: 1, launchpad: 1, live_ts: 1, status: 1, scan: 1, scan_done: 1, entries_n: 1, 'outcome.rugged': 1, 'outcome.peak_multiple': 1, 'outcome.last_multiple': 1, creator: 1 } }).sort({ live_ts: -1 }).limit(40).toArray(),
+      col('tokens').find({}, { projection: { symbol: 1, launchpad: 1, live_ts: 1, status: 1, scan: 1, scan_done: 1, entries_n: 1, 'outcome.rugged': 1, 'outcome.peak_multiple': 1, 'outcome.last_multiple': 1, 'ledger.last_multiple': 1, creator: 1 } }).sort({ live_ts: -1 }).limit(40).toArray(),
       col('tokens').countDocuments({ live_ts: { $gt: day } }), col('tokens').countDocuments({ live_ts: { $gt: day }, scan_done: true, 'scan.score': { $exists: true } }),
       col('tokens').countDocuments({ live_ts: { $gt: day }, 'scan.pass': true }), col('sim_positions').countDocuments({ opened_ts: { $gt: day } }),
       Promise.all(config.launchpads.map(async (p) => ({ launchpad: p, ...(await metaGet(`poll:${p}`)) }))), col('tokens').countDocuments({ live_ts: { $gt: now - 3 * 3600e3 } }),
@@ -181,7 +181,7 @@ const routes = {
     ]);
     const worker = await metaGet('worker');
     return { now, scan: config.scan, window24h: { launches: c24, scanned, passed, bought }, launchesLast3h: newTokens, ruggedTotal, tokensTotal, polls, worker, ai: { enabled: aiEnabled(), model: config.ai.model, ...(worker?.ai || {}) },
-      rows: recent.map((t) => ({ id: t._id, symbol: t.symbol, launchpad: t.launchpad, live_ts: t.live_ts, status: t.status, scan: t.scan || null, scan_done: !!t.scan_done, entries_n: t.entries_n ?? null, rugged: !!t.outcome?.rugged, peak_multiple: t.outcome?.peak_multiple ?? null, last_multiple: t.outcome?.last_multiple ?? null })) };
+      rows: recent.map((t) => ({ id: t._id, symbol: t.symbol, launchpad: t.launchpad, live_ts: t.live_ts, status: t.status, scan: t.scan || null, scan_done: !!t.scan_done, entries_n: t.entries_n ?? null, rugged: !!t.outcome?.rugged, peak_multiple: t.outcome?.peak_multiple ?? null, last_multiple: t.outcome?.last_multiple ?? null, now_multiple: t.ledger?.last_multiple ?? null })) };
   },
 
   '/api/sim/overview': async () => {
@@ -285,7 +285,7 @@ const routes = {
     const w = await col('wallets').findOne({ _id: id });
     if (!w) return { error: 'not found' };
     const entries = await col('entries').find({ wallet: id }).sort({ first_buy_ts: -1 }).limit(100).toArray();
-    const toks = await col('tokens').find({ _id: { $in: entries.map((e) => e.token) } }, { projection: { symbol: 1, launchpad: 1, 'outcome.rugged': 1, 'outcome.peak_multiple': 1, creator: 1 } }).toArray();
+    const toks = await col('tokens').find({ _id: { $in: entries.map((e) => e.token) } }, { projection: { symbol: 1, launchpad: 1, status: 1, 'outcome.rugged': 1, 'outcome.peak_multiple': 1, 'ledger.synced_to_ts': 1, creator: 1 } }).toArray();
     const tmap = new Map(toks.map((t) => [t._id, t]));
     const cluster = w.cluster_id ? await col('clusters').findOne({ _id: w.cluster_id }, { projection: { size: 1, tag: 1, verdict: 1, score: 1, 'ai.label': 1, 'rule.tags': 1 } }) : null;
     const fundEdges = await col('edges').find({ type: 'fund', to: id }, { projection: { from: 1, hash: 1 } }).toArray();
@@ -293,7 +293,7 @@ const routes = {
     for (const f of w.funders || []) f.hash = f.hash || hashOf.get(f.account) || null;
     const { _id, ...rest } = w;
     return { id: _id, ...rest, cluster: cluster ? strip(cluster) : null,
-      entries: entries.map((e) => ({ token: e.token, first_buy_hash: e.first_buy_hash || null, symbol: tmap.get(e.token)?.symbol || null, launchpad: e.launchpad, rank: e.rank, delay_s: e.delay_s, buy_near: e.buy_near, roi: e.roi, roi_now: e.roi_now, realized_now: e.realized_now ?? null, unrealized_now: e.unrealized_now ?? null, first_buy_ts: e.first_buy_ts, rugged: !!tmap.get(e.token)?.outcome?.rugged, peak_multiple: tmap.get(e.token)?.outcome?.peak_multiple ?? null, is_creator: e.is_creator })) };
+      entries: entries.map((e) => ({ token: e.token, first_buy_hash: e.first_buy_hash || null, symbol: tmap.get(e.token)?.symbol || null, launchpad: e.launchpad, rank: e.rank, delay_s: e.delay_s, buy_near: e.buy_near, roi: e.roi, roi_now: e.roi_now, now_ts: tmap.get(e.token)?.ledger?.synced_to_ts ?? null, token_done: tmap.get(e.token)?.status === 'done', realized_now: e.realized_now ?? null, unrealized_now: e.unrealized_now ?? null, first_buy_ts: e.first_buy_ts, rugged: !!tmap.get(e.token)?.outcome?.rugged, peak_multiple: tmap.get(e.token)?.outcome?.peak_multiple ?? null, is_creator: e.is_creator })) };
   },
 
   '/api/tokens': async (u) => {
@@ -371,7 +371,7 @@ const routes = {
     if (!c) return { error: 'not found' };
     const [w, groups] = await Promise.all([col('wallets').findOne({ _id: id }, { projection: { cluster_id: 1, cluster_tag: 1, tag: 1, stats: 1, is_early: 1 } }),
       col('clusters').find({ 'creators.account': id }, { projection: { tag: 1, size: 1, 'ai.label': 1, 'rule.tags': 1, creators: { $elemMatch: { account: id } } } }).toArray()]);
-    const toks = await col('tokens').find({ creator: id }, { projection: { symbol: 1, launchpad: 1, live_ts: 1, 'outcome.rugged': 1, 'outcome.rug_kinds': 1, 'outcome.peak_multiple': 1, 'outcome.last_multiple': 1, 'outcome.creator_sold': 1, 'outcome.creator_sell_near': 1, 'rug.reason': 1 } }).sort({ live_ts: -1 }).limit(100).toArray();
+    const toks = await col('tokens').find({ creator: id }, { projection: { symbol: 1, launchpad: 1, live_ts: 1, status: 1, 'outcome.rugged': 1, 'outcome.rug_kinds': 1, 'outcome.peak_multiple': 1, 'outcome.last_multiple': 1, 'ledger.last_multiple': 1, 'outcome.creator_sold': 1, 'outcome.creator_sell_near': 1, 'rug.reason': 1 } }).sort({ live_ts: -1 }).limit(100).toArray();
     return { id, launches: c.launches, rugged: c.rugged, rug_rate: c.rug_rate, blacklisted: c.blacklisted, flag: creatorFlag(c), wallet: w ? { cluster_id: w.cluster_id ?? null, cluster_tag: w.cluster_tag ?? null, tag: w.tag ?? null, stats: w.stats || null, is_early: !!w.is_early } : null,
       groups: groups.map((g) => ({ id: g._id, tag: g.tag, size: g.size, label: g.ai?.label || g.rule?.tags?.[0] || null, role: g.creators?.[0]?.role || null, depth: g.creators?.[0]?.depth ?? null })), tokens: toks.map(strip) };
   },

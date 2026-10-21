@@ -68,6 +68,28 @@ export function buildOutcome(token, trades, now, cfg) {
 }
 
 /**
+ * The token over its whole stored history (the full ledger), next to the 24 h outcome: current price, all-time high, drawdown from it,
+ * when it last traded, and volume after the last checkpoint. `cfg` = the outcome settings. Verdicts never read this.
+ */
+export function buildLedger(token, trades, cfg) {
+  const live = token.live_ts, horizon = live + cfg.minutes[cfg.minutes.length - 1] * MIN;
+  const all = trades.filter((t) => t.ts >= live), after = all.filter((t) => t.ts > horizon);
+  const series = priceSeries(all, cfg.priceMinNear);
+  const first = series[0]?.price ?? null, last = series.at(-1)?.price ?? null;
+  let ath = null, athTs = null;
+  for (const p of series) if (ath == null || p.price > ath) { ath = p.price; athTs = p.ts; }
+  const drawdown = ath && last != null ? 1 - last / ath : null;
+  const sum = (a, f) => a.reduce((s, x) => s + f(x), 0);
+  const side = (a) => ({ trades: a.length, buy_near: sum(a.filter((t) => t.buy), (t) => t.near), sell_near: sum(a.filter((t) => !t.buy), (t) => t.near), buyers: new Set(a.filter((t) => t.buy).map((t) => t.trader)).size });
+  return {
+    last_price: last, last_multiple: first && last != null ? last / first : null, last_trade_ts: all.at(-1)?.ts ?? null,
+    ath_price: ath, ath_multiple: first && ath ? ath / first : null, ath_ts: athTs, ath_after_cp: athTs != null && athTs > horizon,
+    drawdown, collapsed: drawdown != null && drawdown >= cfg.rugDrawdown, // fell like a rug at some point after launch (24 h verdicts may not show it)
+    ...side(all), after_cp: side(after),
+  };
+}
+
+/**
  * Early buyers of a token and what each made. `cfg` = { windowMinutes, maxBuyers, minNear, minutes }.
  * An entry is a wallet whose first buy fell inside the window, among the first `maxBuyers` such wallets.
  * ROI at a checkpoint T = (NEAR already taken out by T + tokens still held x price at T) / NEAR put in during the window - 1.

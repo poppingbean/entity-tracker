@@ -64,12 +64,14 @@ export async function tradesFromTxs(token, pool, txs) {
 
 /**
  * Pull new transactions of the token contract since the last sync (oldest first), store the trades, advance the cursor.
- * Returns { added, done }: done = the token's history has been read past its last outcome checkpoint.
+ * Reads up to the last outcome checkpoint, or up to now with `full` (the ledger follow-up).
+ * Returns { added, done, reachedEnd, lastTs }: done = the token's history has been read past its last outcome checkpoint;
+ * reachedEnd = nothing more to read right now.
  */
-export async function syncTokenTrades(token, { maxRows = 1000 } = {}) {
+export async function syncTokenTrades(token, { maxRows = 1000, full = false } = {}) {
   const horizon = token.live_ts + config.outcome.minutes[config.outcome.minutes.length - 1] * 60e3;
   const fromHeight = token.sync_height || token.live_height || undefined;
-  const { rows } = await accountRows(token._id, { desc: false, fromHeight, maxRows, untilTs: horizon });
+  const { rows } = await accountRows(token._id, { desc: false, fromHeight, maxRows, untilTs: full ? undefined : horizon });
   const fresh = rows.filter((r) => r.ts >= token.live_ts - 5000 && r.ok);
   const txs = fresh.length ? await fetchTxs(fresh.map((r) => r.hash)) : [];
   const { trades, transfers } = await tradesFromTxs(token._id, token.pool, txs);
@@ -80,5 +82,5 @@ export async function syncTokenTrades(token, { maxRows = 1000 } = {}) {
   const reachedEnd = rows.length < maxRows; // fewer rows than asked: nothing newer exists (yet) or we stopped at the horizon
   const pastHorizon = Date.now() > horizon && reachedEnd;
   await col('tokens').updateOne({ _id: token._id }, { $set: { sync_height: last?.height ?? token.sync_height ?? null, sync_ts: Date.now(), trades_n: (token.trades_n || 0) + keep.length } });
-  return { added: keep.length, done: pastHorizon };
+  return { added: keep.length, done: pastHorizon, reachedEnd, lastTs: last?.ts ?? null };
 }

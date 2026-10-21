@@ -8,6 +8,7 @@ import { adapters } from '../launchpads.js';
 import { accountRows, fetchTxs } from '../near/indexer.js';
 import { saveLaunches } from './launches.js';
 import { processToken } from './process.js';
+import { followToken } from './ledger.js';
 import { auditNearContract, validNearAddress } from '../audit/service.js';
 import { analyseOnDemand } from '../scanner/pipeline.js';
 import { flagRug } from './rugs.js';
@@ -52,6 +53,13 @@ async function run(id, job) {
     step(`reading trades (${t.trades_n || 0} so far)`);
     const r = await processToken(t);
     if (r.done || Date.now() - t.live_ts < lastCp) break;
+  }
+  // past its first 24 h: read the rest of its history up to now (the full ledger)
+  t = await col('tokens').findOne({ _id: id });
+  if (t.status === 'done' && config.ledger.enabled) for (let i = 0; i < 40; i++) {
+    step(`reading the full ledger (${t.trades_n || 0} trades so far)`);
+    if ((await followToken(t, { passes: 3 })).caughtUp) break;
+    t = await col('tokens').findOne({ _id: id });
   }
   step('auditing the contract');
   await auditNearContract(id).catch((e) => warn(`on-demand audit of ${id}: ${e.message}`));
