@@ -38,22 +38,28 @@ const strip = ({ _id, ...r }) => ({ id: _id, ...r });
 // 30 % (a few big wins); unrated = too few tokens judged yet
 const TAGS = ['win80', 'win50', 'win30', 'sniper', 'loss', 'unrated'];
 const tagOf = (t) => (TAGS.includes(t) ? t : 'unrated');
+// rugger wallets: a token creator that rugged or is blacklisted, or a member of a group that contains one (creator-rug) or that the rules
+// call rug farmers. Independent of the win / loss tag: a rugger can make money.
+const RUG_TAGS = new Set(['creator-rug', 'rug-farmer']);
+const ruggerGroup = (c) => !!c && (c.creator_flag === 'rugger' || c.creator_flag === 'blacklisted' || (c.rule?.tags || []).some((t) => RUG_TAGS.has(t)));
+const ruggerWallet = (w, c) => !!(w?.creator && (w.creator.rugged > 0 || w.creator.blacklisted)) || ruggerGroup(c);
 /** For each token: how its early NEAR splits across win-rate tags (a wallet counts with its group's tag, or its own when it has no group), plus the groups involved. */
 async function earlyMix(tokenIds) {
   const out = new Map();
   if (!tokenIds.length) return out;
   const entries = await col('entries').find({ token: { $in: tokenIds } }, { projection: { token: 1, wallet: 1, buy_near: 1 } }).toArray();
-  const wallets = await col('wallets').find({ _id: { $in: [...new Set(entries.map((e) => e.wallet))] } }, { projection: { cluster_id: 1, tag: 1 } }).toArray();
+  const wallets = await col('wallets').find({ _id: { $in: [...new Set(entries.map((e) => e.wallet))] } }, { projection: { cluster_id: 1, tag: 1, creator: 1 } }).toArray();
   const wmap = new Map(wallets.map((w) => [w._id, w]));
   const cids = [...new Set(wallets.map((w) => w.cluster_id).filter(Boolean))];
-  const clusters = await col('clusters').find({ _id: { $in: cids } }, { projection: { tag: 1, size: 1, 'ai.label': 1, 'rule.tags': 1 } }).toArray();
+  const clusters = await col('clusters').find({ _id: { $in: cids } }, { projection: { tag: 1, size: 1, 'ai.label': 1, 'rule.tags': 1, creator_flag: 1 } }).toArray();
   const cmap = new Map(clusters.map((c) => [c._id, c]));
-  for (const t of tokenIds) out.set(t, { wallets: 0, total_near: 0, ...Object.fromEntries(TAGS.map((v) => [v, { w: 0, near: 0 }])), groups: new Map() });
+  for (const t of tokenIds) out.set(t, { wallets: 0, total_near: 0, ...Object.fromEntries(TAGS.map((v) => [v, { w: 0, near: 0 }])), rugger: { w: 0, near: 0 }, groups: new Map() });
   for (const e of entries) {
     const m = out.get(e.token), w = wmap.get(e.wallet), c = w?.cluster_id ? cmap.get(w.cluster_id) : null;
     const v = tagOf(c ? c.tag : w?.tag);
     m.wallets++; m.total_near += e.buy_near; m[v].w++; m[v].near += e.buy_near;
-    if (c) { const g = m.groups.get(c._id) || { id: c._id, tag: tagOf(c.tag), label: c.ai?.label || c.rule?.tags?.[0] || null, size: c.size, wallets: 0, near: 0 }; g.wallets++; g.near += e.buy_near; m.groups.set(c._id, g); }
+    if (ruggerWallet(w, c)) { m.rugger.w++; m.rugger.near += e.buy_near; }
+    if (c) { const g = m.groups.get(c._id) || { id: c._id, tag: tagOf(c.tag), label: c.ai?.label || c.rule?.tags?.[0] || null, size: c.size, rugger: ruggerGroup(c), wallets: 0, near: 0 }; g.wallets++; g.near += e.buy_near; m.groups.set(c._id, g); }
   }
   for (const m of out.values()) m.groups = [...m.groups.values()].sort((a, b) => b.near - a.near);
   return out;
@@ -69,10 +75,12 @@ async function buildSignals(hours = 72, limit = 60) {
     const m = mix.get(t._id), total = m.total_near || 1;
     const win = { w: m.win80.w + m.win50.w + m.sniper.w, near: m.win80.near + m.win50.near + m.sniper.near }, loss = m.loss; // money makers: high hit rate or snipers
     const lossShare = loss.near / total, winShare = win.near / total;
-    const assessment = lossShare >= 0.25 ? 'warning' : win.w >= 2 && lossShare < 0.1 ? 'bullish' : win.w + loss.w + m.win30.w ? 'mixed' : 'no-known-groups';
+    // rug wallets among the early buyers come first: they matter more than who wins
+    const assessment = m.rugger.w ? 'rugger' : lossShare >= 0.25 ? 'warning' : win.w >= 2 && lossShare < 0.1 ? 'bullish' : win.w + loss.w + m.win30.w ? 'mixed' : 'no-known-groups';
     if (assessment === 'no-known-groups') continue;
     out.push({ token: t._id, symbol: t.symbol, launchpad: t.launchpad, live_ts: t.live_ts, status: t.status, early_wallets: m.wallets, total_near: total, win, loss, win_share: winShare, loss_share: lossShare, assessment,
-      mix: Object.fromEntries(TAGS.map((v) => [v, m[v]])), groups: m.groups.filter((g) => g.tag !== 'unrated'),
+      rugger: m.rugger, rugger_share: m.rugger.near / total,
+      mix: Object.fromEntries(TAGS.map((v) => [v, m[v]])), groups: m.groups.filter((g) => g.tag !== 'unrated' || g.rugger).sort((a, b) => (b.rugger ? 1 : 0) - (a.rugger ? 1 : 0) || b.near - a.near),
       outcome: t.outcome ? { rugged: t.outcome.rugged, rug_kinds: t.outcome.rug_kinds || [], peak_multiple: t.outcome.peak_multiple, last_multiple: t.outcome.last_multiple, age_min: t.outcome.age_min, now_multiple: t.ledger?.last_multiple ?? null, done: t.status === 'done' } : null });
   }
   return out;
@@ -317,7 +325,7 @@ const routes = {
     const [total, rows] = await Promise.all([col('tokens').countDocuments(f), col('tokens').find(f, { projection: { pool: 0 } }).sort({ live_ts: -1 }).skip(offset).limit(limit).toArray()]);
     const mix = await earlyMix(rows.map((t) => t._id));
     const cr = await creatorIndex(rows.map((t) => t.creator).filter(Boolean));
-    return { total, rows: rows.map((t) => { const m = mix.get(t._id); return { ...strip(t), creator_risk: creatorBrief(cr.get(t.creator)), mix: Object.fromEntries(TAGS.map((v) => [v, m[v]])), groups: m.groups.filter((g) => g.tag !== 'unrated').slice(0, 3) }; }) };
+    return { total, rows: rows.map((t) => { const m = mix.get(t._id); return { ...strip(t), creator_risk: creatorBrief(cr.get(t.creator)), mix: Object.fromEntries(TAGS.map((v) => [v, m[v]])), rugger: m.rugger, groups: m.groups.filter((g) => g.tag !== 'unrated').slice(0, 3) }; }) };
   },
 
   '/api/token': async (u) => {
@@ -325,10 +333,10 @@ const routes = {
     const t = await col('tokens').findOne({ _id: id });
     if (!t) return { error: 'not found' };
     const entries = await col('entries').find({ token: id }).sort({ rank: 1 }).toArray();
-    const wallets = await col('wallets').find({ _id: { $in: entries.map((e) => e.wallet) } }, { projection: { cluster_id: 1, tag: 1, kind: 1, funder_kind: 1, created_ts: 1, 'stats.tokens_n': 1, 'stats.win_rate': 1, 'stats.profit_rate': 1 } }).toArray();
+    const wallets = await col('wallets').find({ _id: { $in: entries.map((e) => e.wallet) } }, { projection: { cluster_id: 1, tag: 1, kind: 1, funder_kind: 1, created_ts: 1, creator: 1, 'stats.tokens_n': 1, 'stats.win_rate': 1, 'stats.profit_rate': 1 } }).toArray();
     const wmap = new Map(wallets.map((w) => [w._id, w]));
     const cids = [...new Set(wallets.map((w) => w.cluster_id).filter(Boolean))];
-    const clusters = await col('clusters').find({ _id: { $in: cids } }, { projection: { size: 1, tag: 1, 'ai.label': 1, 'rule.tags': 1 } }).toArray();
+    const clusters = await col('clusters').find({ _id: { $in: cids } }, { projection: { size: 1, tag: 1, 'ai.label': 1, 'rule.tags': 1, creator_flag: 1 } }).toArray();
     const cmap = new Map(clusters.map((c) => [c._id, c]));
     const { _id, ...rest } = t;
     const audit = summarizeAudit(await getCachedAudit(id));
@@ -337,7 +345,7 @@ const routes = {
     const creatorNet = t.creator ? await creatorNetwork(t.creator).catch(() => null) : null;
     return { id: _id, ...rest, audit, creator_info: creatorInfo, creator_network: netBrief(creatorNet), creator_wallet: creatorWallet ? { cluster_id: creatorWallet.cluster_id ?? null, cluster_tag: creatorWallet.cluster_tag ?? null, tag: creatorWallet.tag ?? null } : null, entries: entries.map((e) => { const w = wmap.get(e.wallet), c = w?.cluster_id ? cmap.get(w.cluster_id) : null;
       return { wallet: e.wallet, first_buy_hash: e.first_buy_hash || null, rank: e.rank, delay_s: e.delay_s, buy_near: e.buy_near, roi: e.roi, roi_now: e.roi_now, sold_share: e.sold_share, is_creator: e.is_creator, kind: w?.kind || null, funder_kind: w?.funder_kind || null,
-        wallet_age_days: w?.created_ts ? Math.round((e.first_buy_ts - w.created_ts) / 86400e3) : null, wallet_tag: tagOf(w?.tag), wallet_profit_rate: w?.stats?.profit_rate ?? null, tag: tagOf(c ? c.tag : w?.tag), cluster: c ? { id: c._id, size: c.size, tag: tagOf(c.tag), label: c.ai?.label || c.rule?.tags?.[0] || null } : null }; }) };
+        wallet_age_days: w?.created_ts ? Math.round((e.first_buy_ts - w.created_ts) / 86400e3) : null, rugger: ruggerWallet(w, c), wallet_tag: tagOf(w?.tag), wallet_profit_rate: w?.stats?.profit_rate ?? null, tag: tagOf(c ? c.tag : w?.tag), cluster: c ? { id: c._id, size: c.size, tag: tagOf(c.tag), rugger: ruggerGroup(c), label: c.ai?.label || c.rule?.tags?.[0] || null } : null }; }) };
   },
 
   /** One box for everything: tokens by symbol / account, wallets by account, groups by id / AI label. */

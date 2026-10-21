@@ -179,6 +179,8 @@
   .tcard { border:1px solid var(--line); border-radius:13px; padding:14px; background:var(--panel-2); display:flex; flex-direction:column; gap:11px; transition:border-color .12s, transform .12s; }
   .tcard:hover { border-color:var(--accent-line); transform:translateY(-1px); }
   .tc-top { display:flex; justify-content:space-between; align-items:flex-start; gap:8px; }
+  .rugline { font-size:12px; font-weight:600; color:var(--bad); background:var(--bad-soft); border:1px solid color-mix(in srgb, var(--bad) 35%, transparent); border-radius:8px; padding:4px 9px; }
+  .gchip.rug { border-color:color-mix(in srgb, var(--bad) 55%, transparent); }
   .tc-stats { display:grid; grid-template-columns:repeat(4,1fr); gap:6px; }
   .tc-stats small { display:block; color:var(--muted); font-size:10.5px; text-transform:uppercase; letter-spacing:.5px; font-weight:600; }
   .tc-stats b { font-size:13px; white-space:nowrap; }
@@ -306,7 +308,8 @@ const tokCell = (id, sym, lp, k = 26) => `<span class="ent">${avatar(id, sym)}<s
 /** Wallet cell: account -> wallet page, plus NearBlocks. Non-account keys stay plain text. */
 const walLink = (id, k = 24) => (!id ? '–' : ACCT_RE.test(id) ? `<span class="acct">${ilink(P.wal(id), esc(short(id, k)), id)}</span> ${ext(nbAddr(id), '↗', 'NearBlocks: ' + id)}` : esc(short(id, k)));
 const VCOL = { win80: 'var(--win80)', win50: 'var(--win50)', win30: 'var(--win30)', sniper: 'var(--sniper)', loss: 'var(--loss)', unrated: 'var(--unknown)', solo: 'var(--solo)' };
-const gchip = (g) => `<a class="gchip" href="${esc(P.grp(g.id))}" onclick="event.stopPropagation();return navA(event,this)" title="${esc((g.label || g.id) + ' · ' + tagOk(g.tag))}"><i style="background:${VCOL[tagOk(g.tag)]}"></i><span>${esc(short(g.label || g.id, 26))}</span>${g.wallets != null ? `<span class="muted">${g.wallets}w</span>` : ''}</a>`;
+const RUG_ICON = '☠';
+const gchip = (g) => `<a class="gchip${g.rugger ? ' rug' : ''}" href="${esc(P.grp(g.id))}" onclick="event.stopPropagation();return navA(event,this)" title="${esc((g.label || g.id) + ' · ' + tagOk(g.tag) + (g.rugger ? ' · rugger group: contains a creator that rugged, or rug farmers' : ''))}"><i style="background:${VCOL[tagOk(g.tag)]}"></i>${g.rugger ? `<b class="r">${RUG_ICON}</b>` : ''}<span>${esc(short(g.label || g.id, 26))}</span>${g.wallets != null ? `<span class="muted">${g.wallets}w</span>` : ''}</a>`;
 const tile = (label, value, sub, cls = '') => `<div class="tile"><span>${label}</span><b class="${cls}">${value}</b>${sub != null && sub !== '' ? `<small>${sub}</small>` : ''}</div>`;
 const crumbs = (items) => `<div class="crumbs">${items.map(([l, p]) => (p ? ilink(p, esc(l)) : `<span>${esc(l)}</span>`)).join(' / ')}</div>`;
 const empty = (cols, text) => `<tr><td colspan="${cols}" class="muted">${text}</td></tr>`;
@@ -320,8 +323,8 @@ const mixBar = (m, cls = '') => {
   return `<div class="mix ${cls}">${MIXV.map(([v, l]) => { const x = m[v]?.near || 0; return x ? `<i class="${v}" style="width:${((x / tot) * 100).toFixed(2)}%" title="${l}: ${n(x, 1)} N · ${m[v].w} wallets (${pct(x / tot)})"></i>` : ''; }).join('')}</div>`;
 };
 const mixLegend = (m) => { const tot = mixTotal(m) || 1; return `<div class="mixlegend">${MIXV.map(([v, l]) => `<div><small><span class="lg-dot ${v}"></span>${l}</small><b>${pct((m[v]?.near || 0) / tot)}</b><small>${n(m[v]?.near || 0, 1)} N · ${m[v]?.w || 0} wallets</small></div>`).join('')}</div>`; };
-const mixCell = (m) => { const tot = mixTotal(m); if (!tot) return '<span class="muted">no early buyers yet</span>'; const w = MIXV.reduce((s, [v]) => s + (m[v]?.w || 0), 0);
-  return `<div class="mixcell">${mixBar(m)}<small>${w} wallets · ${n(tot, 0)} N · <span class="g">${pct(((m.win80?.near || 0) + (m.win50?.near || 0)) / tot)}</span> / <span class="r">${pct((m.loss?.near || 0) / tot)}</span></small></div>`; };
+const mixCell = (m, rug) => { const tot = mixTotal(m); if (!tot) return '<span class="muted">no early buyers yet</span>'; const w = MIXV.reduce((s, [v]) => s + (m[v]?.w || 0), 0);
+  return `<div class="mixcell">${mixBar(m)}<small>${w} wallets · ${n(tot, 0)} N · <span class="g">${pct(((m.win80?.near || 0) + (m.win50?.near || 0) + (m.sniper?.near || 0)) / tot)}</span> / <span class="r">${pct((m.loss?.near || 0) / tot)}</span>${rug?.w ? ` · <b class="r" title="rugger wallets among the early buyers">${RUG_ICON} ${rug.w}w ${pct(rug.near / tot)}</b>` : ''}</small></div>`; };
 const wavg = (pairs) => { const w = pairs.reduce((s, [, x]) => s + (x || 0), 0); return w ? pairs.reduce((s, [r, x]) => s + r * (x || 0), 0) / w : null; };
 
 // ---- list state, filters, pager
@@ -346,7 +349,7 @@ const aiBanner = (ai) => (!ai.enabled ? '<div class="card warn">NEAR AI is off (
 const views = {};
 
 // ================================================================== EXPLORE
-const ASSESS = { bullish: ['g', 'Winners in'], warning: ['r', 'Loss wallets in'], mixed: ['a', 'Mixed money'] };
+const ASSESS = { rugger: ['r', 'Rugger in'], bullish: ['g', 'Winners in'], warning: ['r', 'Loss wallets in'], mixed: ['a', 'Mixed money'] };
 const rugKind = { creator_exit: 'creator exit', round_trip: 'round trip', price_crash: 'price crash', creator_dump: 'creator dump', creator_sold: 'creator sold', flagged: 'dev rug (blacklist)' };
 /** The creator sold (most of) their dev buy within the first hour: a warning, not a rug by itself. */
 const exitChip = (o) => {
@@ -364,6 +367,7 @@ const signalCard = (s) => `<div class="tcard" ${row(P.tok(s.token))}>
   <div class="tc-top">${tokCell(s.token, s.symbol, s.launchpad, 22)}<span class="badge ${ASSESS[s.assessment][0]}">${ASSESS[s.assessment][1]}</span></div>
   ${mixBar(s.mix)}
   <div class="tc-stats"><span><small>Early</small><b>${s.early_wallets}w · ${n(s.total_near, 0)} N</b></span><span><small>Winners</small><b class="g">${pct(s.win_share)}</b></span><span><small>Loss</small><b class="r">${pct(s.loss_share)}</b></span><span><small>Now</small><b>${outcomeTxt(s.outcome)}</b></span></div>
+  ${s.rugger?.w ? `<div class="rugline" title="token creators that rugged or are blacklisted, and wallets in groups that contain one or that are rug farmers">${RUG_ICON} ${s.rugger.w} rugger${s.rugger.w > 1 ? 's' : ''} in early · ${n(s.rugger.near, 0)} N · ${pct(s.rugger_share)}</div>` : ''}
   <div class="tc-groups">${s.groups.slice(0, 4).map(gchip).join('')}</div>
   <div class="muted small">${esc(s.launchpad)} · live ${since(s.live_ts)}</div></div>`;
 const groupMini = (rows, empty_) => `<table><tr><th>Group</th><th>Tag</th><th class="num">Wallets</th><th class="num">Tokens</th><th class="num">Profitable</th><th class="num">Rug</th><th class="num">P&amp;L N</th></tr>
@@ -415,7 +419,7 @@ views.tokens = async () => {
     ${sel('tokens', 'launchpad', [['', 'all launchpads'], ['nearlytrade', 'nearly.trade'], ['justhoot', 'justhoot'], ['memecooking', 'meme.cooking'], ['gaypad', 'gaypad'], ['tkn', 'tkn.near'], ['qlyphs', 'qlyphs']])}
     ${sel('tokens', 'status', [['', 'any status'], ...['new', 'entries_open', 'tracking', 'done', 'awaiting_pool'].map((v) => [v, v])])}<span class="spacer"></span>${pager('tokens', j.total)}</div>
     <table><tr><th>Token</th><th>Pad</th><th>Age</th><th>Early money by tag</th><th>Scanner</th><th class="num">Score</th><th>Gate fail / decision</th><th class="num">Buyers</th><th class="num">Peak</th><th class="num">Now</th><th>Flags</th></tr>
-    ${j.rows.map((t) => `<tr ${row(P.tok(t.id))}><td>${tokCell(t.id, t.symbol, t.launchpad)}</td><td>${esc(t.launchpad)}</td><td>${ago(m.now - t.live_ts)}</td><td>${mixCell(t.mix)}</td>
+    ${j.rows.map((t) => `<tr ${row(P.tok(t.id))}><td>${tokCell(t.id, t.symbol, t.launchpad)}</td><td>${esc(t.launchpad)}</td><td>${ago(m.now - t.live_ts)}</td><td>${mixCell(t.mix, t.rugger)}</td>
       <td>${scanState(t, m.scan)}</td><td class="num ${t.scan?.score == null ? 'muted' : 'b'}">${t.scan?.score ?? '–'}</td>
       <td class="wrap small" style="min-width:170px">${(t.scan?.failed || []).length ? `<span class="r">${esc(t.scan.failed.map((g) => g.id || g).join(', '))}</span><br>` : ''}<span class="muted">${esc(t.scan?.decision || '')}</span>${t.scan?.id ? ' ' + ilink(P.scan(t.scan.id), 'evaluation →') : ''}</td>
       <td class="num">${t.outcome?.buyers ?? '–'}</td><td class="num">x${n(t.outcome?.peak_multiple, 1)}</td><td class="num">${nowOf(t)}</td>
@@ -428,7 +432,7 @@ views.signals = async () => {
   const by = (a) => j.rows.filter((s) => s.assessment === a);
   const block = (a, title) => (by(a).length ? `<div class="card"><h2>${title} <span class="muted">${by(a).length}</span></h2><div class="tokgrid">${by(a).map(signalCard).join('')}</div></div>` : '');
   return `<div class="bar">${seg('signals', 'hours', [[24, '24 h'], [72, '72 h'], [168, '7 days']])}<span class="muted">${j.rows.length} tokens with rated wallets among the early buyers</span></div>
-    ${block('bullish', 'Winners in (win80 / win50 / sniper), little loss money')}${block('warning', 'Loss wallets hold 25 %+ of early NEAR')}${block('mixed', 'Mixed')}
+    ${block('rugger', 'Ruggers in: wallets tied to rugs bought early')}${block('bullish', 'Winners in (win80 / win50 / sniper), little loss money')}${block('warning', 'Loss wallets hold 25 %+ of early NEAR')}${block('mixed', 'Mixed')}
     ${j.rows.length ? '' : '<div class="card muted">No signals yet: needs profiled wallets and evaluated groups.</div>'}`;
 };
 
@@ -502,7 +506,7 @@ async function tokenPage(id) {
         + tile('At 24 h', 'x' + n(o.last_multiple, 1), o.drawdown != null ? `drawdown ${pct(o.drawdown)} · what verdicts use` : 'what verdicts use', roiCls((o.last_multiple ?? 1) - 1))
       : tile('Peak', 'x' + n(o.peak_multiple, 1)) + tile(at24 ? 'At 24 h' : 'Now', 'x' + n(o.last_multiple, 1), o.drawdown != null ? `drawdown ${pct(o.drawdown)}` : null, roiCls((o.last_multiple ?? 1) - 1))}
       ${L?.last_multiple != null ? tile('Buyers (all time)', n(L.buyers, 0), `${n(L.buy_near, 0)} N in · ${n(L.sell_near, 0)} N out · ${n(L.trades, 0)} trades`) : tile('Buyers', o.buyers ?? '–', `${n(o.buy_near, 0)} N in · ${n(o.sell_near, 0)} N out`)}${tile('Early wallets', es.length, `${n(total, 0)} N in the first minutes`)}
-      ${tile('From winners (win80 / win50 / sniper)', pct(total ? (mix.win80.near + mix.win50.near + mix.sniper.near) / total : null), `${mix.win80.w + mix.win50.w + mix.sniper.w} wallets`, 'g')}${tile('From loss wallets', pct(total ? mix.loss.near / total : null), `${mix.loss.w} wallets`, 'r')}
+      ${tile('From winners (win80 / win50 / sniper)', pct(total ? (mix.win80.near + mix.win50.near + mix.sniper.near) / total : null), `${mix.win80.w + mix.win50.w + mix.sniper.w} wallets`, 'g')}${tile('From loss wallets', pct(total ? mix.loss.near / total : null), `${mix.loss.w} wallets`, 'r')}${(() => { const rg = es.filter((e) => e.rugger), rn = rg.reduce((x, e) => x + (e.buy_near || 0), 0); return tile(`From ruggers ${RUG_ICON}`, pct(total ? rn / total : null), `${rg.length} wallets tied to rugs`, rg.length ? 'r' : 'g'); })()}
       ${tile('Creator sold', o.creator_sold ? 'yes' : 'no', o.creator_sold ? n(o.creator_sell_near, 1) + ' N' : null, o.creator_sold ? 'r' : 'g')}${tile('Contract risk', au?.available ? au.risk_score : '–', au?.available ? au.risk_level : 'not audited', riskCls)}</div></div>`;
   h += syncBanner(t);
   if (L?.collapsed && !o.rugged) h += `<div class="card warn"><b>Collapsed after its first day.</b> The price is ${pct(L.drawdown, 1)} below its all-time high (${xm(L.ath_multiple)}, ${when(L.ath_ts)}) and now ${xm(L.last_multiple)} of launch. Verdicts and tags judge the first 24 h only, so they do not count this.</div>`;
@@ -511,7 +515,7 @@ async function tokenPage(id) {
     <div class="card"><h2>Bubble map <span class="muted">early buyers clustered by group · size = NEAR in · click a bubble</span></h2>${bubbleMap(es)}
       <div class="legend">${MIXV.map(([v, l]) => `<span><span class="lg-dot ${v}"></span>${l}</span>`).join('')}<span><span class="lg-dot" style="background:transparent;box-shadow:inset 0 0 0 2px var(--bad)"></span>creator</span></div></div></div>`;
   h += `<div class="card"><h2>Early buyers <span class="muted">${es.length} wallets, by entry rank</span></h2><table><tr><th>#</th><th>Wallet</th><th>Tag</th><th>Group</th><th class="num">Delay</th><th>Buy tx</th><th class="num">NEAR in</th><th class="num">Wallet age</th><th>Funded by</th><th class="num">ROI 1h</th><th class="num">ROI 24h</th><th class="num" title="${L?.last_multiple != null ? 'ROI at the latest price (full ledger)' : at24 ? 'trades after 24 h are not read yet: this is the ROI at 24 h' : 'ROI at the latest price'}">${L?.last_multiple == null && at24 ? 'At 24 h' : 'Now'}</th></tr>
-    ${es.map((e) => `<tr ${row(P.wal(e.wallet))}><td class="muted">${e.rank}</td><td>${walLink(e.wallet)}${e.is_creator ? ' <span class="v bad">creator</span>' : ''}</td>
+    ${es.map((e) => `<tr ${row(P.wal(e.wallet))}><td class="muted">${e.rank}</td><td>${walLink(e.wallet)}${e.is_creator ? ' <span class="v bad">creator</span>' : ''}${e.rugger ? ` <span class="v bad" title="a creator that rugged, or in a group that contains one or that are rug farmers">${RUG_ICON} rugger</span>` : ''}</td>
       <td>${tg(e.wallet_tag)} <span class="muted small">${pct(e.wallet_profit_rate)}</span></td><td>${e.cluster ? `${tg(e.cluster.tag)} ${ilink(P.grp(e.cluster.id), esc(short(e.cluster.label || e.cluster.id, 26)))} <span class="muted">(${e.cluster.size})</span>` : '<span class="muted">unlinked</span>'}</td><td class="num">${e.delay_s}s</td><td>${txl(e.first_buy_hash)}</td><td class="num">${n(e.buy_near, 1)}</td>
       <td class="num">${e.wallet_age_days != null ? e.wallet_age_days + ' d' : '–'}</td><td>${esc(e.funder_kind || '–')}</td><td class="num ${roiCls(e.roi?.['60'])}">${pct(e.roi?.['60'])}</td><td class="num ${roiCls(e.roi?.['1440'])}">${pct(e.roi?.['1440'])}</td><td class="num ${roiCls(e.roi_now)}">${pct(e.roi_now)}</td></tr>`).join('') || empty(12, 'no early buyers recorded')}</table></div>`;
   if (t.creator_info && (t.creator_info.launches > 1 || t.creator_info.blacklisted || t.creator_info.rugged)) {
