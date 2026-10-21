@@ -70,7 +70,8 @@ export async function importScanner(file, { dry = false } = {}) {
   const before = await col('tokens').estimatedDocumentCount();
   const batches = async (coll, ops) => { for (let i = 0; i < ops.length; i += 500) await col(coll).bulkWrite(ops.slice(i, i + 500), { ordered: false }); };
   await batches('tokens', tokenOps); await batches('scans', scanOps); await batches('scanner_positions', posOps); await batches('scanner_spend', spendOps);
-  for (const [account, v] of bl) await col('blacklist').updateOne({ _id: account }, { $setOnInsert: { _id: account, ts: v.ts, token: v.token || null, symbol: v.symbol || null, reason: v.reason || null, source: 'scanner' } }, { upsert: true });
+  const cleared = new Set((await col('blacklist_cleared').find({}, { projection: { _id: 1 } }).toArray()).map((x) => x._id)); // false dev-rug flags, cleared by hand
+  for (const [account, v] of bl) if (!cleared.has(account)) await col('blacklist').updateOne({ _id: account }, { $setOnInsert: { _id: account, ts: v.ts, token: v.token || null, symbol: v.symbol || null, reason: v.reason || null, source: 'scanner' } }, { upsert: true });
   for (const [launchpad, hashes] of Object.entries(s.templates || {})) if (Object.keys(hashes).length) await col('templates').updateOne({ _id: launchpad }, { $max: Object.fromEntries(Object.entries(hashes).map(([h, n]) => [`counts.${h}`, n])) }, { upsert: true });
   stat.rugs = await flagRugs(); // tokens whose creator was blacklisted are rugs
   const after = await col('tokens').estimatedDocumentCount();
