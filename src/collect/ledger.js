@@ -5,7 +5,7 @@ import { col } from '../db.js';
 import { config } from '../config.js';
 import { info, warn } from '../log.js';
 import { syncTokenTrades } from './trades.js';
-import { buildEntries, buildLedger } from './analyze.js';
+import { buildEntries, buildLedger, buildOutcome } from './analyze.js';
 import { cfgFor } from './cfg.js';
 
 const HOUR = 3600e3, DAY = 24 * HOUR;
@@ -24,8 +24,13 @@ export async function followToken(t, { passes = 1 } = {}) {
   const trades = await col('trades').find({ token: t._id }).sort({ ts: 1 }).toArray();
   const now = Date.now();
   const ledger = buildLedger(fresh, trades, cfg.outcome);
-  const entries = buildEntries(fresh, trades, now, cfg.entry);
-  for (const e of entries) e.token_rugged = !!fresh.outcome?.rugged;
+  // a creator sale is a rug whenever it happens: one after the first 24 h flags the token (the 24 h outcome cannot see it)
+  const late = ledger.creator_sell_near_after_cp > (cfg.outcome.creatorSellRugNear ?? 0) && !fresh.rug?.flagged;
+  const rug = late ? { flagged: true, source: 'ledger', reason: `creator sold ${ledger.creator_sell_near_after_cp.toFixed(2)} N after the first 24 h`, creator: fresh.creator, ts: ledger.creator_first_sell_after_cp_ts } : null;
+  const tok = rug ? { ...fresh, rug } : fresh;
+  const outcome = buildOutcome(tok, trades, now, cfg.outcome); // also re-applies the current rug rules to tokens finished before they changed
+  const entries = buildEntries(tok, trades, now, cfg.entry);
+  for (const e of entries) e.token_rugged = outcome.rugged;
   if (entries.length) await col('entries').bulkWrite(entries.map((e) => ({ replaceOne: { filter: { _id: e._id }, replacement: e, upsert: true } })), { ordered: false });
   // next pass: at once while catching up, then by how recently it traded; stop following a token that went quiet
   const idle = now - (ledger.last_trade_ts ?? fresh.live_ts);
@@ -35,8 +40,9 @@ export async function followToken(t, { passes = 1 } = {}) {
   else next = now + (idle > L.quietDays * DAY ? L.quietHours : L.activeHours) * HOUR;
   await col('tokens').updateOne({ _id: t._id }, { $set: {
     ledger: { ...ledger, synced_ts: now, synced_to_ts: caughtUp ? now : lastTs, caught_up: caughtUp, next_ts: next, stopped },
-    ledger_next_ts: next, trades_n: trades.length,
+    ledger_next_ts: next, trades_n: trades.length, outcome, ...(rug ? { rug } : {}),
   } });
+  if (rug) info(`RUG ${fresh.symbol || ''} ${t._id}: ${rug.reason}`);
   if (added || caughtUp && !t.ledger?.caught_up) info(`LEDGER ${fresh.symbol || ''} ${t._id}: +${added} trades, ${trades.length} stored${caughtUp ? ', up to date' : ', more to read'}${stopped ? ', following stopped (' + stopped + ')' : ''}`);
   return { added, caughtUp };
 }
