@@ -2,7 +2,7 @@
 import { col, metaSet } from './db.js';
 import { config } from './config.js';
 import { info, warn, error } from './log.js';
-import { discover } from './collect/launches.js';
+import { discover, requeueSkippedQuotes } from './collect/launches.js';
 import { processDue } from './collect/process.js';
 import { followDue, ledgerBacklog } from './collect/ledger.js';
 import { profilePending } from './graph/profile.js';
@@ -19,6 +19,7 @@ export const runtime = { startedTs: Date.now(), cycles: 0, lastCycleTs: null, st
 
 /** One pass of the pipeline. Returns what it did, so callers (the CLI) can loop until idle. */
 export async function cycle({ evaluate = true } = {}) {
+  await requeueSkippedQuotes().catch((e) => warn(`re-queue of skipped_quote tokens failed: ${e.message}`));
   const found = await discover();
   // trace who funded each token creator (new launches first), so the scanner sees the creator's network at its first check
   let creators = 0;

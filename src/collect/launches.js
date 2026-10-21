@@ -4,7 +4,7 @@ import { config } from '../config.js';
 import { adapters } from '../launchpads.js';
 import { fetchTxs, newTxHashes, accountRows } from '../near/indexer.js';
 import { view } from '../near/rpc.js';
-import { DCL } from '../near/quotes.js';
+import { DCL, QUOTES } from '../near/quotes.js';
 import { info, warn } from '../log.js';
 import { isKnownQuote } from '../near/quotes.js';
 
@@ -98,4 +98,11 @@ export async function backfill(launchpad, hours) {
   }
   info(`[${launchpad}] backfill: ${added} new tokens`);
   return added;
+}
+
+/** Tokens stored as skipped_quote before their quote became a known one (QUOTES) are queued for their first sync. */
+export async function requeueSkippedQuotes() {
+  const r = await col('tokens').updateMany({ status: 'skipped_quote', 'pool.quote': { $in: Object.keys(QUOTES) } }, { $set: { status: 'new', next_process_ts: 0 } });
+  if (r.modifiedCount) info(`re-queued ${r.modifiedCount} token(s) whose pool quote is now supported`);
+  return r.modifiedCount;
 }
