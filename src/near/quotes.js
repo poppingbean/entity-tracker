@@ -1,4 +1,4 @@
-// Pool quote tokens and how to value them in NEAR. Launch pools are quoted in wNEAR, NEARLY, RHEA or QTC; amounts of the
+// Pool quote tokens and how to value them in NEAR. Launch pools are quoted in wNEAR, NEARLY, RHEA, QTC, HOOT or BLACKDRAGON; amounts of the
 // other quotes are converted at the current price of a 1-NEAR bridge quote (good enough to size early buys).
 import { view } from './rpc.js';
 
@@ -10,6 +10,8 @@ export const QUOTES = {
   'nearly-993927.nearlytrade.near': { symbol: 'NEARLY', bridge: { dex: 'dcl', poolId: 'nearly-993927.nearlytrade.near|wrap.near|10000' } },
   'token.rhealab.near': { symbol: 'RHEA', bridge: { dex: 'refv2', poolId: 6458 } },
   'qtc.omft.near': { symbol: 'QTC', bridge: { dex: 'dcl', poolId: 'qtc.omft.near|wrap.near|10000' } },
+  'hoot-8ecf65.launchpad.justhoot.near': { symbol: 'HOOT', bridge: { dex: 'dcl', poolId: 'hoot-8ecf65.launchpad.justhoot.near|wrap.near|10000' } },
+  'blackdragon.tkn.near': { symbol: 'BLACKDRAGON', bridge: { dex: 'refv2', poolId: 4276 } },
 };
 export const isKnownQuote = (q) => !!QUOTES[q];
 export const quoteSymbol = (q) => QUOTES[q]?.symbol || q;

@@ -3,7 +3,7 @@
 
 const MIN = 60e3;
 /** Version of the rug rules in buildOutcome: bump it when they change, and the worker re-applies them to every stored outcome from an older version. */
-export const RUG_RULES_V = 5;
+export const RUG_RULES_V = 6;
 const median = (a) => { if (!a.length) return null; const s = [...a].sort((x, y) => x - y); const m = s.length >> 1; return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; };
 export { median };
 
@@ -58,14 +58,40 @@ export function buildOutcome(token, trades, now, cfg) {
   if (settled && first0 && peak && last != null && peak / first0 >= (cfg.roundTripPeak ?? 3) && last / first0 <= (cfg.roundTripBack ?? 1.25) && !rugKinds.length) rugKinds.push('round_trip');
   // creator exit: the creator took (all of) their dev buy out within the hour and the token is not much above its launch price (at most creatorExitBack x), so holders are flat or under
   if (creatorExit && creatorExit.share >= (cfg.creatorExitShare ?? 0.8) && first0 && last != null && last / first0 <= (cfg.creatorExitBack ?? 1.5) && !rugKinds.length) rugKinds.push('creator_exit');
-  if (token.rug?.flagged) rugKinds.push('flagged');
+  // the creator sold at all: a dump, whatever the price did (the kinds above say more when they apply)
+  if (creatorSells.length && creatorSellNear > (cfg.creatorSellRugNear ?? 0) && !rugKinds.length) rugKinds.push('creator_sold');
+  if (token.rug?.flagged) rugKinds.push(token.rug.source === 'ledger' ? 'creator_sold' : 'flagged'); // ledger: the creator sold after the first 24 h
   return {
     first_price: first, peak_price: peak, peak_ts: peakTs, last_price: last,
     peak_multiple: first && peak ? peak / first : null, last_multiple: first && last != null ? last / first : null,
-    drawdown, rugged: rugKinds.length > 0, rug_kinds: rugKinds, rules_v: RUG_RULES_V, rug_reason: token.rug?.reason || null, creator_exit: creatorExit, cp, final_cp: finalM,
+    drawdown, rugged: rugKinds.length > 0, rug_kinds: [...new Set(rugKinds)], rules_v: RUG_RULES_V, rug_reason: token.rug?.reason || null, creator_exit: creatorExit, cp, final_cp: finalM,
     buy_near: sum(buys, (t) => t.near), sell_near: sum(sells, (t) => t.near), buyers: new Set(buys.map((t) => t.trader)).size, sellers: new Set(sells.map((t) => t.trader)).size,
     trades: inHorizon.length, creator_buy_near: sum(creatorBuys, (t) => t.near), creator_sell_near: sum(creatorSells, (t) => t.near), creator_sold: creatorSells.length > 0,
     age_min: Math.round(ageMin), complete: ageMin >= cfg.minutes[cfg.minutes.length - 1],
+  };
+}
+
+/**
+ * The token over its whole stored history (the full ledger), next to the 24 h outcome: current price, all-time high, drawdown from it,
+ * when it last traded, and volume after the last checkpoint. `cfg` = the outcome settings. Verdicts never read this.
+ */
+export function buildLedger(token, trades, cfg) {
+  const live = token.live_ts, horizon = live + cfg.minutes[cfg.minutes.length - 1] * MIN;
+  const all = trades.filter((t) => t.ts >= live), after = all.filter((t) => t.ts > horizon);
+  const series = priceSeries(all, cfg.priceMinNear);
+  const first = series[0]?.price ?? null, last = series.at(-1)?.price ?? null;
+  let ath = null, athTs = null;
+  for (const p of series) if (ath == null || p.price > ath) { ath = p.price; athTs = p.ts; }
+  const drawdown = ath && last != null ? 1 - last / ath : null;
+  const sum = (a, f) => a.reduce((s, x) => s + f(x), 0);
+  const creatorAfter = token.creator ? after.filter((t) => !t.buy && t.trader === token.creator) : [];
+  const side = (a) => ({ trades: a.length, buy_near: sum(a.filter((t) => t.buy), (t) => t.near), sell_near: sum(a.filter((t) => !t.buy), (t) => t.near), buyers: new Set(a.filter((t) => t.buy).map((t) => t.trader)).size });
+  return {
+    last_price: last, last_multiple: first && last != null ? last / first : null, last_trade_ts: all.at(-1)?.ts ?? null,
+    ath_price: ath, ath_multiple: first && ath ? ath / first : null, ath_ts: athTs, ath_after_cp: athTs != null && athTs > horizon,
+    drawdown, collapsed: drawdown != null && drawdown >= cfg.rugDrawdown, // fell like a rug at some point after launch (24 h verdicts may not show it)
+    ...side(all), after_cp: side(after),
+    creator_sell_near_after_cp: sum(creatorAfter, (t) => t.near), creator_first_sell_after_cp_ts: creatorAfter[0]?.ts ?? null, // the creator selling after day 1
   };
 }
 

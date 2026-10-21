@@ -38,7 +38,20 @@ export const config = {
     creatorExitShare: num(process.env.CREATOR_EXIT_SHARE, 0.8),  // creator sold this share of their dev buy within the first hour ...
     creatorExitBack: num(process.env.CREATOR_EXIT_BACK, 1.5),    // ... and the price is at or below this multiple of the launch price = rug (creator exit)
     softRugDrawdown: num(process.env.SOFT_RUG_DRAWDOWN, 0.7),    // a fall this deep counts as a rug when the creator also sold at least 1 NEAR
+    creatorSellRugNear: num(process.env.CREATOR_SELL_RUG_NEAR, 0), // any creator sale above this many NEAR makes the token a rug (creator sold)
     winRoi: num(process.env.WIN_ROI, 0.2),
+  },
+
+  // Full ledger: after a token's first 24 h are read, keep reading its trades up to today (current price, all-time high, each early buyer's
+  // current ROI). Verdicts and tags keep using the OUTCOME_MINUTES checkpoints, so groups stay comparable.
+  ledger: {
+    enabled: process.env.LEDGER_ENABLED !== 'false',
+    activeHours: num(process.env.LEDGER_ACTIVE_HOURS, 6),     // re-read a token that still trades this often ...
+    quietHours: num(process.env.LEDGER_QUIET_HOURS, 24),      // ... and one with no trade for LEDGER_QUIET_DAYS this often
+    quietDays: num(process.env.LEDGER_QUIET_DAYS, 2),
+    stopDays: num(process.env.LEDGER_STOP_DAYS, 14),          // stop following after this many days without a trade ("Sync now" still reads it)
+    perCycle: num(process.env.LEDGER_TOKENS_PER_CYCLE, 4),    // tokens followed per worker cycle (newest launch first)
+    rowsPerPass: num(process.env.LEDGER_ROWS_PER_PASS, 1000), // transactions read per token per pass; a long history is read over several passes
   },
 
   graph: {
@@ -74,6 +87,7 @@ export const config = {
     maxTaxBps: num(process.env.MAX_TAX_BPS, 1000),
     maxLinkedBuyerShare: num(process.env.MAX_LINKED_BUYER_SHARE, 0.4),
     maxBadGroupShare: num(process.env.MAX_BAD_GROUP_SHARE, 0.4),
+    maxNetworkRuggers: num(process.env.CREATOR_NETWORK_MAX_RUGGERS, 0), // other creators tied to this one (funding / payments) allowed to have rugged; -1 = no gate
     auditMaxRisk: num(process.env.AUDIT_MAX_RISK, 70),
     maxPriceMultipleSinceLaunch: num(process.env.MAX_PRICE_MULTIPLE, 8),
     ignoreRunupBelowMcapUsd: num(process.env.IGNORE_RUNUP_BELOW_MCAP_USD, 10000),

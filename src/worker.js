@@ -2,23 +2,30 @@
 import { col, metaSet } from './db.js';
 import { config } from './config.js';
 import { info, warn, error } from './log.js';
-import { discover } from './collect/launches.js';
+import { discover, requeueSkippedQuotes } from './collect/launches.js';
 import { processDue } from './collect/process.js';
+import { followDue, ledgerBacklog } from './collect/ledger.js';
 import { profilePending } from './graph/profile.js';
 import { expandNetworks } from './graph/expand.js';
 import { flagRugs, refreshStaleOutcomes } from './collect/rugs.js';
 import { evaluateGroups, reviewPending } from './evaluate/run.js';
+import { profileCreators } from './evaluate/creators.js';
 import { checkAi, aiEnabled, aiStatus } from './ai/nearai.js';
 import { scanTick, followUpTick, blacklistCreator } from './scanner/pipeline.js';
 import { managePositions } from './sim/portfolio.js';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-export const runtime = { startedTs: Date.now(), cycles: 0, lastCycleTs: null, stopping: false, lastEvalTs: 0, lastPositionCheck: 0, lastRugCheck: 0 };
+export const runtime = { startedTs: Date.now(), cycles: 0, lastCycleTs: null, stopping: false, lastEvalTs: 0, lastPositionCheck: 0, lastRugCheck: 0, lastCreatorCheck: 0 };
 
 /** One pass of the pipeline. Returns what it did, so callers (the CLI) can loop until idle. */
 export async function cycle({ evaluate = true } = {}) {
+  await requeueSkippedQuotes().catch((e) => warn(`re-queue of skipped_quote tokens failed: ${e.message}`));
   const found = await discover();
+  // trace who funded each token creator (new launches first), so the scanner sees the creator's network at its first check
+  let creators = 0;
+  if (found || Date.now() - runtime.lastCreatorCheck > 60e3) { runtime.lastCreatorCheck = Date.now(); creators = await profileCreators(found ? 12 : 6).catch((e) => { warn(`creator profiling failed: ${e.message}`); return 0; }); }
   const processed = await processDue();
+  const ledgered = await followDue().catch((e) => { warn(`ledger follow failed: ${e.message}`); return 0; }); // done tokens: trades after the first 24 h
   let scanned = 0, followed = 0;
   if (config.scan.enabled) { scanned = await scanTick(); followed = await followUpTick(); }
   if (config.sim.enabled && Date.now() - runtime.lastPositionCheck > config.sim.positionCheckSeconds * 1000) { runtime.lastPositionCheck = Date.now(); await managePositions(blacklistCreator); }
@@ -32,22 +39,28 @@ export async function cycle({ evaluate = true } = {}) {
     groups = (await evaluateGroups()).groups; runtime.lastEvalTs = Date.now();
   }
   if (evaluate && aiEnabled()) reviewed = await reviewPending(3);
-  return { found, processed, scanned, followed, profiled, expanded, groups, reviewed };
+  return { found, creators, processed, ledgered, scanned, followed, profiled, expanded, groups, reviewed };
 }
 
 export async function runWorker() {
   if (aiEnabled()) { checkAi().then((s) => (s.ok ? info(`NEAR AI ready (${config.ai.model})`) : warn(`NEAR AI NOT ready: ${s.error}`))); }
   else warn('NEAR_AI_API_KEY is not set: groups get rule-based verdicts only');
   info(`worker started · launchpads=${config.launchpads.join(',')} · early window ${config.entry.windowMinutes} min · outcomes at ${config.outcome.minutes.join('/')} min`);
+  // heartbeat: report every minute, also in the middle of a long cycle (a catch-up can take a while), so the dashboard can tell busy from stopped
+  let last = null;
+  const report = () => metaSet('worker', { ts: Date.now(), cycles: runtime.cycles, startedTs: runtime.startedTs, lastCycleTs: runtime.lastCycleTs, last, ai: { enabled: aiEnabled(), model: config.ai.model, ok: aiStatus.ok, error: aiStatus.error, calls: aiStatus.calls, failures: aiStatus.failures } }).catch(() => {});
+  const beat = setInterval(report, 60e3); beat.unref?.();
+  await report();
   while (!runtime.stopping) {
     try {
-      const r = await cycle();
+      last = await cycle();
       runtime.cycles++; runtime.lastCycleTs = Date.now();
-      await metaSet('worker', { ts: Date.now(), cycles: runtime.cycles, startedTs: runtime.startedTs, last: r, ai: { enabled: aiEnabled(), model: config.ai.model, ok: aiStatus.ok, error: aiStatus.error, calls: aiStatus.calls, failures: aiStatus.failures } });
+      await report();
     } catch (e) { error(`cycle failed: ${e.message}`); }
     // sleep in short steps so a shutdown is prompt; work backlog continues without waiting
     const backlog = await col('tokens').countDocuments({ status: { $nin: ['done', 'skipped_quote', 'awaiting_pool', 'no_pool'] }, next_process_ts: { $lte: Date.now() } }).catch(() => 0);
-    const wait = backlog > 0 ? 2000 : config.pollSeconds * 1000;
+    const ledgerWait = backlog > 0 ? 0 : await ledgerBacklog().catch(() => 0);
+    const wait = backlog > 0 ? 2000 : ledgerWait > 0 ? 5000 : config.pollSeconds * 1000;
     for (let t = 0; t < wait && !runtime.stopping; t += 500) await sleep(500);
   }
 }
