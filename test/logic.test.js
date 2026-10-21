@@ -295,12 +295,12 @@ test('rugs: a token that pumped and came back to its launch price is a round-tri
   assert.equal(buildOutcome(token, [trade('a', true, 10, 1000, 1), trade('b', true, 40, 1000, 5), trade('x', false, 25, 1000, 80)], T0 + 120 * MIN, lcfg).rugged, false);
 });
 
-test('creator exit: share of the dev buy sold in the first hour and how soon, without calling it a rug', () => {
+test('creator exit: share of the dev buy sold in the first hour and how soon; any creator sale is a rug (creator sold)', () => {
   const lcfg = { minutes: cfg.minutes, rugDrawdown: 0.9 };
   const tr = [trade('a', true, 20, 2000, 0.1), trade('creator.near', false, 19, 1900, 3), trade('b', true, 30, 1000, 4)]; // price 3x the launch price afterwards
   const o = buildOutcome({ ...token, dev_buy_near: 20 }, tr, T0 + 50 * MIN, lcfg);
   assert.ok(o.creator_exit.share > 0.9 && o.creator_exit.minutes === 3);
-  assert.equal(o.rugged, false, 'exit while holders are well in profit: a warning only');
+  assert.equal(o.rugged, true, 'any creator sale is a dump'); assert.deepEqual(o.rug_kinds, ['creator_sold'], 'not an exit rug while holders are well in profit');
   assert.equal(buildOutcome(token, tr, T0 + 50 * MIN, lcfg).creator_exit, null, 'no dev buy known: no share');
 });
 
@@ -310,9 +310,9 @@ test('rugs: creator exit (80 %+ of the dev buy sold in the first hour) with the 
   // launch price 0.01; the last sale at 0.0092 -> below launch
   const down = buildOutcome({ ...token, dev_buy_near: 20 }, tr(4.6), T0 + 50 * MIN, lcfg);
   assert.equal(down.rugged, true); assert.deepEqual(down.rug_kinds, ['creator_exit']);
-  // price a little above launch (1.1x): still a rug; well above (1.6x): only the warning
-  assert.equal(buildOutcome({ ...token, dev_buy_near: 20 }, tr(5.5), T0 + 50 * MIN, lcfg).rugged, true);
-  assert.equal(buildOutcome({ ...token, dev_buy_near: 20 }, tr(8), T0 + 50 * MIN, lcfg).rugged, false);
+  // price a little above launch (1.1x): still an exit rug; well above (1.6x): a rug only because the creator sold
+  assert.deepEqual(buildOutcome({ ...token, dev_buy_near: 20 }, tr(5.5), T0 + 50 * MIN, lcfg).rug_kinds, ['creator_exit']);
+  assert.deepEqual(buildOutcome({ ...token, dev_buy_near: 20 }, tr(8), T0 + 50 * MIN, lcfg).rug_kinds, ['creator_sold']);
 });
 
 test('rugs: creator exit (80 %+ of the dev buy sold in the first hour) with the price at or below launch is a rug; above launch it is not', () => {
@@ -325,9 +325,11 @@ test('rugs: creator exit (80 %+ of the dev buy sold in the first hour) with the 
   // same exit but the price is above the launch price: warning only
   const up = [trade('a', true, 20, 2000, 0.1), trade('creator.near', false, 19, 2000, 3), trade('x', true, 12, 1000, 10)];
   const o2 = buildOutcome(t0, up, T0 + 20 * MIN, lcfg);
-  assert.equal(o2.rugged, false); assert.ok(o2.creator_exit.share >= 0.8);
-  // a small creator sale is not an exit
-  assert.equal(buildOutcome(t0, [trade('a', true, 20, 2000, 0.1), trade('creator.near', false, 3, 300, 3), trade('x', false, 9.3, 1000, 10)], T0 + 20 * MIN, lcfg).rugged, false);
+  assert.deepEqual(o2.rug_kinds, ['creator_sold']); assert.ok(o2.creator_exit.share >= 0.8);
+  // a small creator sale is not an exit, but still a rug (creator sold); a sale at or under CREATOR_SELL_RUG_NEAR is not
+  const small = [trade('a', true, 20, 2000, 0.1), trade('creator.near', false, 3, 300, 3), trade('x', false, 9.3, 1000, 10)];
+  assert.deepEqual(buildOutcome(t0, small, T0 + 20 * MIN, lcfg).rug_kinds, ['creator_sold']);
+  assert.equal(buildOutcome(t0, small, T0 + 20 * MIN, { ...lcfg, creatorSellRugNear: 5 }).rugged, false);
 });
 
 test('public mode: thresholds, rule names, reasons and gate ids are removed from API responses', () => {
@@ -369,4 +371,14 @@ test('full ledger: 24 h outcome ignores later trades; the ledger and roi_now fol
   const a = buildEntries(token, trades, now, { ...cfg, minutes: cfg.minutes }).find((e) => e.wallet === 'a');
   assert.ok(Math.abs(a.roi[1440] - 2) < 1e-9, 'checkpoint ROI (what verdicts use) is the 24 h one');
   assert.ok(Math.abs(a.roi_now - (-0.5)) < 1e-9, 'roi_now uses the latest price');
+});
+
+test('creator sold after the first 24 h: the ledger sees it, and a ledger flag reads as creator sold', () => {
+  const lcfg = { minutes: cfg.minutes, rugDrawdown: 0.9 };
+  const trades = [trade('a', true, 10, 1000, 1), trade('b', true, 30, 1000, 60), trade('creator.near', false, 4, 100, 1440 * 3)];
+  assert.equal(buildOutcome(token, trades, T0 + 1440 * 4 * MIN, lcfg).rugged, false, 'the 24 h outcome cannot see a later sale');
+  const L = buildLedger(token, trades, lcfg);
+  assert.equal(L.creator_sell_near_after_cp, 4); assert.equal(L.creator_first_sell_after_cp_ts, T0 + 1440 * 3 * MIN);
+  const o = buildOutcome({ ...token, rug: { flagged: true, source: 'ledger', reason: 'creator sold 4.00 N after the first 24 h' } }, trades, T0 + 1440 * 4 * MIN, lcfg);
+  assert.equal(o.rugged, true); assert.deepEqual(o.rug_kinds, ['creator_sold']); assert.match(o.rug_reason, /after the first 24 h/);
 });
