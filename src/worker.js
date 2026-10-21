@@ -6,7 +6,7 @@ import { discover } from './collect/launches.js';
 import { processDue } from './collect/process.js';
 import { profilePending } from './graph/profile.js';
 import { expandNetworks } from './graph/expand.js';
-import { flagRugs } from './collect/rugs.js';
+import { flagRugs, refreshStaleOutcomes } from './collect/rugs.js';
 import { evaluateGroups, reviewPending } from './evaluate/run.js';
 import { checkAi, aiEnabled, aiStatus } from './ai/nearai.js';
 import { scanTick, followUpTick, blacklistCreator } from './scanner/pipeline.js';
@@ -22,7 +22,8 @@ export async function cycle({ evaluate = true } = {}) {
   let scanned = 0, followed = 0;
   if (config.scan.enabled) { scanned = await scanTick(); followed = await followUpTick(); }
   if (config.sim.enabled && Date.now() - runtime.lastPositionCheck > config.sim.positionCheckSeconds * 1000) { runtime.lastPositionCheck = Date.now(); await managePositions(blacklistCreator); }
-  if (Date.now() - runtime.lastRugCheck > 10 * 60e3) { runtime.lastRugCheck = Date.now(); await flagRugs().catch((e) => warn(`rug flagging failed: ${e.message}`)); } // creators blacklisted for dumping: their token is a rug
+  if (Date.now() - runtime.lastRugCheck > 10 * 60e3) { runtime.lastRugCheck = Date.now(); await flagRugs().catch((e) => warn(`rug flagging failed: ${e.message}`)); // creators blacklisted for dumping: their token is a rug
+    if (await refreshStaleOutcomes().catch((e) => { warn(`rug rules refresh failed: ${e.message}`); return 0; })) runtime.lastEvalTs = 0; } // outcomes from older rug rules; regroup after
   const profiled = await profilePending(40);
   const expanded = evaluate ? await expandNetworks().catch((e) => { warn(`network expansion failed: ${e.message}`); return 0; }) : 0; // linked wallets around the groups, up to 3 hops
   let groups = null, reviewed = 0;

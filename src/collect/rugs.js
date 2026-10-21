@@ -2,7 +2,7 @@
 // rugs from outside the price series: the scanner's dev-rug blacklist (the creator emptied their balance while a position was held).
 import { col } from '../db.js';
 import { info } from '../log.js';
-import { buildEntries, buildOutcome } from './analyze.js';
+import { buildEntries, buildOutcome, RUG_RULES_V } from './analyze.js';
 import { cfgFor } from './cfg.js';
 
 /** Rebuild one token's outcome and entries from its stored trades and write them. Returns the entries count, or null when no trades are stored. */
@@ -25,6 +25,16 @@ export async function flagRug(tokenId, { source, reason, creator = null, ts = Da
   const t = await col('tokens').findOne({ _id: tokenId });
   await recomputeToken(t).catch(() => {}); // a token without stored trades picks the flag up when it is processed
   return true;
+}
+
+/** Re-apply the current rug rules to tokens whose stored outcome came from an older version of them (a token whose processing is done is not
+ * recomputed otherwise, so a new rule would never reach it). Returns the number refreshed. */
+export async function refreshStaleOutcomes(limit = 300) {
+  const toks = await col('tokens').find({ outcome: { $exists: true }, trades_n: { $gt: 0 }, 'outcome.rules_v': { $ne: RUG_RULES_V } }).limit(limit).toArray();
+  let n = 0;
+  for (const t of toks) if ((await recomputeToken(t).catch(() => null)) != null) n++;
+  if (n) info(`RUGS re-applied the rug rules to ${n} tokens with an older outcome`);
+  return n;
 }
 
 /** Flag every token named in the blacklist that is not flagged yet. Returns the number newly flagged. */

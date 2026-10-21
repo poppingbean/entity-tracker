@@ -2,6 +2,8 @@
 // No I/O here, so it is unit-tested with synthetic trades (test/analyze.test.js).
 
 const MIN = 60e3;
+/** Version of the rug rules in buildOutcome: bump it when they change, and the worker re-applies them to every stored outcome from an older version. */
+export const RUG_RULES_V = 5;
 const median = (a) => { if (!a.length) return null; const s = [...a].sort((x, y) => x - y); const m = s.length >> 1; return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; };
 export { median };
 
@@ -60,7 +62,7 @@ export function buildOutcome(token, trades, now, cfg) {
   return {
     first_price: first, peak_price: peak, peak_ts: peakTs, last_price: last,
     peak_multiple: first && peak ? peak / first : null, last_multiple: first && last != null ? last / first : null,
-    drawdown, rugged: rugKinds.length > 0, rug_kinds: rugKinds, rug_reason: token.rug?.reason || null, creator_exit: creatorExit, cp, final_cp: finalM,
+    drawdown, rugged: rugKinds.length > 0, rug_kinds: rugKinds, rules_v: RUG_RULES_V, rug_reason: token.rug?.reason || null, creator_exit: creatorExit, cp, final_cp: finalM,
     buy_near: sum(buys, (t) => t.near), sell_near: sum(sells, (t) => t.near), buyers: new Set(buys.map((t) => t.trader)).size, sellers: new Set(sells.map((t) => t.trader)).size,
     trades: inHorizon.length, creator_buy_near: sum(creatorBuys, (t) => t.near), creator_sell_near: sum(creatorSells, (t) => t.near), creator_sold: creatorSells.length > 0,
     age_min: Math.round(ageMin), complete: ageMin >= cfg.minutes[cfg.minutes.length - 1],
