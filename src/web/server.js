@@ -11,7 +11,7 @@ import { aiEnabled, aiStatus } from '../ai/nearai.js';
 import { simSell, ensureAccount, positionPnl } from '../sim/portfolio.js';
 import { startFetch, jobStatus } from '../collect/ondemand.js';
 import { redact } from './redact.js';
-import { creatorIndex, creatorBrief, creatorFlag } from '../evaluate/creators.js';
+import { creatorIndex, creatorBrief, creatorFlag, creatorNetwork } from '../evaluate/creators.js';
 import { auditNearContract, getCachedAudit, validNearAddress, summarizeAudit } from '../audit/service.js';
 
 const page = fs.readFileSync(new URL('./index.html', import.meta.url), 'utf8');
@@ -76,6 +76,9 @@ async function buildSignals(hours = 72, limit = 60) {
   }
   return out;
 }
+
+/** The part of a creator's network a token page shows: its first real funder and what the creators tied to it did. */
+const netBrief = (x) => (x?.profiled ? { profiled: true, funder: x.funders.find((f) => f.link) || x.funders[0] || null, network: x.network, siblings: x.siblings.slice(0, 8).map((s) => ({ account: s.account, launches: s.launches, rugged: s.rugged, blacklisted: s.blacklisted, relations: s.relations.slice(0, 2) })) } : x ? { profiled: false } : null);
 
 const routes = {
   '/api/overview': async () => {
@@ -154,10 +157,10 @@ const routes = {
     const k = u.searchParams.get('kind'); if (k) f.kind = k;
     const role = u.searchParams.get('role'); if (role) f.roles = role;
     const q = (u.searchParams.get('q') || '').trim(); if (q) f.$or = [{ _id: rx(q) }, { label: rx(q) }];
-    const sort = { funded: { funded_n: -1 }, near: { funded_near: -1 }, sink: { sink_near: -1 }, tokens: { tokens_n: -1 }, pnl: { funded_pnl_near: -1 } }[u.searchParams.get('sort')] || { funded_n: -1 };
+    const sort = { funded: { funded_n: -1 }, near: { funded_near: -1 }, sink: { sink_near: -1 }, tokens: { tokens_n: -1 }, pnl: { funded_pnl_near: -1 }, creators: { creators_funded_n: -1 }, rugcreators: { creators_rugged_n: -1, creators_funded_n: -1 } }[u.searchParams.get('sort')] || { funded_n: -1 };
     const limit = clamp(u.searchParams.get('limit'), 50, 200), offset = Math.max(0, Number(u.searchParams.get('offset')) || 0);
     const [total, rows, types] = await Promise.all([col('entities').countDocuments(f),
-      col('entities').find(f, { projection: { funded_wallets: 0, sink_wallets: 0 } }).sort(sort).skip(offset).limit(limit).toArray(),
+      col('entities').find(f, { projection: { funded_wallets: 0, sink_wallets: 0, creators_funded: 0, creator_sinks: 0 } }).sort(sort).skip(offset).limit(limit).toArray(),
       col('entities').aggregate([{ $group: { _id: '$type', n: { $sum: 1 } } }, { $sort: { n: -1 } }]).toArray()]);
     return { total, rows: rows.map(strip), types: types.map((x) => ({ type: x._id, n: x.n })) };
   },
@@ -330,7 +333,8 @@ const routes = {
     const audit = summarizeAudit(await getCachedAudit(id));
     const creatorInfo = t.creator ? (await creatorIndex([t.creator])).get(t.creator) || null : null;
     const creatorWallet = t.creator ? await col('wallets').findOne({ _id: t.creator }, { projection: { cluster_id: 1, cluster_tag: 1, tag: 1, is_early: 1 } }) : null;
-    return { id: _id, ...rest, audit, creator_info: creatorInfo, creator_wallet: creatorWallet ? { cluster_id: creatorWallet.cluster_id ?? null, cluster_tag: creatorWallet.cluster_tag ?? null, tag: creatorWallet.tag ?? null } : null, entries: entries.map((e) => { const w = wmap.get(e.wallet), c = w?.cluster_id ? cmap.get(w.cluster_id) : null;
+    const creatorNet = t.creator ? await creatorNetwork(t.creator).catch(() => null) : null;
+    return { id: _id, ...rest, audit, creator_info: creatorInfo, creator_network: netBrief(creatorNet), creator_wallet: creatorWallet ? { cluster_id: creatorWallet.cluster_id ?? null, cluster_tag: creatorWallet.cluster_tag ?? null, tag: creatorWallet.tag ?? null } : null, entries: entries.map((e) => { const w = wmap.get(e.wallet), c = w?.cluster_id ? cmap.get(w.cluster_id) : null;
       return { wallet: e.wallet, first_buy_hash: e.first_buy_hash || null, rank: e.rank, delay_s: e.delay_s, buy_near: e.buy_near, roi: e.roi, roi_now: e.roi_now, sold_share: e.sold_share, is_creator: e.is_creator, kind: w?.kind || null, funder_kind: w?.funder_kind || null,
         wallet_age_days: w?.created_ts ? Math.round((e.first_buy_ts - w.created_ts) / 86400e3) : null, wallet_tag: tagOf(w?.tag), wallet_profit_rate: w?.stats?.profit_rate ?? null, tag: tagOf(c ? c.tag : w?.tag), cluster: c ? { id: c._id, size: c.size, tag: tagOf(c.tag), label: c.ai?.label || c.rule?.tags?.[0] || null } : null }; }) };
   },
@@ -373,7 +377,7 @@ const routes = {
       col('clusters').find({ 'creators.account': id }, { projection: { tag: 1, size: 1, 'ai.label': 1, 'rule.tags': 1, creators: { $elemMatch: { account: id } } } }).toArray()]);
     const toks = await col('tokens').find({ creator: id }, { projection: { symbol: 1, launchpad: 1, live_ts: 1, status: 1, 'outcome.rugged': 1, 'outcome.rug_kinds': 1, 'outcome.peak_multiple': 1, 'outcome.last_multiple': 1, 'ledger.last_multiple': 1, 'outcome.creator_sold': 1, 'outcome.creator_sell_near': 1, 'rug.reason': 1 } }).sort({ live_ts: -1 }).limit(100).toArray();
     return { id, launches: c.launches, rugged: c.rugged, rug_rate: c.rug_rate, blacklisted: c.blacklisted, flag: creatorFlag(c), wallet: w ? { cluster_id: w.cluster_id ?? null, cluster_tag: w.cluster_tag ?? null, tag: w.tag ?? null, stats: w.stats || null, is_early: !!w.is_early } : null,
-      groups: groups.map((g) => ({ id: g._id, tag: g.tag, size: g.size, label: g.ai?.label || g.rule?.tags?.[0] || null, role: g.creators?.[0]?.role || null, depth: g.creators?.[0]?.depth ?? null })), tokens: toks.map(strip) };
+      groups: groups.map((g) => ({ id: g._id, tag: g.tag, size: g.size, label: g.ai?.label || g.rule?.tags?.[0] || null, role: g.creators?.[0]?.role || null, depth: g.creators?.[0]?.depth ?? null })), tokens: toks.map(strip), network: await creatorNetwork(id).catch(() => null) };
   },
 
   '/api/signals': async (u) => ({ rows: await buildSignals(clamp(u.searchParams.get('hours'), 72, 720), 60) }),

@@ -28,6 +28,8 @@ export function applyRules(f) {
     au?.available ? `contract audit: risk ${au.risk_score}/100 ${au.risk_level}${au.confirmed_malicious.length ? '; confirmed: ' + au.confirmed_malicious.map((c) => c.key).join(', ') : ''}` : 'contract audit unavailable');
   // entity intelligence
   gate((f.intel?.creator_prior_rugs_or_dumps ?? 0) === 0, 'creator_clean_history', `the creator already launched ${f.intel?.creator_prior_rugs_or_dumps} token(s) that were rugged or dumped by them (${(f.intel?.creator_prior_rug_symbols || []).join(', ')})`);
+  const cn = f.intel?.creator_network;
+  if (R.maxNetworkRuggers >= 0 && cn?.traced) gate((cn.rugger_creators ?? 0) <= R.maxNetworkRuggers, 'creator_network_clean', `${cn.rugger_creators} other creator(s) tied to this creator by funding or payments rugged or dumped tokens (${(cn.ruggers || []).map((r) => `${r.account}: ${r.rugged}/${r.launches}${r.blacklisted ? ', blacklisted' : ''}`).join('; ')})`);
   const badShare = f.intel?.early_buyer_groups?.bad?.share ?? 0;
   gate(badShare <= R.maxBadGroupShare, 'bad_groups_not_dominant', `${(badShare * 100).toFixed(0)}% of early buying comes from groups judged bad (> ${(R.maxBadGroupShare * 100).toFixed(0)}%)`);
 
@@ -41,6 +43,7 @@ export function applyRules(f) {
   score -= f.wallets.linkedBuyerShare * 20;
   score += Math.min(8, (f.intel?.early_buyer_groups?.good?.share ?? 0) * 16); // known good money among the early buyers
   score -= Math.min(15, badShare * 30);
+  score -= Math.min(15, (cn?.other_rugged_tokens ?? 0) * 3); // tokens rugged by creators tied to this one
   if (f.audit?.available) score -= Math.min(15, Math.round(f.audit.risk_score / 5)); // risk 0-100 costs up to 15 points
   if (f.audit?.available && f.audit.trust_score >= 70) score += 3;
   score = Math.max(0, Math.min(100, Math.round(score)));

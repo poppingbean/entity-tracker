@@ -382,3 +382,19 @@ test('creator sold after the first 24 h: the ledger sees it, and a ledger flag r
   const o = buildOutcome({ ...token, rug: { flagged: true, source: 'ledger', reason: 'creator sold 4.00 N after the first 24 h' } }, trades, T0 + 1440 * 4 * MIN, lcfg);
   assert.equal(o.rugged, true); assert.deepEqual(o.rug_kinds, ['creator_sold']); assert.match(o.rug_reason, /after the first 24 h/);
 });
+
+import { creatorAnchors, relateCreators } from '../src/evaluate/creators.js';
+test('creator network: anchors and how two creators are tied', () => {
+  const kindOf = (a) => (a === 'binance.near' ? 'hub' : 'wallet');
+  const me = { _id: 'dev1.near', funders: [{ account: 'boss.near', kind: 'wallet', near: 20 }, { account: 'relay.near', kind: 'relayer', creator_only: true }], chain: [{ account: 'boss.near', kind: 'wallet', hop: 1 }, { account: 'binance.near', kind: 'hub', hop: 2 }],
+    flow_out: [{ to: 'cash.near', near: 50, n: 2 }, { to: 'binance.near', near: 80, n: 1 }, { to: 'dust.near', near: 0.5, n: 1 }] };
+  const a = creatorAnchors(me, kindOf);
+  assert.deepEqual(a.up.map((x) => [x.account, x.hop, x.link]), [['boss.near', 1, true], ['relay.near', 1, false], ['binance.near', 2, false]]);
+  assert.deepEqual(a.down.map((x) => [x.account, x.link]), [['cash.near', true], ['binance.near', false]], 'dust dropped; exchanges link nothing');
+  const rel = (o) => relateCreators('dev1.near', a, o, kindOf).map((r) => r.type);
+  assert.deepEqual(rel({ _id: 'dev2.near', funders: [{ account: 'boss.near', kind: 'wallet' }] }), ['shared_funder']);
+  assert.deepEqual(rel({ _id: 'dev3.near', flow_out: [{ to: 'cash.near', near: 10 }] }), ['shared_cashout']);
+  assert.deepEqual(rel({ _id: 'dev4.near', funders: [{ account: 'dev1.near', kind: 'wallet' }] }), ['funded_by_it']);
+  assert.deepEqual(rel({ _id: 'boss.near' }), ['funded_it'], 'a creator that funded this one');
+  assert.deepEqual(rel({ _id: 'dev5.near', funders: [{ account: 'binance.near', kind: 'hub' }], flow_out: [{ to: 'binance.near', near: 9 }] }), [], 'the same exchange ties nothing');
+});
