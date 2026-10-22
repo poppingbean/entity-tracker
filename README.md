@@ -49,7 +49,7 @@ npm run process          # read trades, profile wallets, group, evaluate, AI rev
 npm start                # worker + web UI (http://127.0.0.1:8790)
 ```
 
-- **NEAR AI:** create a key at <https://cloud.near.ai> (API Keys). `NEAR_AI_MODEL` can be any chat model from `https://cloud-api.near.ai/v1/models` that supports JSON output (default `z-ai/glm-5.3-flash`). Without a key the tracker still runs with rule-based verdicts.
+- **NEAR AI:** create a key at <https://cloud.near.ai> (API Keys). `NEAR_AI_MODEL` can be any chat model from `https://cloud-api.near.ai/v1/models` that supports JSON output (default `anthropic/claude-haiku-5-5`, used by the scanner's AI analyst and group reviews; the On-chain analysis write-up uses `NEAR_AI_ANALYSIS_MODEL`, default `anthropic/claude-sonnet-5-5`). Without a key the tracker still runs with rule-based verdicts.
 - **FastNEAR:** an API key raises rate limits on the transaction indexer and RPC.
 - **Tests:** `npm test` (grouping, ROI, verdict and AI-parsing logic).
 - **Nothing here trades:** there is no wallet or private key; the only "trading" is the simulated wallet in MongoDB.
