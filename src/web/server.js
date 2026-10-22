@@ -399,21 +399,23 @@ const routes = {
     const a = await getAnalysis(id, { refresh });
     if (!a) return { error: 'not found' };
     const job = aiRunning.get(id);
-    return { ...a, ai_enabled: aiEnabled(), ai_job: job ? { running: !job.error, error: job.error || null, started: job.started } : null };
+    return { ...a, ai_enabled: aiEnabled(), ai_job: job ? { running: !job.error && !job.unchanged, error: job.error || null, unchanged: !!job.unchanged, started: job.started } : null };
   },
   '/api/analysis-ai': async (u, req) => {
     const id = (u.searchParams.get('id') || '').trim();
     if (!validNearAddress(id)) return { error: 'invalid NEAR account id' };
     if (!aiEnabled()) return { error: 'NEAR AI is not configured' };
     const job = aiRunning.get(id);
-    if (job && !job.error) return { running: true, started: job.started };
+    if (job && !job.error && !job.unchanged) return { running: true, started: job.started };
     if (limited(aiHits, req.socket.remoteAddress || 'ip', 5)) return { error: 'too many AI requests, try again in a few minutes' };
-    const a = await getAnalysis(id);
-    if (!a) return { error: 'not found' };
-    if (a.ai && Date.now() - a.ai.ts < 60 * 60e3 && u.searchParams.get('force') !== '1') return { running: false, ai: a.ai };
+    // run only on request; every run rebuilds the analysis from the latest data, then writes the first assessment or updates the last one
+    // with what changed since it (no model call when nothing did)
     const started = Date.now();
     aiRunning.set(id, { started });
-    assessWithAi(a).then(() => aiRunning.delete(id)).catch((e) => { aiRunning.set(id, { started, error: e.message }); setTimeout(() => aiRunning.delete(id), 10 * 60e3); });
+    getAnalysis(id, { refresh: true }).then((a) => { if (!a) throw new Error('not found'); return assessWithAi(a); })
+      .then((ai) => (ai.unchanged ? aiRunning.set(id, { started, unchanged: true, done: Date.now() }) : aiRunning.delete(id)))
+      .catch((e) => aiRunning.set(id, { started, error: e.message }))
+      .finally(() => setTimeout(() => { if (aiRunning.get(id)?.started === started) aiRunning.delete(id); }, 10 * 60e3));
     return { running: true, started };
   },
 

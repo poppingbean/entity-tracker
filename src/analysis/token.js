@@ -15,9 +15,9 @@ const WINDOWS = [15, 60, 1440]; // minutes after launch
 const EARLY_ROWS = 30, HOLDERS_VERIFIED = 15;
 const r = (x, d = 2) => (x == null || !Number.isFinite(x) ? null : Math.round(x * 10 ** d) / 10 ** d);
 // routers and launchpad services that trade on behalf of users (justhoot in-app buys settle through NEAR Intents): not holders or sellers
-const INFRA = /^(intents|wrap)\.near$|^(aa-[\w-]+|reward-distribute)\.justhoot\.near$|(^|\.)(ref-finance|ref-labs)\.near$/;
+export const INFRA = /^(intents|wrap)\.near$|^(aa-[\w-]+|reward-distribute)\.justhoot\.near$|(^|\.)(ref-finance|ref-labs)\.near$/;
 // label = the AI's name for the group; rule_tag = the rules' tag (hidden on a public dashboard, so flag texts never use it)
-const groupBrief = (c) => (c ? { id: c._id, size: c.size, tag: tagOf(c.tag), rugger: ruggerGroup(c), label: c.ai?.label || null, rule_tag: c.rule?.tags?.[0] || null } : null);
+export const groupBrief = (c) => (c ? { id: c._id, size: c.size, tag: tagOf(c.tag), rugger: ruggerGroup(c), label: c.ai?.label || null, rule_tag: c.rule?.tags?.[0] || null } : null);
 
 async function supplyOf(token) {
   try {
@@ -213,10 +213,11 @@ export async function buildAnalysis(id) {
 
 /** Cached analysis (rebuilt when older than CACHE_MS or when `refresh`). */
 export async function getAnalysis(id, { refresh = false } = {}) {
-  const doc = await col('analyses').findOne({ _id: id });
-  if (doc?.data && !refresh && Date.now() - doc.data.built_ts < CACHE_MS) return { ...doc.data, ai: doc.ai || null };
+  const doc = await col('analyses').findOne({ _id: id }, { projection: { 'ai.snapshot': 0 } }); // the AI's evidence snapshot stays server-side
+  const withAi = (data) => ({ ...data, ai: doc?.ai || null, ai_history: [...(doc?.ai_history || [])].reverse() });
+  if (doc?.data && !refresh && Date.now() - doc.data.built_ts < CACHE_MS) return withAi(doc.data);
   const data = await buildAnalysis(id);
   if (!data) return null;
   await col('analyses').updateOne({ _id: id }, { $set: { data, ts: Date.now() } }, { upsert: true });
-  return { ...data, ai: doc?.ai || null };
+  return withAi(data);
 }

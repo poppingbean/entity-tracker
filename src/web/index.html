@@ -949,18 +949,29 @@ async function analysisPage(id, refresh) {
   return h;
 }
 function anaAiBody(a) {
-  const ai = a.ai;
-  if (ai) return `<div class="card"><div class="head"><h2>NEAR AI assessment <span class="v ${ai.risk_level === 'high' ? 'bad' : ai.risk_level === 'medium' ? 'neutral' : 'good'}">risk ${esc(ai.risk_level)}</span> <span class="muted small">confidence ${n(ai.confidence, 2)} · ${esc(ai.model || '')} · ${since(ai.ts)}</span></h2>${a.ai_enabled ? `<button class="btn" onclick="anaAsk(${esc(JSON.stringify(a.token))},1)">Ask again</button>` : ''}</div>
-    <p>${esc(ai.summary)}</p>${ai.findings?.length ? `<ul class="flags">${ai.findings.map((f) => `<li>${esc(f)}</li>`).join('')}</ul>` : ''}<p><b>Conclusion.</b> ${esc(ai.conclusion)}</p>
-    <p class="small muted">Written by NEAR AI from the figures on this page; check the tables before relying on it.</p></div>`;
-  if (a.ai_job?.running) return `<div class="card muted">NEAR AI is writing the assessment (started ${since(a.ai_job.started)}; usually under a minute) …</div>`;
-  if (!a.ai_enabled) return '';
-  return `<div class="card"><div class="head"><h2>NEAR AI assessment</h2><button class="btn" onclick="anaAsk(${esc(JSON.stringify(a.token))})">Ask NEAR AI</button></div>
-    ${a.ai_job?.error ? `<p class="r small">Last attempt failed: ${esc(a.ai_job.error)}</p>` : ''}<p class="muted small">A written summary, key findings and a conclusion from the figures below.</p></div>`;
+  const ai = a.ai, job = a.ai_job, running = !!job?.running, tok = esc(JSON.stringify(a.token));
+  const btn = a.ai_enabled ? `<button ${running ? 'disabled' : ''} onclick="this.disabled=true;anaAsk(${tok})">${ai ? 'Update with the latest activity' : 'Ask the AI analyst'}</button>` : '';
+  const checked = ai?.checked_ts && ai.checked_ts > ai.ts ? ai.checked_ts : null;
+  const status = running ? `<p class="muted small">${ai ? `Updating the assessment with what changed since ${when(ai.ts)}` : 'Writing the assessment'} (started ${since(job.started)}; usually under a minute) …</p>`
+    : job?.error ? `<p class="r small">Last run failed: ${esc(job.error)}</p>`
+    : checked || job?.unchanged ? `<p class="muted small">No new on-chain activity since this assessment (checked ${since(checked || job.started)}).</p>` : '';
+  const ul = (xs) => (xs?.length ? `<ul class="flags">${xs.map((f) => `<li>${esc(f)}</li>`).join('')}</ul>` : '');
+  const risk = (lvl) => `<span class="v ${lvl === 'high' ? 'bad' : lvl === 'medium' ? 'neutral' : 'good'}">risk ${esc(lvl)}</span>`;
+  if (!ai) return `<div class="card"><div class="head"><h2>AI analyst</h2>${btn}</div>${status}
+    <p class="muted small">Runs only when asked. The first run writes an assessment from the figures below; every later run updates it with what changed on chain since the previous run.</p></div>`;
+  let h = `<div class="card"><div class="head"><h2>AI analyst ${risk(ai.risk_level)}${ai.previous_risk && ai.previous_risk !== ai.risk_level ? ` <span class="muted small">was ${esc(ai.previous_risk)}</span>` : ''}
+      <span class="muted small">${ai.mode === 'update' ? 'update' : 'first assessment'} · ${when(ai.ts)} · confidence ${n(ai.confidence, 2)} · ${esc(ai.model || '')}</span></h2>${btn}</div>${status}`;
+  if (ai.changes?.length) h += `<h3>Since the previous assessment <span class="muted small">${when(ai.since_ts)}${ai.window ? ` · ${ai.window.trades} trades · ${n(ai.window.buy_near, 1)} N in / ${n(ai.window.sell_near, 1)} N out` : ''}</span></h3>${ul(ai.changes)}`;
+  h += `${ai.changes?.length ? '<h3>Current assessment</h3>' : ''}<p>${esc(ai.summary)}</p>${ul(ai.findings)}<p><b>Conclusion.</b> ${esc(ai.conclusion)}</p>`;
+  const hist = a.ai_history || [];
+  if (hist.length) h += `<details><summary class="muted small">Earlier assessments (${hist.length})</summary>${hist.map((x) => `<div style="margin:8px 0;padding-top:6px;border-top:1px solid var(--line)">
+      <div class="small">${when(x.ts)} · ${x.mode === 'update' ? 'update' : 'first assessment'} · ${risk(x.risk_level)} <span class="muted">${esc(x.model || '')}</span></div>
+      ${x.changes?.length ? `<div class="small muted">Changes then:</div>${ul(x.changes)}` : ''}<p class="small">${esc(x.summary)}</p></div>`).join('')}</details>`;
+  return h + '<p class="small muted">Written by the AI analyst from the figures on this page; check the tables before relying on it.</p></div>';
 }
 let anaTimer = null;
-async function anaAsk(id, force) {
-  const r = await get('/api/analysis-ai', { id, force: force ? '1' : '' }).catch((e) => ({ error: e.message }));
+async function anaAsk(id) {
+  const r = await get('/api/analysis-ai', { id }).catch((e) => ({ error: e.message }));
   if (r.error) { $('anaAi').innerHTML = `<div class="card err">${esc(r.error)}</div>`; return; }
   anaPoll(id);
 }
