@@ -21,11 +21,11 @@ export function extractJson(text) {
 }
 
 /** One chat completion expected to return a JSON object. Retries on rate limits and server errors. */
-export async function chatJSON({ system, user, maxTokens = config.ai.maxTokens, temperature = 0.2 }) {
+export async function chatJSON({ system, user, maxTokens = config.ai.maxTokens, temperature = 0.2, timeoutMs = config.ai.timeoutMs, attempts = 3 }) {
   if (!aiEnabled()) throw new Error('NEAR_AI_API_KEY is not set');
   let lastErr;
-  for (let attempt = 0; attempt < 3; attempt++) {
-    const ctl = new AbortController(), timer = setTimeout(() => ctl.abort(), config.ai.timeoutMs);
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    const ctl = new AbortController(), timer = setTimeout(() => ctl.abort(), timeoutMs);
     try {
       aiStatus.calls++;
       const res = await fetch(`${config.ai.baseUrl}/chat/completions`, {
@@ -43,7 +43,7 @@ export async function chatJSON({ system, user, maxTokens = config.ai.maxTokens, 
       aiStatus.ok = true; aiStatus.error = null; aiStatus.checkedTs = Date.now();
       return { json: parsed, model: j.model || config.ai.model, usage: j.usage || null };
     } catch (e) {
-      lastErr = e.name === 'AbortError' ? new Error(`NEAR AI timed out after ${config.ai.timeoutMs / 1000}s`) : e;
+      lastErr = e.name === 'AbortError' ? new Error(`NEAR AI timed out after ${timeoutMs / 1000}s`) : e;
       if (/NEAR AI 4\d\d/.test(lastErr.message) && !/429/.test(lastErr.message)) break; // auth / request errors will not improve on retry
     } finally { clearTimeout(timer); }
   }

@@ -8,6 +8,7 @@ import { extractJson } from '../src/ai/nearai.js';
 import { positionPnl } from '../src/sim/portfolio.js';
 import { redact } from '../src/web/redact.js';
 import { normaliseReview } from '../src/ai/review.js';
+import { aiPacket } from '../src/analysis/ai.js';
 
 const MIN = 60e3;
 const T0 = 1_700_000_000_000;
@@ -405,4 +406,17 @@ test('creator network: anchors and how two creators are tied', () => {
   assert.deepEqual(rel({ _id: 'dev4.near', funders: [{ account: 'dev1.near', kind: 'wallet' }] }), ['funded_by_it']);
   assert.deepEqual(rel({ _id: 'boss.near' }), ['funded_it'], 'a creator that funded this one');
   assert.deepEqual(rel({ _id: 'dev5.near', funders: [{ account: 'binance.near', kind: 'hub' }], flow_out: [{ to: 'binance.near', near: 9 }] }), [], 'the same exchange ties nothing');
+});
+
+test('token analysis: public mode drops rule tags from groups; the AI packet shortens 64-hex accounts', () => {
+  const grp = { id: 'c1', size: 3, tag: 'loss', rugger: false, label: null, rule_tag: 'insider' };
+  const hex = 'ab'.repeat(32);
+  const a = { token: 't', symbol: 'T', age_min: 10, launch: {}, creator: { account: hex, funders: [{ account: hex, kind: 'wallet' }], group: grp }, flows: {},
+    early: { wallets: 1, near_in: 5, rows: [{ wallet: hex, rank: 1, group: grp, notes: [] }] }, groups: [{ ...grp, members: [hex] }], shared_funders: [{ funder: hex, kind: 'hub', wallets: [hex, 'b.near'] }],
+    repeat: [{ wallet: 'r.near', group: grp }], sellers: [{ account: 's.near', group: grp }], holders: { top10_share: 0.4, rows: [{ account: 'h.near', group: grp }] }, flags: [] };
+  const pub = redact('/api/analysis', a);
+  assert.ok(!JSON.stringify(pub).includes('insider'));
+  assert.equal(pub.groups[0].id, 'c1'); assert.equal(pub.early.rows[0].group.tag, 'loss');
+  const p = aiPacket(a);
+  assert.equal(p.creator.account, 'abababab…'); assert.equal(p.early.first[0].wallet, 'abababab…'); assert.deepEqual(p.shared_funders[0].wallets, ['abababab…', 'b.near']);
 });

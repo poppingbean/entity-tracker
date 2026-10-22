@@ -14,6 +14,8 @@ export const config = {
     baseUrl: (process.env.NEAR_AI_BASE_URL || 'https://cloud-api.near.ai/v1').replace(/\/+$/, ''),
     model: process.env.NEAR_AI_MODEL || 'z-ai/glm-5.3-flash',
     timeoutMs: num(process.env.NEAR_AI_TIMEOUT_SECONDS, 120) * 1000,
+    // a token analysis is a longer piece of writing than a group review
+    analysisTimeoutMs: num(process.env.NEAR_AI_ANALYSIS_TIMEOUT_SECONDS, 300) * 1000,
     maxTokens: num(process.env.NEAR_AI_MAX_TOKENS, 4000),
   },
 
