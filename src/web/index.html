@@ -442,6 +442,7 @@ const scanState = (t, scanCfg) => {
   const s = t.scan;
   if (s?.stale) return '<span class="muted">stale</span>';
   if (s?.error) return '<span class="r">error</span>';
+  if (s?.score != null && s.ai_pending) return Date.now() - s.ts < 15 * 60e3 ? '<span class="v good">gates pass</span> <span class="b small">AI reviewing…</span>' : '<span class="v good">gates pass</span> <span class="muted small">AI review did not finish</span>';
   if (s?.score != null) return s.bought ? '<span class="v good">bought (sim)</span>' : s.pass ? '<span class="v neutral">pass, no buy</span>' : '<span class="v bad">gates fail</span>';
   const minAge = Math.max(scanCfg.observeSeconds, t.launchpad === 'justhoot' ? scanCfg.justhootMinAgeSeconds : 0) * 1000;
   const left = minAge - (Date.now() - t.live_ts);
@@ -851,6 +852,7 @@ async function scanPage(id) {
   if (s.pass === false || s.stale || s.error) h += `<h3>Why it did not pass</h3>${failReasons(s)}`;
   h += '</div>';
   if (ai) h += `<div class="ai"><b>NEAR AI analyst</b> · ${esc(ai.action)} confidence ${n(ai.confidence)} · risk ${esc(ai.risk_level)} · quality ${ai.quality_score ?? '–'}${(ai.reasons || []).length ? '<ul class="flags">' + ai.reasons.map((x) => `<li>${esc(x)}</li>`).join('') + '</ul>' : ''}${(ai.red_flags || []).length ? '<p class="a"><b>Red flags</b></p><ul class="flags">' + ai.red_flags.map((x) => `<li>${esc(x)}</li>`).join('') + '</ul>' : ''}</div>`;
+  else if (s.ai_pending) h += `<div class="card muted">${Date.now() - s.ts < 15 * 60e3 ? 'The AI analyst is reviewing this token (the gate result above is final) …' : 'The AI review did not finish.'}</div>`;
   else h += `<div class="card muted">${s.pass === false ? 'No AI review: the token did not pass the checks above, so the AI analyst was not asked.' : 'No AI review: NEAR AI is off or the call failed.'}</div>`;
   const ig = f.intel?.early_buyer_groups;
   if (ig) {

@@ -12,7 +12,7 @@ export const config = {
   ai: {
     key: process.env.NEAR_AI_API_KEY || '',
     baseUrl: (process.env.NEAR_AI_BASE_URL || 'https://cloud-api.near.ai/v1').replace(/\/+$/, ''),
-    model: process.env.NEAR_AI_MODEL || 'z-ai/glm-5.3-flash',
+    model: process.env.NEAR_AI_MODEL || 'anthropic/claude-sonnet-5-5', // Claude Sonnet 5.5 served by NEAR AI (the GLM default took minutes per call)
     timeoutMs: num(process.env.NEAR_AI_TIMEOUT_SECONDS, 120) * 1000,
     // token analysis write-ups: Claude Sonnet 5.5 served by NEAR AI (group reviews keep `model`); streamed, so a long answer is not cut at 300 s
     analysisModel: process.env.NEAR_AI_ANALYSIS_MODEL || 'anthropic/claude-sonnet-5-5',

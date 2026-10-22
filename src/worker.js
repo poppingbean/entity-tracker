@@ -15,7 +15,7 @@ import { scanTick, followUpTick, blacklistCreator } from './scanner/pipeline.js'
 import { managePositions } from './sim/portfolio.js';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-export const runtime = { startedTs: Date.now(), cycles: 0, lastCycleTs: null, stopping: false, lastEvalTs: 0, lastPositionCheck: 0, lastRugCheck: 0, lastCreatorCheck: 0 };
+export const runtime = { startedTs: Date.now(), cycles: 0, lastCycleTs: null, stopping: false, lastEvalTs: 0, lastPositionCheck: 0, lastRugCheck: 0, lastCreatorCheck: 0, reviewing: null, reviewed: 0 };
 
 /** One pass of the pipeline. Returns what it did, so callers (the CLI) can loop until idle. */
 export async function cycle({ evaluate = true } = {}) {
@@ -38,7 +38,12 @@ export async function cycle({ evaluate = true } = {}) {
   if (evaluate && (profiled > 0 || expanded > 0 && Date.now() - runtime.lastEvalTs > 2 * 60e3 || stale && processed > 0 || stale && runtime.lastEvalTs === 0)) {
     groups = (await evaluateGroups()).groups; runtime.lastEvalTs = Date.now();
   }
-  if (evaluate && aiEnabled()) reviewed = await reviewPending(3);
+  // NEAR AI group reviews run beside the loop, one batch at a time: a slow model (minutes per call, with retries) must never hold up
+  // discovery, trade reading and the scanner's gate checks
+  if (evaluate && aiEnabled() && !runtime.reviewing) {
+    runtime.reviewing = reviewPending(3).then((n) => { runtime.reviewed += n; return n; }).catch((e) => { warn(`group reviews failed: ${e.message}`); return 0; }).finally(() => { runtime.reviewing = null; });
+  }
+  reviewed = runtime.reviewed;
   return { found, creators, processed, ledgered, scanned, followed, profiled, expanded, groups, reviewed };
 }
 
