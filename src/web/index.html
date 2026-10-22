@@ -395,8 +395,9 @@ views.explore = async () => {
 
 // ================================================================== TOKENS + SCANNER (one page)
 /** Scanner state of a launch: observing / checking / gates fail / pass / bought (simulated). */
-// ---- why a token failed the scanner: a plain explanation per gate (no thresholds, safe on the public dashboard); the exact reason
-// with its numbers comes with it when the server sends it (password-protected or local dashboard)
+// ---- why a token failed the scanner: a plain explanation per gate. This is what the public dashboard shows: it names the check that
+// failed without its threshold, so a rugger cannot learn the numbers to get past it. (When running locally the server also sends the
+// exact reason, shown under it.)
 const GATE_TEXT = {
   quote_accepted: 'Its pool is quoted in a token the scanner cannot trade.',
   standard_contract: "The token contract is not the launchpad's standard code (custom code can hide a honeypot).",
