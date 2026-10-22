@@ -105,6 +105,15 @@
   .dh-main { display:flex; gap:16px; align-items:flex-start; margin-bottom:16px; }
   .dh-main h1 { margin:0; font-size:24px; letter-spacing:-.3px; display:flex; align-items:center; gap:10px; flex-wrap:wrap; word-break:break-all; }
   .dh-main h1 .muted { font-size:15px; font-weight:500; }
+  /* call to action: the token's on-chain analysis */
+  .cta-row { display:flex; align-items:center; gap:14px; flex-wrap:wrap; margin:4px 0 18px; }
+  .cta { display:inline-flex; align-items:center; gap:10px; padding:13px 22px; border-radius:12px; font-size:16px; font-weight:700; letter-spacing:.1px;
+         color:var(--accent-ink); background:linear-gradient(135deg, var(--accent), var(--accent-2)); box-shadow:0 8px 24px -8px var(--accent), 0 0 0 1px var(--accent-line);
+         text-decoration:none; transition:transform .12s ease, box-shadow .12s ease, filter .12s ease; }
+  .cta:hover { text-decoration:none; transform:translateY(-1px); filter:brightness(1.06); box-shadow:0 12px 28px -8px var(--accent), 0 0 0 1px var(--accent); }
+  .cta:active { transform:translateY(0); }
+  .cta svg { width:20px; height:20px; flex:none; }
+  .cta-row .cta-note { color:var(--muted); font-size:13px; max-width:520px; }
   .meta { color:var(--muted); font-size:12.5px; margin-top:5px; display:flex; flex-wrap:wrap; gap:6px 10px; align-items:center; }
   .banner { display:flex; align-items:center; gap:12px; padding:12px 14px; border-radius:12px; border:1px solid var(--line); background:var(--panel-2); margin-bottom:14px; flex-wrap:wrap; }
   .banner.good { border-color:color-mix(in srgb, var(--good) 40%, transparent); background:var(--good-soft); }
@@ -221,6 +230,7 @@
     .hero { padding:22px 18px; } .hero h1 { font-size:22px; }
     input[type=search] { min-width:0; width:100%; }
     .dh-main h1 { font-size:20px; }
+    .cta { width:100%; justify-content:center; }
   }
 </style>
 </head>
@@ -255,6 +265,8 @@ const roiCls = (r) => (r == null ? 'muted' : r > 0 ? 'g' : r < 0 ? 'r' : 'muted'
 const signed = (x, d = 1) => (x == null ? '–' : (x > 0 ? '+' : '') + n(x, d));
 const TAGS = ['win80', 'win50', 'win30', 'sniper', 'loss', 'unrated'];
 const tagOk = (t) => (TAGS.includes(t) ? t : 'unrated');
+// the simulated wallet (paper trading) is hidden while it does not buy anything; set to true to show its page, tabs and labels again
+const SHOW_SIM = false;
 const TAGHELP = 'loss = lost money overall · net profit: win80 / win50 / win30 = ended in profit in 80 / 50 / 30 %+ of the tokens bought early, sniper = under 30 % (a few big wins pay for many small losses) · unrated = too few judged tokens';
 /** Win-rate tag of a wallet or group (share of its early tokens that ended in profit). */
 const tg = (t) => `<span class="v ${tagOk(t)}" title="${esc(TAGHELP)}">${tagOk(t)}</span>`;
@@ -443,7 +455,7 @@ const scanState = (t, scanCfg) => {
   if (s?.stale) return '<span class="muted">stale</span>';
   if (s?.error) return '<span class="r">error</span>';
   if (s?.score != null && s.ai_pending) return Date.now() - s.ts < 15 * 60e3 ? '<span class="v good">gates pass</span> <span class="b small">AI reviewing…</span>' : '<span class="v good">gates pass</span> <span class="muted small">AI review did not finish</span>';
-  if (s?.score != null) return s.bought ? '<span class="v good">bought (sim)</span>' : s.pass ? '<span class="v neutral">pass, no buy</span>' : '<span class="v bad">gates fail</span>';
+  if (s?.score != null) return s.bought && SHOW_SIM ? '<span class="v good">bought (sim)</span>' : s.pass ? `<span class="v neutral">${SHOW_SIM ? 'pass, no buy' : 'gates pass'}</span>` : '<span class="v bad">gates fail</span>';
   const minAge = Math.max(scanCfg.observeSeconds, t.launchpad === 'justhoot' ? scanCfg.justhootMinAgeSeconds : 0) * 1000;
   const left = minAge - (Date.now() - t.live_ts);
   return left > 0 ? '<span class="b">observing</span>' : '<span class="b">checking…</span>';
@@ -455,9 +467,9 @@ views.tokens = async () => {
   const [j, m] = await Promise.all([get('/api/tokens', { q: S.q, status: S.status, tab: S.tab, launchpad: S.launchpad, limit: 50, offset: S.offset }), get('/api/monitor')]);
   setStatus(m.worker, m.now, m.ai);
   const W = m.window24h;
-  return `<div class="card"><div class="tiles">${tile('Tokens tracked', n(m.tokensTotal, 0), `${m.launchesLast3h} in the last 3 h`)}${tile('Launches (24 h)', W.launches)}${tile('Checked', W.scanned)}${tile('Passed the gates', W.passed, null, 'a')}${tile('Bought (simulated)', W.bought, null, 'g')}${tile('Rugged tokens', n(m.ruggedTotal, 0), null, m.ruggedTotal ? 'r' : '')}
+  return `<div class="card"><div class="tiles">${tile('Tokens tracked', n(m.tokensTotal, 0), `${m.launchesLast3h} in the last 3 h`)}${tile('Launches (24 h)', W.launches)}${tile('Checked', W.scanned)}${tile('Passed the gates', W.passed, null, 'a')}${SHOW_SIM ? tile('Bought (simulated)', W.bought, null, 'g') : ''}${tile('Rugged tokens', n(m.ruggedTotal, 0), null, m.ruggedTotal ? 'r' : '')}
     ${m.polls.map((p) => tile(esc(p.launchpad), p.ts ? ago(m.now - p.ts) + ' ago' : '–', p.ok === false ? esc(short(p.error || 'failed', 30)) : 'last poll ok', p.ok === false ? 'r' : '')).join('')}</div></div>
-  <div class="card"><div class="bar">${seg('tokens', 'tab', [['', 'All'], ['new', 'New (24 h)'], ['checked', 'Checked'], ['passed', 'Passed gates'], ['bought', 'Bought (sim)'], ['rugged', 'Rugged'], ['volume', 'Top volume (24 h)']])}
+  <div class="card"><div class="bar">${seg('tokens', 'tab', [['', 'All'], ['new', 'New (24 h)'], ['checked', 'Checked'], ['passed', 'Passed gates'], ...(SHOW_SIM ? [['bought', 'Bought (sim)']] : []), ['rugged', 'Rugged'], ['volume', 'Top volume (24 h)']])}
     ${qbox('tokens', 'symbol / token / creator')}
     ${sel('tokens', 'launchpad', [['', 'all launchpads'], ['nearlytrade', 'nearly.trade'], ['justhoot', 'justhoot'], ['memecooking', 'meme.cooking'], ['gaypad', 'gaypad'], ['tkn', 'tkn.near'], ['qlyphs', 'qlyphs']])}
     ${sel('tokens', 'status', [['', 'any status'], ...['new', 'entries_open', 'tracking', 'done', 'awaiting_pool'].map((v) => [v, v])])}<span class="spacer"></span>${pager('tokens', j.total)}</div>
@@ -542,8 +554,10 @@ async function tokenPage(id) {
   const riskCls = au?.available ? (au.risk_level === 'low' ? 'g' : au.risk_level === 'medium' ? 'a' : 'r') : 'muted';
   let h = `<div class="card">${crumbs([['Tokens', '/tokens'], [t.symbol || short(t.id, 20)]])}
     <div class="dh-main">${avatar(t.id, t.symbol, 54)}<div style="min-width:0"><h1>${esc(t.symbol || short(t.id, 24))} <span class="muted">${esc(t.name || '')}</span> ${rugChips(o)} ${exitChip(o)}</h1>
-      <div class="meta"><span class="chip">${esc(t.launchpad)}</span><span class="chip">${esc(t.status)}</span><span class="acct">${esc(t.id)}</span><span>live ${when(t.live_ts)} (${since(t.live_ts)})</span><span>${ilink(P.ana(t.id), '<b>On-chain analysis →</b>')}</span></div>
+      <div class="meta"><span class="chip">${esc(t.launchpad)}</span><span class="chip">${esc(t.status)}</span><span class="acct">${esc(t.id)}</span><span>live ${when(t.live_ts)} (${since(t.live_ts)})</span></div>
       <div class="meta"><span>creator ${t.creator ? ilink(P.creator(t.creator), esc(short(t.creator, 30)), t.creator) + ' ' + ext(nbAddr(t.creator), '↗', 'NearBlocks') + ' ' + crChip(t.creator_info) : '–'}</span><span>launch tx ${txl(t.live_tx)}</span>${ext(tokUrl(t.id, t.launchpad), 'Launchpad page ↗')}${ext(`${NB}/token/${encodeURIComponent(t.id)}`, 'NearBlocks ↗')}${ilink(P.audit(t.id), 'Full audit →')}</div></div></div>
+    <div class="cta-row"><a class="cta" href="${esc(P.ana(t.id))}" onclick="return navA(event,this)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>On-chain analysis →</a>
+      <span class="cta-note">Launch, creator, flows, who bought early and the groups behind them, who sold, who holds, risk notes and the AI analyst.</span></div>
     <div class="tiles">${L?.last_multiple != null ? tile('All-time high', 'x' + n(L.ath_multiple, 1), `x${n(o.peak_multiple, 1)} in the first 24 h${L.ath_after_cp ? ' · ATH ' + since(L.ath_ts) : ''}`)
         + tile('Now', xm(L.last_multiple), `${L.drawdown != null ? pct(L.drawdown, L.drawdown > 0.99 ? 1 : 0) + ' below ATH · ' : ''}last trade ${since(L.last_trade_ts)}`, roiCls(L.last_multiple - 1))
         + tile('At 24 h', 'x' + n(o.last_multiple, 1), o.drawdown != null ? `drawdown ${pct(o.drawdown)} · what verdicts use` : 'what verdicts use', roiCls((o.last_multiple ?? 1) - 1))
@@ -571,7 +585,7 @@ async function tokenPage(id) {
   const cn = t.creator_network;
   if (t.scan && (t.scan.score != null || t.scan.stale || t.scan.error)) {
     const sc = t.scan;
-    h += `<div class="card ${sc.pass === false ? 'err' : ''}"><div class="head"><h2>Scanner check ${sc.bought ? '<span class="v good">bought (simulated)</span>' : sc.pass ? '<span class="v neutral">passed, not bought</span>' : sc.pass === false ? '<span class="v bad">did not pass</span>' : ''}${sc.score != null ? ` <span class="muted">rule score ${esc(sc.score)}</span>` : ''}</h2>${sc.id ? ilink(P.scan(sc.id), 'Full evaluation →') : ''}</div>
+    h += `<div class="card ${sc.pass === false ? 'err' : ''}"><div class="head"><h2>Scanner check ${sc.bought && SHOW_SIM ? '<span class="v good">bought (simulated)</span>' : sc.pass ? `<span class="v neutral">${SHOW_SIM ? 'passed, not bought' : 'gates passed'}</span>` : sc.pass === false ? '<span class="v bad">did not pass</span>' : ''}${sc.score != null ? ` <span class="muted">rule score ${esc(sc.score)}</span>` : ''}</h2>${sc.id ? ilink(P.scan(sc.id), 'Full evaluation →') : ''}</div>
       ${sc.pass === false || sc.stale || sc.error ? failReasons(sc) : `<p class="muted" style="margin-bottom:0">${esc(sc.decision || 'Passed every check.')}</p>`}</div>`;
   }
   if (t.creator && cn?.profiled) {
@@ -848,7 +862,7 @@ async function scanPage(id) {
   let h = `<div class="card">${crumbs([['Evaluations', '/scans'], [`${s.symbol || short(s.token, 20)} · ${s.kind}`]])}
     <div class="dh-main">${avatar(s.token, s.symbol, 48)}<div><h1>${esc(s.symbol || '')} · ${esc(s.kind)}${s.kind === 'followup' ? ' +' + s.minutes + ' min' : ''} ${s.pass ? '<span class="v good">gates pass</span>' : '<span class="v bad">gates fail</span>'}</h1>
     <div class="meta">${ilink(P.tok(s.token), 'Token page →')}${ext(tokUrl(s.token, s.launchpad), 'Launchpad ↗')}<span>${when(s.ts)}</span><span>score <b class="b">${s.score}</b></span><span>${esc(s.decision || '')}</span></div></div></div>`;
-  if (s.trade) h += `<p>Simulated trade: <b class="${s.trade.status === 'bought' ? 'g' : ''}">${esc(s.trade.status)}</b> ${s.trade.near ? s.trade.near + ' N' : ''} ${esc(s.trade.reason || '')}</p>`;
+  if (s.trade && SHOW_SIM) h += `<p>Simulated trade: <b class="${s.trade.status === 'bought' ? 'g' : ''}">${esc(s.trade.status)}</b> ${s.trade.near ? s.trade.near + ' N' : ''} ${esc(s.trade.reason || '')}</p>`;
   if (s.pass === false || s.stale || s.error) h += `<h3>Why it did not pass</h3>${failReasons(s)}`;
   h += '</div>';
   if (ai) h += `<div class="ai"><b>NEAR AI analyst</b> · ${esc(ai.action)} confidence ${n(ai.confidence)} · risk ${esc(ai.risk_level)} · quality ${ai.quality_score ?? '–'}${(ai.reasons || []).length ? '<ul class="flags">' + ai.reasons.map((x) => `<li>${esc(x)}</li>`).join('') + '</ul>' : ''}${(ai.red_flags || []).length ? '<p class="a"><b>Red flags</b></p><ul class="flags">' + ai.red_flags.map((x) => `<li>${esc(x)}</li>`).join('') + '</ul>' : ''}</div>`;
@@ -1049,7 +1063,7 @@ views.config = async () => {
   const c = await get('/api/config');
   const block = (title, o) => `<div class="card"><h2>${title}</h2><table class="kv">${Object.entries(o).map(([k, v]) => `<tr><td>${esc(k)}</td><td class="wrap mono small">${esc(JSON.stringify(v))}</td></tr>`).join('')}</table></div>`;
   return `<div class="card muted">Read-only view of the settings in .env (never any secret). AI: ${c.ai.enabled ? 'NEAR AI on' : 'off'} · database ${esc(c.db)} · launchpads ${esc(c.launchpads.join(', '))}</div>
-    <div class="grid2"><div>${block('Scanner timing', c.scan)}${block('AI analyst', c.analyst)}${block('Simulated wallet', c.sim)}</div><div>${block('Hard gates', c.rules)}${block('Follow-up reviews', c.followUp)}${block('Early-investor tracking', { entry: c.entry, outcome: c.outcome })}</div></div>`;
+    <div class="grid2"><div>${block('Scanner timing', c.scan)}${block('AI analyst', c.analyst)}${SHOW_SIM ? block('Simulated wallet', c.sim) : ''}</div><div>${block('Hard gates', c.rules)}${block('Follow-up reviews', c.followUp)}${block('Early-investor tracking', { entry: c.entry, outcome: c.outcome })}</div></div>`;
 };
 
 // ================================================================== search
@@ -1090,7 +1104,7 @@ document.addEventListener('keydown', (e) => { if (e.key === '/' && !['INPUT', 'S
 // ================================================================== shell + router (History API: /tokens/<id>, /groups/<id>, no #)
 const SECTIONS = [
   { label: 'Explore', views: [['explore', 'Explore']] },
-  { label: 'Tokens & Scanner', views: [['tokens', 'Launches'], ['signals', 'Smart-money signals'], ['sim', 'Simulated wallet'], ['analysis', 'On-chain analysis'], ['scans', 'Evaluations'], ['audit', 'Contract audit']] },
+  { label: 'Tokens & Scanner', views: [['tokens', 'Launches'], ['signals', 'Smart-money signals'], ...(SHOW_SIM ? [['sim', 'Simulated wallet']] : []), ['analysis', 'On-chain analysis'], ['scans', 'Evaluations'], ['audit', 'Contract audit']] },
   { label: 'Wallets & Groups', views: [['groups', 'Groups'], ['wallets', 'Wallets'], ['creators', 'Creators'], ['entities', 'Funders & entities']] },
 ];
 const TITLES = {
@@ -1125,8 +1139,8 @@ async function render() {
   closeSearch();
   const seg = location.pathname.split('/').filter(Boolean).map(decodeURIComponent);
   let view = seg[0] === 'overview' ? 'explore' : seg[0] === 'monitor' ? 'tokens' : seg[0]; // the old Monitor page is part of /tokens now
-  if (!views[view]) view = 'explore';
-  if (!seg.length || seg[0] === 'overview' || seg[0] === 'monitor') history.replaceState(null, '', '/' + view);
+  if (!views[view] || (view === 'sim' && !SHOW_SIM)) view = 'explore';
+  if (!seg.length || seg[0] === 'overview' || seg[0] === 'monitor' || (seg[0] === 'sim' && !SHOW_SIM)) history.replaceState(null, '', '/' + view);
   const id = seg.length > 1 ? seg.slice(1).join('/') : null, detail = id && DETAIL[view];
   const sec = SECTIONS.find((s) => s.views.some(([v]) => v === view)) || { label: '', views: [[view, TITLES[view][0]]] };
   $('nav').innerHTML = SECTIONS.map((s) => `<a href="/${s.views[0][0]}" onclick="return navA(event,this)" class="${s === sec ? 'on' : ''}">${s.label}</a>`).join('');
