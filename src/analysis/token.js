@@ -214,7 +214,9 @@ export async function buildAnalysis(id) {
 /** Cached analysis (rebuilt when older than CACHE_MS or when `refresh`). */
 export async function getAnalysis(id, { refresh = false } = {}) {
   const doc = await col('analyses').findOne({ _id: id }, { projection: { 'ai.snapshot': 0 } }); // the AI's evidence snapshot stays server-side
-  const withAi = (data) => ({ ...data, ai: doc?.ai || null, ai_history: [...(doc?.ai_history || [])].reverse() });
+  const runs = await col('analysis_runs').find({ token: id }, { projection: { snapshot: 0, since: 0 } }).sort({ ts: -1 }).limit(100).toArray();
+  // the history: every earlier run (the latest is `ai`)
+  const withAi = (data) => ({ ...data, ai: doc?.ai || null, ai_history: runs.filter((x) => x.ts !== doc?.ai?.ts).map(({ _id, ...x }) => ({ id: _id, ...x })) });
   if (doc?.data && !refresh && Date.now() - doc.data.built_ts < CACHE_MS) return withAi(doc.data);
   const data = await buildAnalysis(id);
   if (!data) return null;

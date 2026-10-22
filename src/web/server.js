@@ -15,7 +15,7 @@ import { creatorIndex, creatorBrief, creatorFlag, creatorNetwork } from '../eval
 import { auditNearContract, getCachedAudit, validNearAddress, summarizeAudit } from '../audit/service.js';
 import { TAGS, tagOf, ruggerGroup, ruggerWallet } from '../evaluate/tags.js';
 import { getAnalysis } from '../analysis/token.js';
-import { assessWithAi } from '../analysis/ai.js';
+import { assessWithAi, getRun } from '../analysis/ai.js';
 
 const page = fs.readFileSync(new URL('./index.html', import.meta.url), 'utf8');
 // pages of the single-page UI; each is served the same HTML and the browser routes with the History API (no # in URLs)
@@ -401,6 +401,8 @@ const routes = {
     const job = aiRunning.get(id);
     return { ...a, ai_enabled: aiEnabled(), ai_job: job ? { running: !job.error && !job.unchanged, error: job.error || null, unchanged: !!job.unchanged, started: job.started } : null };
   },
+  /** One earlier AI analyst run, with the figures it was written from and what changed since the run before. */
+  '/api/analysis-run': async (u) => (await getRun(u.searchParams.get('id') || '')) || { error: 'not found' },
   '/api/analysis-ai': async (u, req) => {
     const id = (u.searchParams.get('id') || '').trim();
     if (!validNearAddress(id)) return { error: 'invalid NEAR account id' };

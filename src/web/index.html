@@ -964,10 +964,28 @@ function anaAiBody(a) {
   if (ai.changes?.length) h += `<h3>Since the previous assessment <span class="muted small">${when(ai.since_ts)}${ai.window ? ` · ${ai.window.trades} trades · ${n(ai.window.buy_near, 1)} N in / ${n(ai.window.sell_near, 1)} N out` : ''}</span></h3>${ul(ai.changes)}`;
   h += `${ai.changes?.length ? '<h3>Current assessment</h3>' : ''}<p>${esc(ai.summary)}</p>${ul(ai.findings)}<p><b>Conclusion.</b> ${esc(ai.conclusion)}</p>`;
   const hist = a.ai_history || [];
-  if (hist.length) h += `<details><summary class="muted small">Earlier assessments (${hist.length})</summary>${hist.map((x) => `<div style="margin:8px 0;padding-top:6px;border-top:1px solid var(--line)">
+  if (hist.length) h += `<details><summary class="muted small">Earlier runs (${hist.length}), kept with the figures they were written from</summary>${hist.map((x) => `<div style="margin:8px 0;padding-top:6px;border-top:1px solid var(--line)">
       <div class="small">${when(x.ts)} · ${x.mode === 'update' ? 'update' : 'first assessment'} · ${risk(x.risk_level)} <span class="muted">${esc(x.model || '')}</span></div>
-      ${x.changes?.length ? `<div class="small muted">Changes then:</div>${ul(x.changes)}` : ''}<p class="small">${esc(x.summary)}</p></div>`).join('')}</details>`;
+      ${x.changes?.length ? `<div class="small muted">Changes then:</div>${ul(x.changes)}` : ''}<p class="small">${esc(x.summary)}</p>${ul(x.findings)}<p class="small"><b>Conclusion.</b> ${esc(x.conclusion || '')}</p>
+      <button onclick="anaRun(${esc(JSON.stringify(x.id))},this)">Show figures</button><div></div></div>`).join('')}</details>`;
   return h + '<p class="small muted">Written by the AI analyst from the figures on this page; check the tables before relying on it.</p></div>';
+}
+/** The figures an earlier run was written from (and, for an update, what changed in its window), shown under it. */
+async function anaRun(id, btn) {
+  const box = btn.nextElementSibling;
+  if (box.innerHTML) { box.innerHTML = ''; btn.textContent = 'Show figures'; return; }
+  const x = await get('/api/analysis-run', { id }).catch((e) => ({ error: e.message }));
+  if (x.error) { box.innerHTML = `<p class="r small">${esc(x.error)}</p>`; return; }
+  if (!x.snapshot) { box.innerHTML = '<p class="muted small">This run was written before runs were stored with their figures.</p>'; btn.textContent = 'Hide'; return; }
+  const S = x.snapshot, F = S.flows || {}, T = x.since?.trades;
+  let h = `<div class="tiles">${tile('Price then', xm(F.now_multiple), `peak ${xm(F.peak_multiple)}`)}${tile('Volume then', n((F.total?.buy_near || 0) + (F.total?.sell_near || 0), 0) + ' N', `${F.total?.trades ?? '–'} trades`)}
+    ${tile('Early NEAR', n(S.early?.near_in, 1) + ' N', `${S.early?.wallets ?? '–'} wallets`)}${tile('Top 10 holders', pc(S.holders?.top10_share))}${S.creator ? tile('Creator held', pc(S.creator.balance_share), `sold ${n(S.creator.traded?.sell_near ?? 0, 1)} N`) : ''}
+    ${T ? tile('Window', `${T.trades} trades`, `${n(T.buy_near, 1)} N in / ${n(T.sell_near, 1)} N out`) : ''}</div>`;
+  if (T?.top_sellers?.length) h += `<div class="small"><b>Biggest sellers in the window:</b> ${T.top_sellers.slice(0, 5).map((y) => `${esc(y.account)} ${n(y.sell_near, 1)} N${y.group ? ` (${esc(y.group.label || y.group.id)})` : ''}`).join(', ')}</div>`;
+  if (T?.top_buyers?.length) h += `<div class="small"><b>Biggest buyers in the window:</b> ${T.top_buyers.slice(0, 5).map((y) => `${esc(y.account)} ${n(y.buy_near, 1)} N${y.group ? ` (${esc(y.group.label || y.group.id)})` : ''}`).join(', ')}</div>`;
+  if (S.flags?.length) h += `<div class="small"><b>Risk notes then:</b></div><ul class="flags small">${S.flags.map((f) => `<li><span class="v ${FLAGCLS[f.level]}">${f.level}</span> ${esc(f.text)}</li>`).join('')}</ul>`;
+  if (S.holders?.rows?.length) h += `<div class="small"><b>Largest holders then:</b> ${S.holders.rows.slice(0, 6).map((y) => `${esc(y.account)} ${pc(y.supply_share)}`).join(', ')}</div>`;
+  box.innerHTML = h; btn.textContent = 'Hide figures';
 }
 let anaTimer = null;
 async function anaAsk(id) {

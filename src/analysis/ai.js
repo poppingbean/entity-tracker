@@ -1,14 +1,14 @@
 // The AI analyst's written assessment of a token analysis (Claude Sonnet 5.5 served by NEAR AI). Run only when someone asks for it.
 // The first run writes the assessment from the whole analysis; every later run updates it from what changed since the previous run
 // (new trades, price, the creator, holders, early buyers and groups selling, risk flags), the way the hand-written reports add
-// "Update" sections instead of starting over. Stored in `analyses`: `ai` (latest, with the evidence it was built from) and `ai_history`.
+// "Update" sections instead of starting over. The latest is `ai` in `analyses` (with the evidence it was built from, to diff the next run
+// against); every run is also kept for good in `analysis_runs`, with its evidence and, for an update, what changed since the run before.
 import { col } from '../db.js';
 import { chatJSON } from '../ai/nearai.js';
 import { config } from '../config.js';
 import { tagOf } from '../evaluate/tags.js';
 import { INFRA, groupBrief } from './token.js';
 
-const HISTORY = 20;
 const COMMON = `Tags: win80 / win50 / win30 = profitable in 80 / 50 / 30 %+ of the tokens they bought early, sniper = net profit from a few big wins, loss = lost money overall, unrated = too few tokens.
 Rules: use only the supplied facts and numbers; never invent accounts, amounts or events; shares are fractions (0.05 = 5%); say "linked" for tracker groups and shared funders,
 "proven common control" only when a wallet funded another directly; keep account names exactly as given (shorten 64-hex ids to their first 8 characters + "…").`;
@@ -130,9 +130,8 @@ export async function assessWithAi(analysis) {
     const snapshot = aiPacket(analysis);
     const { json, model } = await ask(SYSTEM, JSON.stringify(snapshot));
     const ai = { ...clean(json), mode: 'initial', model, ts: Date.now(), data_to_ts: analysis.data_to_ts, for_built_ts: analysis.built_ts, snapshot };
-    // an assessment stored before updates existed has no snapshot to compare with: it is kept in the history and this one starts afresh
-    const old = doc?.ai ? (({ snapshot, ...x }) => x)(doc.ai) : null;
-    await col('analyses').updateOne({ _id: analysis.token }, { $set: { ai }, ...(old ? { $push: { ai_history: { $each: [old], $slice: -HISTORY } } } : {}) }, { upsert: true });
+    await col('analyses').updateOne({ _id: analysis.token }, { $set: { ai } }, { upsert: true });
+    await saveRun(analysis.token, ai);
     return ai;
   }
   const { cur, since, material } = await changesSince(analysis, prev);
@@ -140,12 +139,25 @@ export async function assessWithAi(analysis) {
     await col('analyses').updateOne({ _id: analysis.token }, { $set: { 'ai.checked_ts': Date.now(), 'ai.checked_to_ts': analysis.data_to_ts } });
     return { ...prev, checked_ts: Date.now(), unchanged: true };
   }
-  const { snapshot: _s, ...prevText } = prev;
   const now = { age_min: cur.age_min, flows: cur.flows, creator: cur.creator && { balance: cur.creator.balance, balance_share: cur.creator.balance_share, traded: cur.creator.traded }, holders: cur.holders, flags: cur.flags };
   const packet = { previous: { ts: prev.ts, risk_level: prev.risk_level, confidence: prev.confidence, summary: prev.summary, findings: prev.findings, conclusion: prev.conclusion, changes: prev.changes }, since, now };
   const { json, model } = await ask(SYSTEM_UPDATE, JSON.stringify(packet));
   const ai = { ...clean(json), mode: 'update', model, ts: Date.now(), since_ts: prev.ts, since_data_to_ts: prev.data_to_ts, data_to_ts: analysis.data_to_ts, for_built_ts: analysis.built_ts,
     window: { trades: since.trades.trades, buy_near: since.trades.buy_near, sell_near: since.trades.sell_near }, previous_risk: prev.risk_level, snapshot: cur };
-  await col('analyses').updateOne({ _id: analysis.token }, { $set: { ai }, $push: { ai_history: { $each: [prevText], $slice: -HISTORY } } });
+  await col('analyses').updateOne({ _id: analysis.token }, { $set: { ai } });
+  await saveRun(analysis.token, ai, since);
   return ai;
+}
+
+// ---- every run, kept for good
+const runId = (token, ts) => `${token}|${ts}`;
+/** Store one run: the assessment, the evidence it was written from and, for an update, what changed since the previous run. */
+export async function saveRun(token, ai, since = null) {
+  const { checked_ts, checked_to_ts, unchanged, ...x } = ai;
+  await col('analysis_runs').replaceOne({ _id: runId(token, ai.ts) }, { ...x, token, since: since || null }, { upsert: true });
+}
+/** One run with its evidence. */
+export async function getRun(id) {
+  const x = await col('analysis_runs').findOne({ _id: id });
+  return x ? (({ _id, ...y }) => ({ id: _id, ...y }))(x) : null;
 }
