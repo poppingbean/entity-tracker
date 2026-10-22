@@ -8,6 +8,7 @@ import { extractJson } from '../src/ai/nearai.js';
 import { positionPnl } from '../src/sim/portfolio.js';
 import { redact } from '../src/web/redact.js';
 import { normaliseReview } from '../src/ai/review.js';
+import { aiPacket, diffPackets } from '../src/analysis/ai.js';
 
 const MIN = 60e3;
 const T0 = 1_700_000_000_000;
@@ -405,4 +406,36 @@ test('creator network: anchors and how two creators are tied', () => {
   assert.deepEqual(rel({ _id: 'dev4.near', funders: [{ account: 'dev1.near', kind: 'wallet' }] }), ['funded_by_it']);
   assert.deepEqual(rel({ _id: 'boss.near' }), ['funded_it'], 'a creator that funded this one');
   assert.deepEqual(rel({ _id: 'dev5.near', funders: [{ account: 'binance.near', kind: 'hub' }], flow_out: [{ to: 'binance.near', near: 9 }] }), [], 'the same exchange ties nothing');
+});
+
+test('token analysis: public mode drops rule tags from groups; the AI packet shortens 64-hex accounts', () => {
+  const grp = { id: 'c1', size: 3, tag: 'loss', rugger: false, label: null, rule_tag: 'insider' };
+  const hex = 'ab'.repeat(32);
+  const a = { token: 't', symbol: 'T', age_min: 10, launch: {}, creator: { account: hex, funders: [{ account: hex, kind: 'wallet' }], group: grp }, flows: {},
+    early: { wallets: 1, near_in: 5, rows: [{ wallet: hex, rank: 1, group: grp, notes: [] }] }, groups: [{ ...grp, members: [hex] }], shared_funders: [{ funder: hex, kind: 'hub', wallets: [hex, 'b.near'] }],
+    repeat: [{ wallet: 'r.near', group: grp }], sellers: [{ account: 's.near', group: grp }], holders: { top10_share: 0.4, rows: [{ account: 'h.near', group: grp }] }, flags: [] };
+  const pub = redact('/api/analysis', a);
+  assert.ok(!JSON.stringify(pub).includes('insider'));
+  assert.equal(pub.groups[0].id, 'c1'); assert.equal(pub.early.rows[0].group.tag, 'loss');
+  const p = aiPacket(a);
+  assert.equal(p.creator.account, 'abababab…'); assert.equal(p.early.first[0].wallet, 'abababab…'); assert.deepEqual(p.shared_funders[0].wallets, ['abababab…', 'b.near']);
+});
+
+test('AI analyst updates: diffPackets reports only what moved since the previous snapshot', () => {
+  const prev = { flows: { now_multiple: 50, peak_multiple: 119 }, creator: { balance: 100, balance_share: 0.05, traded: { sell_near: 0 } },
+    holders: { top10_share: 0.2, rows: [{ account: 'a.near', supply_share: 0.03 }, { account: 'b.near', supply_share: 0.02 }] },
+    early: { first: [{ wallet: 'e1.near', rank: 1, sold_share_now: 0.1 }, { wallet: 'e2.near', rank: 2, sold_share_now: 0.5 }] },
+    groups: [{ id: 'g1', realized_now: 10, unrealized_now: 50 }], flags: [{ level: 'info', text: 'old flag' }, { level: 'info', text: 'kept' }] };
+  const cur = { flows: { now_multiple: 30, peak_multiple: 119 }, creator: { balance: 0, balance_share: 0, traded: { sell_near: 40 } },
+    holders: { top10_share: 0.18, rows: [{ account: 'a.near', supply_share: 0.01 }, { account: 'c.near', supply_share: 0.04, tag: 'loss' }] },
+    early: { first: [{ wallet: 'e1.near', rank: 1, sold_share_now: 0.9 }, { wallet: 'e2.near', rank: 2, sold_share_now: 0.52 }] },
+    groups: [{ id: 'g1', realized_now: 60, unrealized_now: 5 }, { id: 'g2', realized_now: 0 }], flags: [{ level: 'medium', text: 'new flag' }, { level: 'info', text: 'kept' }] };
+  const d = diffPackets(prev, cur);
+  assert.deepEqual(d.price.now_multiple, { was: 50, now: 30 });
+  assert.deepEqual(d.creator.now, { balance: 0, balance_share: 0, sold_near: 40 });
+  assert.deepEqual(d.holders.entered.map((x) => x.account), ['c.near']); assert.deepEqual(d.holders.left.map((x) => x.account), ['b.near']); assert.deepEqual(d.holders.moved.map((x) => x.account), ['a.near']);
+  assert.deepEqual(d.early_sold.map((x) => x.wallet), ['e1.near'], 'a 2-point move is noise');
+  assert.deepEqual(d.groups.map((x) => x.id), ['g1', 'g2']); assert.equal(d.groups[1].new_here, true);
+  assert.deepEqual(d.flags.added.map((f) => f.text), ['new flag']); assert.deepEqual(d.flags.removed.map((f) => f.text), ['old flag']);
+  assert.equal(diffPackets(cur, cur).creator, undefined, 'an unchanged creator is left out');
 });

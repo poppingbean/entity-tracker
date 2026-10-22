@@ -64,6 +64,12 @@ export function redact(path, d) {
       if (x.cluster) { const { rule, score, ...c } = x.cluster; x.cluster = c; }
       return x;
     }
+    case '/api/analysis': {
+      const g = (x) => (x ? { ...x, rule_tag: null } : x);
+      const rows = (list) => (list || []).map((x) => (x?.group ? { ...x, group: g(x.group) } : x));
+      return { ...d, creator: d.creator && { ...d.creator, group: g(d.creator.group) }, groups: (d.groups || []).map(g), early: d.early && { ...d.early, rows: rows(d.early.rows) },
+        repeat: rows(d.repeat), sellers: rows(d.sellers), holders: d.holders && { ...d.holders, rows: rows(d.holders.rows) } };
+    }
     case '/api/scans': return { ...d, rows: failedOnly(d.rows) };
     case '/api/scan': { const { features, failed, decision, ai, ...x } = d; return { ...x, failed: gateIds(failed), ai: aiBrief(ai) }; }
     case '/api/sim/position': return { ...d, scans: failedOnly(d.scans) };

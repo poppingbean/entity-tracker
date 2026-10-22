@@ -13,12 +13,23 @@ import { startFetch, jobStatus } from '../collect/ondemand.js';
 import { redact } from './redact.js';
 import { creatorIndex, creatorBrief, creatorFlag, creatorNetwork } from '../evaluate/creators.js';
 import { auditNearContract, getCachedAudit, validNearAddress, summarizeAudit } from '../audit/service.js';
+import { TAGS, tagOf, ruggerGroup, ruggerWallet } from '../evaluate/tags.js';
+import { getAnalysis } from '../analysis/token.js';
+import { assessWithAi, getRun } from '../analysis/ai.js';
 
 const page = fs.readFileSync(new URL('./index.html', import.meta.url), 'utf8');
 // pages of the single-page UI; each is served the same HTML and the browser routes with the History API (no # in URLs)
-const UI_VIEWS = new Set(['creators', 'explore', 'audit', 'monitor', 'sim', 'scans', 'overview', 'signals', 'groups', 'entities', 'wallets', 'tokens', 'logs', 'config']);
+const UI_VIEWS = new Set(['analysis', 'creators', 'explore', 'audit', 'monitor', 'sim', 'scans', 'overview', 'signals', 'groups', 'entities', 'wallets', 'tokens', 'logs', 'config']);
 const HIDDEN_PUBLIC = new Set(['/api/logs', '/api/config']);
 const auditHits = new Map(); // ip -> [timestamps]
+const analysisHits = new Map(), aiHits = new Map();
+const aiRunning = new Map(); // token -> { started, error }
+/** At most `max` calls per IP in 10 minutes. */
+function limited(map, ip, max) {
+  const now = Date.now(), list = (map.get(ip) || []).filter((t) => now - t < 10 * 60e3);
+  if (list.length >= max) { map.set(ip, list); return true; }
+  list.push(now); map.set(ip, list); return false;
+}
 const fetchHits = new Map();
 function fetchAllowed(ip) {
   const now = Date.now(), list = (fetchHits.get(ip) || []).filter((t) => now - t < 10 * 60e3);
@@ -34,15 +45,6 @@ const clamp = (v, d, max) => Math.min(max, Math.max(1, Number(v) || d));
 const rx = (s) => ({ $regex: String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), $options: 'i' });
 const strip = ({ _id, ...r }) => ({ id: _id, ...r });
 
-// tags: loss = lost money overall; net profit: win80 / win50 / win30 = profitable in 80 / 50 / 30 %+ of the tokens bought early, sniper = under
-// 30 % (a few big wins); unrated = too few tokens judged yet
-const TAGS = ['win80', 'win50', 'win30', 'sniper', 'loss', 'unrated'];
-const tagOf = (t) => (TAGS.includes(t) ? t : 'unrated');
-// rugger wallets: a token creator that rugged or is blacklisted, or a member of a group that contains one (creator-rug) or that the rules
-// call rug farmers. Independent of the win / loss tag: a rugger can make money.
-const RUG_TAGS = new Set(['creator-rug', 'rug-farmer']);
-const ruggerGroup = (c) => !!c && (c.creator_flag === 'rugger' || c.creator_flag === 'blacklisted' || (c.rule?.tags || []).some((t) => RUG_TAGS.has(t)));
-const ruggerWallet = (w, c) => !!(w?.creator && (w.creator.rugged > 0 || w.creator.blacklisted)) || ruggerGroup(c);
 /** For each token: how its early NEAR splits across win-rate tags (a wallet counts with its group's tag, or its own when it has no group), plus the groups involved. */
 async function earlyMix(tokenIds) {
   const out = new Map();
@@ -387,6 +389,36 @@ const routes = {
     const toks = await col('tokens').find({ creator: id }, { projection: { symbol: 1, launchpad: 1, live_ts: 1, status: 1, 'outcome.rugged': 1, 'outcome.rug_kinds': 1, 'outcome.peak_multiple': 1, 'outcome.last_multiple': 1, 'ledger.last_multiple': 1, 'outcome.creator_sold': 1, 'outcome.creator_sell_near': 1, 'rug.reason': 1 } }).sort({ live_ts: -1 }).limit(100).toArray();
     return { id, launches: c.launches, rugged: c.rugged, rug_rate: c.rug_rate, blacklisted: c.blacklisted, flag: creatorFlag(c), wallet: w ? { cluster_id: w.cluster_id ?? null, cluster_tag: w.cluster_tag ?? null, tag: w.tag ?? null, stats: w.stats || null, is_early: !!w.is_early } : null,
       groups: groups.map((g) => ({ id: g._id, tag: g.tag, size: g.size, label: g.ai?.label || g.rule?.tags?.[0] || null, role: g.creators?.[0]?.role || null, depth: g.creators?.[0]?.depth ?? null })), tokens: toks.map(strip), network: await creatorNetwork(id).catch(() => null) };
+  },
+
+  // ------------------------------------------------------------ on-chain analysis of one token (cached; NEAR AI assessment on request)
+  '/api/analysis': async (u, req) => {
+    const id = (u.searchParams.get('id') || '').trim();
+    if (!validNearAddress(id)) return { error: 'invalid NEAR account id' };
+    const refresh = u.searchParams.get('refresh') === '1' && !limited(analysisHits, req.socket.remoteAddress || 'ip', 6);
+    const a = await getAnalysis(id, { refresh });
+    if (!a) return { error: 'not found' };
+    const job = aiRunning.get(id);
+    return { ...a, ai_enabled: aiEnabled(), ai_job: job ? { running: !job.error && !job.unchanged, error: job.error || null, unchanged: !!job.unchanged, started: job.started } : null };
+  },
+  /** One earlier AI analyst run, with the figures it was written from and what changed since the run before. */
+  '/api/analysis-run': async (u) => (await getRun(u.searchParams.get('id') || '')) || { error: 'not found' },
+  '/api/analysis-ai': async (u, req) => {
+    const id = (u.searchParams.get('id') || '').trim();
+    if (!validNearAddress(id)) return { error: 'invalid NEAR account id' };
+    if (!aiEnabled()) return { error: 'NEAR AI is not configured' };
+    const job = aiRunning.get(id);
+    if (job && !job.error && !job.unchanged) return { running: true, started: job.started };
+    if (limited(aiHits, req.socket.remoteAddress || 'ip', 5)) return { error: 'too many AI requests, try again in a few minutes' };
+    // run only on request; every run rebuilds the analysis from the latest data, then writes the first assessment or updates the last one
+    // with what changed since it (no model call when nothing did)
+    const started = Date.now();
+    aiRunning.set(id, { started });
+    getAnalysis(id, { refresh: true }).then((a) => { if (!a) throw new Error('not found'); return assessWithAi(a); })
+      .then((ai) => (ai.unchanged ? aiRunning.set(id, { started, unchanged: true, done: Date.now() }) : aiRunning.delete(id)))
+      .catch((e) => aiRunning.set(id, { started, error: e.message }))
+      .finally(() => setTimeout(() => { if (aiRunning.get(id)?.started === started) aiRunning.delete(id); }, 10 * 60e3));
+    return { running: true, started };
   },
 
   '/api/signals': async (u) => ({ rows: await buildSignals(clamp(u.searchParams.get('hours'), 72, 720), 60) }),

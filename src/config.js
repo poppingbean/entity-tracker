@@ -14,6 +14,9 @@ export const config = {
     baseUrl: (process.env.NEAR_AI_BASE_URL || 'https://cloud-api.near.ai/v1').replace(/\/+$/, ''),
     model: process.env.NEAR_AI_MODEL || 'z-ai/glm-5.3-flash',
     timeoutMs: num(process.env.NEAR_AI_TIMEOUT_SECONDS, 120) * 1000,
+    // token analysis write-ups: Claude Sonnet 5.5 served by NEAR AI (group reviews keep `model`); streamed, so a long answer is not cut at 300 s
+    analysisModel: process.env.NEAR_AI_ANALYSIS_MODEL || 'anthropic/claude-sonnet-5-5',
+    analysisTimeoutMs: num(process.env.NEAR_AI_ANALYSIS_TIMEOUT_SECONDS, 600) * 1000,
     maxTokens: num(process.env.NEAR_AI_MAX_TOKENS, 4000),
   },
 
