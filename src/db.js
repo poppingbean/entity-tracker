@@ -21,7 +21,7 @@ async function ensureIndexes() {
   const ix = (c, spec, opts) => db.collection(c).createIndex(spec, opts).catch(() => {});
   await Promise.all([
     ix('tokens', { live_ts: -1 }), ix('tokens', { status: 1, live_ts: 1 }), ix('tokens', { status: 1, ledger_next_ts: 1 }), ix('tokens', { launchpad: 1 }), ix('tokens', { symbol: 1 }),
-    ix('trades', { token: 1, ts: 1 }), ix('analysis_runs', { token: 1, ts: -1 }), ix('trades', { trader: 1 }),
+    ix('trades', { token: 1, ts: 1 }), ix('trades', { ts: -1 }), ix('analysis_runs', { token: 1, ts: -1 }), ix('trades', { trader: 1 }),
     ix('entries', { token: 1, rank: 1 }), ix('entries', { wallet: 1 }), ix('entries', { first_buy_ts: -1 }),
     ix('wallets', { cluster_id: 1 }), ix('wallets', { funder: 1 }), ix('wallets', { is_creator: 1 }), ix('wallets', { 'funders.account': 1 }), ix('wallets', { 'chain.account': 1 }), ix('wallets', { 'flow_out.to': 1 }), ix('wallets', { profiled: 1 }), ix('wallets', { score: -1 }),
     ix('edges', { from: 1 }), ix('edges', { to: 1 }), ix('edges', { type: 1 }),

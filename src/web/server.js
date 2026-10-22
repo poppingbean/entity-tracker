@@ -91,9 +91,20 @@ async function buildSignals(hours = 72, limit = 60) {
 /** The part of a creator's network a token page shows: its first real funder and what the creators tied to it did. */
 const netBrief = (x) => (x?.profiled ? { profiled: true, funder: x.funders.find((f) => f.link) || x.funders[0] || null, network: x.network, siblings: x.siblings.slice(0, 8).map((s) => ({ account: s.account, launches: s.launches, rugged: s.rugged, blacklisted: s.blacklisted, relations: s.relations.slice(0, 2) })) } : x ? { profiled: false } : null);
 
+/** Trading volume over the last 24 h per token (NEAR bought + sold, trades, distinct traders), largest first, from the stored trades. */
+async function volume24(tokenIds = null, limit = 0) {
+  return col('trades').aggregate([
+    { $match: { ts: { $gt: Date.now() - 24 * 3600e3 }, ...(tokenIds ? { token: { $in: tokenIds } } : {}) } },
+    { $group: { _id: '$token', near: { $sum: '$near' }, buy_near: { $sum: { $cond: ['$buy', '$near', 0] } }, sell_near: { $sum: { $cond: ['$buy', 0, '$near'] } }, trades: { $sum: 1 }, traders: { $addToSet: '$trader' } } },
+    { $project: { near: 1, buy_near: 1, sell_near: 1, trades: 1, traders: { $size: '$traders' } } },
+    { $sort: { near: -1 } }, ...(limit ? [{ $limit: limit }] : []),
+  ]).toArray();
+}
+const volBrief = (v) => (v ? { near: v.near, buy_near: v.buy_near, sell_near: v.sell_near, trades: v.trades, traders: v.traders } : null);
+
 const routes = {
   '/api/overview': async () => {
-    const [tokStatus, clusterTag, wallets, profiled, entries, worker, latest, topWin, topLoss, tokens, rugged, netWallets, blacklisted, groupsWithCreators] = await Promise.all([
+    const [tokStatus, clusterTag, wallets, profiled, entries, worker, latest, topWin, topLoss, tokens, rugged, netWallets, blacklisted, groupsWithCreators, vol] = await Promise.all([
       col('tokens').aggregate([{ $group: { _id: '$status', n: { $sum: 1 } } }]).toArray(),
       col('clusters').aggregate([{ $group: { _id: '$tag', n: { $sum: 1 }, wallets: { $sum: '$size' } } }]).toArray(),
       col('wallets').countDocuments({ is_early: true }), col('wallets').countDocuments({ is_early: true, profiled: true }), col('entries').estimatedDocumentCount(),
@@ -102,10 +113,13 @@ const routes = {
       col('clusters').find({ tag: 'loss' }, { projection: { tag: 1, size: 1, score: 1, 'metrics.tokens_n': 1, 'metrics.profit_rate': 1, 'metrics.pnl_near': 1, 'metrics.rug_share': 1, 'rule.tags': 1, 'ai.label': 1 } }).sort({ size: -1, 'metrics.pnl_near': 1 }).limit(5).toArray(),
       col('tokens').estimatedDocumentCount(), col('tokens').countDocuments({ 'outcome.rugged': true }), col('wallets').countDocuments({ net: true, profiled: true }),
       col('blacklist').estimatedDocumentCount(), col('clusters').countDocuments({ creator_flag: { $in: ['blacklisted', 'rugger'] } }),
+      volume24(null, 10),
     ]);
+    const volToks = new Map((await col('tokens').find({ _id: { $in: vol.map((v) => v._id) } }, { projection: { symbol: 1, launchpad: 1, live_ts: 1, 'outcome.rugged': 1, 'outcome.last_multiple': 1, 'ledger.last_multiple': 1 } }).toArray()).map((t) => [t._id, t]));
+    const topVolume = vol.filter((v) => volToks.has(v._id)).map((v) => { const t = volToks.get(v._id); return { id: v._id, symbol: t.symbol, launchpad: t.launchpad, live_ts: t.live_ts, rugged: !!t.outcome?.rugged, now_multiple: t.ledger?.last_multiple ?? t.outcome?.last_multiple ?? null, vol24: volBrief(v) }; });
     return {
       now: Date.now(), tokens, tokenStatus: tokStatus.map((r) => ({ status: r._id, n: r.n })), clusterTag: clusterTag.map((r) => ({ tag: tagOf(r._id), n: r.n, wallets: r.wallets })), rugged, netWallets, blacklisted, groupsWithCreators,
-      wallets, profiled, entries, worker, latest: latest.map(strip), topWin: topWin.map(strip), topLoss: topLoss.map(strip),
+      wallets, profiled, entries, worker, latest: latest.map(strip), topWin: topWin.map(strip), topLoss: topLoss.map(strip), topVolume,
       ai: { enabled: aiEnabled(), model: config.ai.model, ...(worker?.ai || {}) }, db: config.mongo.dbName,
     };
   },
@@ -324,10 +338,25 @@ const routes = {
     else if (tab === 'bought') f['scan.bought'] = true;
     else if (tab === 'rugged') f['outcome.rugged'] = true;
     const limit = clamp(u.searchParams.get('limit'), 50, 200), offset = Math.max(0, Number(u.searchParams.get('offset')) || 0);
-    const [total, rows] = await Promise.all([col('tokens').countDocuments(f), col('tokens').find(f, { projection: { pool: 0 } }).sort({ live_ts: -1 }).skip(offset).limit(limit).toArray()]);
+    let total, rows, vmap;
+    if (tab === 'volume') {
+      // highest trading volume over the last 24 h: rank by volume, then apply the other filters
+      const vol = await volume24();
+      vmap = new Map(vol.map((v) => [v._id, v]));
+      const order = new Map(vol.map((v, i) => [v._id, i]));
+      const all = await col('tokens').find({ ...f, _id: { $in: vol.map((v) => v._id) } }, { projection: { _id: 1 } }).toArray();
+      const ids = all.map((t) => t._id).sort((a, b) => order.get(a) - order.get(b));
+      total = ids.length;
+      const page = ids.slice(offset, offset + limit);
+      const docs = new Map((await col('tokens').find({ _id: { $in: page } }, { projection: { pool: 0 } }).toArray()).map((t) => [t._id, t]));
+      rows = page.map((id) => docs.get(id)).filter(Boolean);
+    } else {
+      [total, rows] = await Promise.all([col('tokens').countDocuments(f), col('tokens').find(f, { projection: { pool: 0 } }).sort({ live_ts: -1 }).skip(offset).limit(limit).toArray()]);
+      vmap = new Map((await volume24(rows.map((t) => t._id))).map((v) => [v._id, v]));
+    }
     const mix = await earlyMix(rows.map((t) => t._id));
     const cr = await creatorIndex(rows.map((t) => t.creator).filter(Boolean));
-    return { total, rows: rows.map((t) => { const m = mix.get(t._id); return { ...strip(t), creator_risk: creatorBrief(cr.get(t.creator)), mix: Object.fromEntries(TAGS.map((v) => [v, m[v]])), rugger: m.rugger, groups: m.groups.filter((g) => g.tag !== 'unrated').slice(0, 3) }; }) };
+    return { total, rows: rows.map((t) => { const m = mix.get(t._id); return { ...strip(t), vol24: volBrief(vmap.get(t._id)), creator_risk: creatorBrief(cr.get(t.creator)), mix: Object.fromEntries(TAGS.map((v) => [v, m[v]])), rugger: m.rugger, groups: m.groups.filter((g) => g.tag !== 'unrated').slice(0, 3) }; }) };
   },
 
   '/api/token': async (u) => {
