@@ -389,6 +389,8 @@ views.explore = async () => {
     <div class="legend">${MIXV.map(([v, l]) => `<span><span class="lg-dot ${v}"></span>${l}</span>`).join('')}<span>bar = share of early NEAR</span></div></div>
   <div class="grid2"><div class="card"><div class="head"><h2>Best groups <span class="muted">win80 / win50</span></h2>${ilink('/groups', 'All groups →')}</div>${groupMini(o.topWin, 'no win80 / win50 groups yet')}</div>
     <div class="card"><div class="head"><h2>Largest loss groups</h2>${ilink('/groups', 'All groups →')}</div>${groupMini(o.topLoss, 'no loss groups yet')}</div></div>
+  <div class="card"><div class="head"><h2>Highest trading volume <span class="muted">last 24 h</span></h2><a href="/tokens" onclick="ST.tokens.tab='volume';ST.tokens.offset=0;return navA(event,this)">All by volume →</a></div><table><tr><th>Token</th><th>Pad</th><th>Live</th><th class="num">Volume</th><th class="num">Bought</th><th class="num">Sold</th><th class="num">Trades</th><th class="num">Traders</th><th class="num">Now</th><th>Rug</th></tr>
+    ${(o.topVolume || []).map((t) => `<tr ${row(P.tok(t.id))}><td>${tokCell(t.id, t.symbol, t.launchpad)}</td><td>${esc(t.launchpad)}</td><td>${since(t.live_ts)}</td><td class="num b">${n(t.vol24.near, 0)} N</td><td class="num g">${n(t.vol24.buy_near, 0)}</td><td class="num r">${n(t.vol24.sell_near, 0)}</td><td class="num">${t.vol24.trades}</td><td class="num">${t.vol24.traders}</td><td class="num">${xm(t.now_multiple)}</td><td class="${t.rugged ? 'r' : 'muted'}">${t.rugged ? 'RUG' : '–'}</td></tr>`).join('') || empty(10, 'no trades in the last 24 h')}</table></div>
   <div class="card"><div class="head"><h2>Latest launches</h2>${ilink('/tokens', 'Tokens &amp; scanner →')}</div><table><tr><th>Token</th><th>Pad</th><th>Live</th><th>Status</th><th class="num">Early</th><th class="num">Peak</th><th>Rug</th></tr>
     ${o.latest.map((t) => `<tr ${row(P.tok(t.id))}><td>${tokCell(t.id, t.symbol, t.launchpad)}</td><td>${esc(t.launchpad)}</td><td>${since(t.live_ts)}</td><td><span class="chip">${esc(t.status)}</span></td><td class="num">${t.entries_n ?? '–'}</td><td class="num">x${n(t.outcome?.peak_multiple, 1)}</td><td class="${t.outcome?.rugged ? 'r' : 'muted'}">${t.outcome?.rugged ? 'RUG' : '–'}</td></tr>`).join('') || empty(7, 'no launches yet')}</table></div>`;
 };
@@ -443,6 +445,8 @@ const scanState = (t, scanCfg) => {
   const left = minAge - (Date.now() - t.live_ts);
   return left > 0 ? '<span class="b">observing</span>' : '<span class="b">checking…</span>';
 };
+/** Last-24 h trading volume of a token: NEAR bought + sold, with the split, trades and traders on hover. */
+const volCell = (v) => (v ? `<td class="num" title="${esc(`${n(v.buy_near, 1)} N bought / ${n(v.sell_near, 1)} N sold · ${v.trades} trades · ${v.traders} traders`)}">${n(v.near, 0)} N</td>` : '<td class="num muted">–</td>');
 views.tokens = async () => {
   const S = ST.tokens;
   const [j, m] = await Promise.all([get('/api/tokens', { q: S.q, status: S.status, tab: S.tab, launchpad: S.launchpad, limit: 50, offset: S.offset }), get('/api/monitor')]);
@@ -450,16 +454,16 @@ views.tokens = async () => {
   const W = m.window24h;
   return `<div class="card"><div class="tiles">${tile('Tokens tracked', n(m.tokensTotal, 0), `${m.launchesLast3h} in the last 3 h`)}${tile('Launches (24 h)', W.launches)}${tile('Checked', W.scanned)}${tile('Passed the gates', W.passed, null, 'a')}${tile('Bought (simulated)', W.bought, null, 'g')}${tile('Rugged tokens', n(m.ruggedTotal, 0), null, m.ruggedTotal ? 'r' : '')}
     ${m.polls.map((p) => tile(esc(p.launchpad), p.ts ? ago(m.now - p.ts) + ' ago' : '–', p.ok === false ? esc(short(p.error || 'failed', 30)) : 'last poll ok', p.ok === false ? 'r' : '')).join('')}</div></div>
-  <div class="card"><div class="bar">${seg('tokens', 'tab', [['', 'All'], ['new', 'New (24 h)'], ['checked', 'Checked'], ['passed', 'Passed gates'], ['bought', 'Bought (sim)'], ['rugged', 'Rugged']])}
+  <div class="card"><div class="bar">${seg('tokens', 'tab', [['', 'All'], ['new', 'New (24 h)'], ['checked', 'Checked'], ['passed', 'Passed gates'], ['bought', 'Bought (sim)'], ['rugged', 'Rugged'], ['volume', 'Top volume (24 h)']])}
     ${qbox('tokens', 'symbol / token / creator')}
     ${sel('tokens', 'launchpad', [['', 'all launchpads'], ['nearlytrade', 'nearly.trade'], ['justhoot', 'justhoot'], ['memecooking', 'meme.cooking'], ['gaypad', 'gaypad'], ['tkn', 'tkn.near'], ['qlyphs', 'qlyphs']])}
     ${sel('tokens', 'status', [['', 'any status'], ...['new', 'entries_open', 'tracking', 'done', 'awaiting_pool'].map((v) => [v, v])])}<span class="spacer"></span>${pager('tokens', j.total)}</div>
-    <table><tr><th>Token</th><th>Pad</th><th>Age</th><th>Early money by tag</th><th>Scanner</th><th class="num">Score</th><th>Gate fail / decision</th><th class="num">Buyers</th><th class="num">Peak</th><th class="num">Now</th><th>Flags</th></tr>
+    <table><tr><th>Token</th><th>Pad</th><th>Age</th><th>Early money by tag</th><th>Scanner</th><th class="num">Score</th><th>Gate fail / decision</th><th class="num">Buyers</th><th class="num">Peak</th><th class="num">Now</th><th class="num" title="NEAR bought + sold in the last 24 h">Vol 24 h</th><th>Flags</th></tr>
     ${j.rows.map((t) => `<tr ${row(P.tok(t.id))}><td>${tokCell(t.id, t.symbol, t.launchpad)}</td><td>${esc(t.launchpad)}</td><td>${ago(m.now - t.live_ts)}</td><td>${mixCell(t.mix, t.rugger)}</td>
       <td>${scanState(t, m.scan)}</td><td class="num ${t.scan?.score == null ? 'muted' : 'b'}">${t.scan?.score ?? '–'}</td>
       <td class="wrap small" style="min-width:170px" title="${esc(failTitle(t.scan))}">${(t.scan?.failed || []).length ? `<span class="r">${esc(t.scan.failed.map(gateText).join(' · '))}</span><br>` : t.scan?.pass === false ? '<span class="r">rule score too low</span><br>' : ''}<span class="muted">${esc(t.scan?.decision || '')}</span>${t.scan?.id ? ' ' + ilink(P.scan(t.scan.id), 'evaluation →') : ''}</td>
-      <td class="num">${t.outcome?.buyers ?? '–'}</td><td class="num">x${n(t.outcome?.peak_multiple, 1)}</td><td class="num">${nowOf(t)}</td>
-      <td>${crChip(t.creator_risk)} ${rugChips(t.outcome)} ${t.outcome?.rugged ? '' : exitChip(t.outcome) || (t.outcome?.creator_sold ? '<span class="v neutral">creator sold</span>' : '')}${!t.outcome?.rugged && !t.outcome?.creator_sold ? `<span class="chip">${esc(t.status)}</span>` : ''}</td></tr>`).join('') || empty(11, 'no tokens')}</table>
+      <td class="num">${t.outcome?.buyers ?? '–'}</td><td class="num">x${n(t.outcome?.peak_multiple, 1)}</td><td class="num">${nowOf(t)}</td>${volCell(t.vol24)}
+      <td>${crChip(t.creator_risk)} ${rugChips(t.outcome)} ${t.outcome?.rugged ? '' : exitChip(t.outcome) || (t.outcome?.creator_sold ? '<span class="v neutral">creator sold</span>' : '')}${!t.outcome?.rugged && !t.outcome?.creator_sold ? `<span class="chip">${esc(t.status)}</span>` : ''}</td></tr>`).join('') || empty(12, 'no tokens')}</table>
     <div class="legend">${MIXV.map(([v, l]) => `<span><span class="lg-dot ${v}"></span>${l}</span>`).join('')}<span>· green / red % = early NEAR from winners (win80 + win50 + sniper) / loss wallets</span></div></div>`;
 };
 
