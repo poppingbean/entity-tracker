@@ -1,5 +1,5 @@
-// Public deployments must not teach a rugger what is checked: thresholds, rule names, reasons, gate ids and scoring weights are removed from
-// every API response before it leaves the server (the data itself - prices, trades, wallets, links on chain, tags, scores - stays).
+// Public deployments must not teach a rugger what is checked: thresholds, rule names, reasons and scoring weights are removed from
+// every API response before it leaves the server; a failed gate keeps only its code (e.g. min_buyers), never the condition to pass it (the data itself - prices, trades, wallets, links on chain, tags, scores - stays).
 // Applied when the dashboard is public (hosted without DASHBOARD_PASSWORD) or HIDE_CRITERIA=1; with a password, or locally, everything is shown.
 
 // group labels fall back to the first rule tag when the AI has not named the group: those are rule names
@@ -16,11 +16,13 @@ export function outcome(o) {
   delete x.rug_kinds; delete x.rug_reason;
   return x;
 }
-/** A scan summary without gate ids and decision text. */
+/** Failed gates as their codes only: the reason text holds the threshold. */
+const gateIds = (failed) => (failed || []).map((g) => ({ id: g?.id ?? g }));
+/** A scan summary with the failed gate codes but without their reasons or the decision text. */
 export function scanBrief(s) {
   if (!s) return s;
   const { failed, decision, ...rest } = s;
-  return { ...rest, ...(failed ? { failed_n: failed.length } : {}), ...(decision !== undefined ? { decision: s.pass === false ? 'did not pass the checks' : s.pass ? 'passed the checks' : null } : {}) };
+  return { ...rest, ...(failed ? { failed: gateIds(failed) } : {}), ...(decision !== undefined ? { decision: s.pass === false ? 'did not pass the checks' : s.pass ? 'passed the checks' : null } : {}) };
 }
 const aiBrief = (a) => (a ? { label: a.label, verdict: a.verdict, confidence: a.confidence, follow_advice: a.follow_advice, action: a.action, risk_level: a.risk_level, quality_score: a.quality_score, model: a.model, ts: a.ts } : a);
 const blBrief = (b) => (b ? { ts: b.ts, token: b.token, symbol: b.symbol } : b);
@@ -36,7 +38,7 @@ const clusterBase = (c) => {
   if (out.creators) out.creators = out.creators.map((x) => ({ ...x, blacklisted: x.blacklisted ? { ts: x.blacklisted.ts, token: x.blacklisted.token, symbol: x.blacklisted.symbol } : null, tokens: tokensBrief(x.tokens) }));
   return out;
 };
-const failedOnly = (rows) => (rows || []).map((s) => { const { failed, decision, features, ...r } = s; return { ...r, ai: aiBrief(r.ai) }; });
+const failedOnly = (rows) => (rows || []).map((s) => { const { failed, decision, features, ...r } = s; return { ...r, failed: gateIds(failed), ai: aiBrief(r.ai) }; });
 
 /** Remove the criteria from the JSON a route returned. `path` is the API path (u.pathname). Returns the data to send. */
 export function redact(path, d) {
@@ -63,7 +65,7 @@ export function redact(path, d) {
       return x;
     }
     case '/api/scans': return { ...d, rows: failedOnly(d.rows) };
-    case '/api/scan': { const { features, failed, decision, ai, ...x } = d; return { ...x, failed_n: (failed || []).length, ai: aiBrief(ai) }; }
+    case '/api/scan': { const { features, failed, decision, ai, ...x } = d; return { ...x, failed: gateIds(failed), ai: aiBrief(ai) }; }
     case '/api/sim/position': return { ...d, scans: failedOnly(d.scans) };
     case '/api/audit': {
       const hits = (f) => (f || []).filter((x) => x.hit).map(({ weight, ...r }) => r);

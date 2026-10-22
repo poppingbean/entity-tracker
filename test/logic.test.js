@@ -337,12 +337,15 @@ test('rugs: creator exit (80 %+ of the dev buy sold in the first hour) with the 
   assert.equal(buildOutcome(t0, small, T0 + 20 * MIN, { ...lcfg, creatorSellRugNear: 5 }).rugged, false);
 });
 
-test('public mode: thresholds, rule names, reasons and gate ids are removed from API responses', () => {
+test('public mode: thresholds, rule names and reasons are removed from API responses; failed gates keep only their code', () => {
   const tok = redact('/api/token', { id: 't', rug: { flagged: true, reason: 'creator sold at launch' }, outcome: { rugged: true, rug_kinds: ['creator_exit'], rug_reason: 'x', creator_exit: { share: 0.99, minutes: 3 }, peak_multiple: 2 },
     scan: { score: 70, pass: false, failed: ['min_mcap', 'min_buyers'], decision: 'rules failed: min_mcap' }, audit: { available: true, findings: [{ key: 'fullAccessKeyExists', weight: 35, detail: '1 key' }] },
     creator_info: { launches: 3, rugged: 1, blacklisted: { ts: 1, reason: 'creator balance fell 100% while we held', source: 'scanner', token: 'a', symbol: 'A' }, tokens: [{ id: 'a', kinds: ['flagged'] }] } });
   assert.equal(tok.rug, undefined); assert.equal(tok.outcome.rug_kinds, undefined); assert.equal(tok.outcome.rug_reason, undefined); assert.equal(tok.outcome.creator_exit, true); assert.equal(tok.outcome.rugged, true); assert.equal(tok.outcome.peak_multiple, 2);
-  assert.equal(tok.scan.failed, undefined); assert.equal(tok.scan.failed_n, 2); assert.ok(!/min_mcap/.test(JSON.stringify(tok)));
+  assert.deepEqual(tok.scan.failed, [{ id: 'min_mcap' }, { id: 'min_buyers' }]); assert.equal(tok.scan.decision, 'did not pass the checks');
+  const sc = redact('/api/scan', { id: 's', pass: false, failed: [{ id: 'min_buyers', why: '3 distinct external buyers (< 5)' }], decision: 'rules failed', features: { x: 1 } });
+  assert.deepEqual(sc.failed, [{ id: 'min_buyers' }]); assert.ok(!/< 5|distinct/.test(JSON.stringify(sc))); assert.equal(sc.features, undefined);
+  assert.deepEqual(redact('/api/scans', { rows: [{ id: 's', failed: [{ id: 'tax_ok', why: 'round-trip tax ~12% (> 10%)' }] }] }).rows[0].failed, [{ id: 'tax_ok' }]);
   assert.equal(tok.audit.findings[0].weight, undefined); assert.equal(tok.creator_info.blacklisted.reason, undefined); assert.equal(tok.creator_info.blacklisted.source, undefined); assert.equal(tok.creator_info.tokens[0].kinds, undefined);
   const cl = redact('/api/cluster', { id: 'c', rule: { score: 70, verdict: 'bad', tags: ['insider'] }, links: [{ type: 'cobuy' }, { type: 'deep_link', depth: 3 }], ai: { label: 'L', summary: 'S', reasons: ['r'], red_flags: ['f'], verdict: 'bad' }, metrics: { win_rate: 0.5, fresh_share: 0.9, sync_share: 0.8, creator_linked_share: 0.3 }, history: [{ ts: 1, verdict: 'bad', score: 40, tags: ['x'] }] });
   assert.equal(cl.rule, undefined); assert.equal(cl.links, undefined); assert.equal(cl.links_n, 2); assert.equal(cl.ai.reasons, undefined); assert.equal(cl.ai.label, 'L'); assert.equal(cl.metrics.fresh_share, undefined); assert.equal(cl.metrics.win_rate, 0.5); assert.equal(cl.history[0].tags, undefined);
