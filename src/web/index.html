@@ -395,6 +395,42 @@ views.explore = async () => {
 
 // ================================================================== TOKENS + SCANNER (one page)
 /** Scanner state of a launch: observing / checking / gates fail / pass / bought (simulated). */
+// ---- why a token failed the scanner: a plain explanation per gate. This is what the public dashboard shows: it names the check that
+// failed without its threshold, so a rugger cannot learn the numbers to get past it. (When running locally the server also sends the
+// exact reason, shown under it.)
+const GATE_TEXT = {
+  quote_accepted: 'Its pool is quoted in a token the scanner cannot trade.',
+  standard_contract: "The token contract is not the launchpad's standard code (custom code can hide a honeypot).",
+  lp_locked: 'Liquidity is not locked by the launchpad, so it can be pulled.',
+  min_pool_near: 'Too little NEAR in the pool.',
+  min_mcap: 'Market cap too small.',
+  min_buyers: 'Too few independent wallets had bought it at the time of the check.',
+  creator_not_selling: 'The creator had already sold some of the token.',
+  tax_ok: 'The buy / sell tax is too high.',
+  no_sybil_cluster: 'Too much of the buying came from wallets linked to each other or to the creator.',
+  creator_not_funding_buyers: 'The creator funded some of the buyers.',
+  not_overextended: 'The price had already run up too far since the first trade.',
+  quote_available: 'No tradable quote for the buy size (the pool is too thin).',
+  contract_audit_ok: 'The contract audit found a dangerous finding or a high risk score.',
+  creator_clean_history: 'The creator launched tokens before that were rugged or dumped.',
+  creator_network_clean: 'Other token creators tied to this one by funding or payments have rugged.',
+  bad_groups_not_dominant: 'Wallets from groups judged dangerous made up too much of the early buying.',
+};
+const gateId = (g) => (typeof g === 'string' ? g : g?.id);
+const gateText = (g) => GATE_TEXT[gateId(g)] || String(gateId(g) || 'unknown check').replace(/_/g, ' ');
+/** The reasons a scanner check failed, readable: one line per failed gate, or the low score when every gate passed. */
+function failReasons(s) {
+  if (!s) return '';
+  if (s.stale) return '<p class="muted">Not checked: the token was not checked within its first hour.</p>';
+  if (s.error) return `<p class="r">The check could not run${typeof s.error === 'string' ? ': ' + esc(s.error) : ''}.</p>`;
+  if (s.pass !== false) return '';
+  const failed = s.failed || [];
+  const items = failed.map((g) => `<li><b>${esc(gateText(g))}</b> <span class="chip">${esc(gateId(g))}</span>${g?.why ? `<div class="muted small">${esc(g.why)}</div>` : ''}</li>`);
+  if (!failed.length) items.push(`<li><b>Every gate passed, but the overall rule score${s.score != null ? ` (${esc(s.score)})` : ''} was too low to buy.</b> <span class="chip">score</span></li>`);
+  return `<ul class="flags">${items.join('')}</ul>`;
+}
+const failTitle = (s) => (s?.pass === false ? ((s.failed || []).length ? s.failed.map(gateText).join('\n') : 'every gate passed, but the rule score was too low') : '');
+
 const scanState = (t, scanCfg) => {
   if (t.status === 'skipped_quote') return '<span class="muted">skipped (quote not tradable)</span>';
   if (t.status === 'awaiting_pool') return '<span class="muted">waiting for its pool</span>';
@@ -421,7 +457,7 @@ views.tokens = async () => {
     <table><tr><th>Token</th><th>Pad</th><th>Age</th><th>Early money by tag</th><th>Scanner</th><th class="num">Score</th><th>Gate fail / decision</th><th class="num">Buyers</th><th class="num">Peak</th><th class="num">Now</th><th>Flags</th></tr>
     ${j.rows.map((t) => `<tr ${row(P.tok(t.id))}><td>${tokCell(t.id, t.symbol, t.launchpad)}</td><td>${esc(t.launchpad)}</td><td>${ago(m.now - t.live_ts)}</td><td>${mixCell(t.mix, t.rugger)}</td>
       <td>${scanState(t, m.scan)}</td><td class="num ${t.scan?.score == null ? 'muted' : 'b'}">${t.scan?.score ?? '–'}</td>
-      <td class="wrap small" style="min-width:170px">${(t.scan?.failed || []).length ? `<span class="r">${esc(t.scan.failed.map((g) => g.id || g).join(', '))}</span><br>` : ''}<span class="muted">${esc(t.scan?.decision || '')}</span>${t.scan?.id ? ' ' + ilink(P.scan(t.scan.id), 'evaluation →') : ''}</td>
+      <td class="wrap small" style="min-width:170px" title="${esc(failTitle(t.scan))}">${(t.scan?.failed || []).length ? `<span class="r">${esc(t.scan.failed.map(gateText).join(' · '))}</span><br>` : t.scan?.pass === false ? '<span class="r">rule score too low</span><br>' : ''}<span class="muted">${esc(t.scan?.decision || '')}</span>${t.scan?.id ? ' ' + ilink(P.scan(t.scan.id), 'evaluation →') : ''}</td>
       <td class="num">${t.outcome?.buyers ?? '–'}</td><td class="num">x${n(t.outcome?.peak_multiple, 1)}</td><td class="num">${nowOf(t)}</td>
       <td>${crChip(t.creator_risk)} ${rugChips(t.outcome)} ${t.outcome?.rugged ? '' : exitChip(t.outcome) || (t.outcome?.creator_sold ? '<span class="v neutral">creator sold</span>' : '')}${!t.outcome?.rugged && !t.outcome?.creator_sold ? `<span class="chip">${esc(t.status)}</span>` : ''}</td></tr>`).join('') || empty(11, 'no tokens')}</table>
     <div class="legend">${MIXV.map(([v, l]) => `<span><span class="lg-dot ${v}"></span>${l}</span>`).join('')}<span>· green / red % = early NEAR from winners (win80 + win50 + sniper) / loss wallets</span></div></div>`;
@@ -526,6 +562,11 @@ async function tokenPage(id) {
       <div>${ci.tokens.filter((x) => x.id !== t.id).slice(0, 8).map((x) => `<a class="gchip" href="${esc(P.tok(x.id))}" onclick="return navA(event,this)"><i style="background:${x.rugged ? 'var(--loss)' : 'var(--unknown)'}"></i><span>${esc(x.symbol || short(x.id, 14))}${x.rugged ? ' · rug' : ''}</span></a>`).join('')}</div></div>`;
   }
   const cn = t.creator_network;
+  if (t.scan && (t.scan.score != null || t.scan.stale || t.scan.error)) {
+    const sc = t.scan;
+    h += `<div class="card ${sc.pass === false ? 'err' : ''}"><div class="head"><h2>Scanner check ${sc.bought ? '<span class="v good">bought (simulated)</span>' : sc.pass ? '<span class="v neutral">passed, not bought</span>' : sc.pass === false ? '<span class="v bad">did not pass</span>' : ''}${sc.score != null ? ` <span class="muted">rule score ${esc(sc.score)}</span>` : ''}</h2>${sc.id ? ilink(P.scan(sc.id), 'Full evaluation →') : ''}</div>
+      ${sc.pass === false || sc.stale || sc.error ? failReasons(sc) : `<p class="muted" style="margin-bottom:0">${esc(sc.decision || 'Passed every check.')}</p>`}</div>`;
+  }
   if (t.creator && cn?.profiled) {
     const f = cn.funder, N = cn.network;
     h += `<div class="card ${N.ruggers ? 'warn' : ''}"><div class="head"><h2>Who is behind the creator</h2>${ilink(P.creator(t.creator), 'Creator network →')}</div>
@@ -792,7 +833,7 @@ views.scans = async () => {
     ${qbox('scans', 'symbol / token')}<span class="spacer"></span>${pager('scans', j.total)}</div>
     <table><tr><th>Token</th><th>At</th><th>Kind</th><th class="num">Score</th><th>Gates</th><th>Gate fail</th><th>AI</th><th>Decision</th><th>Trade</th></tr>
     ${j.rows.map((s) => `<tr ${row(P.scan(s.id))}><td>${tokCell(s.token, s.symbol, s.launchpad, 22)}</td><td>${when(s.ts)}</td><td>${esc(s.kind)}${s.kind === 'followup' ? ' +' + s.minutes + 'm' : ''}</td><td class="num b">${s.score}</td><td>${s.pass ? '<span class="v good">pass</span>' : '<span class="v bad">fail</span>'}</td>
-      <td class="r wrap small">${esc((s.failed || []).map((g) => g.id).join(', '))}</td><td>${s.ai ? esc(s.ai.action) + ' ' + n(s.ai.confidence) + ' <span class="muted">' + esc(s.ai.risk_level) + '</span>' : '–'}</td><td class="wrap muted small">${esc(s.decision || '')}</td><td class="${s.trade?.status === 'bought' ? 'g' : 'muted'}">${s.trade ? esc(s.trade.status) + (s.trade.near ? ' ' + s.trade.near + ' N' : '') : ''}</td></tr>`).join('') || empty(9, 'no evaluations yet: tokens are checked a couple of minutes after their pool opens')}</table></div>`;
+      <td class="r wrap small" title="${esc(failTitle(s))}">${esc((s.failed || []).length ? s.failed.map(gateText).join(' · ') : s.pass === false ? 'rule score too low' : '')}</td><td>${s.ai ? esc(s.ai.action) + ' ' + n(s.ai.confidence) + ' <span class="muted">' + esc(s.ai.risk_level) + '</span>' : '–'}</td><td class="wrap muted small">${esc(s.decision || '')}</td><td class="${s.trade?.status === 'bought' ? 'g' : 'muted'}">${s.trade ? esc(s.trade.status) + (s.trade.near ? ' ' + s.trade.near + ' N' : '') : ''}</td></tr>`).join('') || empty(9, 'no evaluations yet: tokens are checked a couple of minutes after their pool opens')}</table></div>`;
 };
 
 async function scanPage(id) {
@@ -801,10 +842,10 @@ async function scanPage(id) {
     <div class="dh-main">${avatar(s.token, s.symbol, 48)}<div><h1>${esc(s.symbol || '')} · ${esc(s.kind)}${s.kind === 'followup' ? ' +' + s.minutes + ' min' : ''} ${s.pass ? '<span class="v good">gates pass</span>' : '<span class="v bad">gates fail</span>'}</h1>
     <div class="meta">${ilink(P.tok(s.token), 'Token page →')}${ext(tokUrl(s.token, s.launchpad), 'Launchpad ↗')}<span>${when(s.ts)}</span><span>score <b class="b">${s.score}</b></span><span>${esc(s.decision || '')}</span></div></div></div>`;
   if (s.trade) h += `<p>Simulated trade: <b class="${s.trade.status === 'bought' ? 'g' : ''}">${esc(s.trade.status)}</b> ${s.trade.near ? s.trade.near + ' N' : ''} ${esc(s.trade.reason || '')}</p>`;
-  if ((s.failed || []).length) h += '<h3>Failed gates</h3><ul class="flags">' + s.failed.map((g) => `<li><span class="r">${esc(g.id)}</span> ${esc(g.why)}</li>`).join('') + '</ul>';
+  if (s.pass === false || s.stale || s.error) h += `<h3>Why it did not pass</h3>${failReasons(s)}`;
   h += '</div>';
   if (ai) h += `<div class="ai"><b>NEAR AI analyst</b> · ${esc(ai.action)} confidence ${n(ai.confidence)} · risk ${esc(ai.risk_level)} · quality ${ai.quality_score ?? '–'}${(ai.reasons || []).length ? '<ul class="flags">' + ai.reasons.map((x) => `<li>${esc(x)}</li>`).join('') + '</ul>' : ''}${(ai.red_flags || []).length ? '<p class="a"><b>Red flags</b></p><ul class="flags">' + ai.red_flags.map((x) => `<li>${esc(x)}</li>`).join('') + '</ul>' : ''}</div>`;
-  else h += '<div class="card muted">No AI review (the gates failed, NEAR_AI_API_KEY is not set, or the call failed).</div>';
+  else h += `<div class="card muted">${s.pass === false ? 'No AI review: the token did not pass the checks above, so the AI analyst was not asked.' : 'No AI review: NEAR AI is off or the call failed.'}</div>`;
   const ig = f.intel?.early_buyer_groups;
   if (ig) {
     h += `<div class="card"><h2>Entity intelligence <span class="muted">early buying by group verdict at the time of the check</span></h2><p class="small"><span class="g">good ${pct(ig.good.share)} (${ig.good.wallets} w)</span> · <span class="r">dangerous ${pct(ig.bad.share)} (${ig.bad.wallets} w)</span> · bots/losers ${pct(ig.bots_losers?.share)} · neutral ${pct(ig.neutral.share)} · unknown ${pct(ig.unknown.share)} · creator's earlier rugs: ${f.intel.creator_prior_rugs_or_dumps}/${f.intel.creator_prior_launches}</p></div>`;
