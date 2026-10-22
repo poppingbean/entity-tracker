@@ -42,7 +42,7 @@ const clean = (j) => ({
 
 /** Ask NEAR AI for an assessment of `analysis` and store it. */
 export async function assessWithAi(analysis) {
-  const { json, model } = await chatJSON({ system: SYSTEM, user: JSON.stringify(aiPacket(analysis)), timeoutMs: config.ai.analysisTimeoutMs, attempts: 2 });
+  const { json, model } = await chatJSON({ system: SYSTEM, user: JSON.stringify(aiPacket(analysis)), model: config.ai.analysisModel, timeoutMs: config.ai.analysisTimeoutMs, attempts: 2, stream: true });
   const ai = { ...clean(json), model, ts: Date.now(), for_built_ts: analysis.built_ts };
   await col('analyses').updateOne({ _id: analysis.token }, { $set: { ai } }, { upsert: true });
   return ai;

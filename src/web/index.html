@@ -953,7 +953,7 @@ function anaAiBody(a) {
   if (ai) return `<div class="card"><div class="head"><h2>NEAR AI assessment <span class="v ${ai.risk_level === 'high' ? 'bad' : ai.risk_level === 'medium' ? 'neutral' : 'good'}">risk ${esc(ai.risk_level)}</span> <span class="muted small">confidence ${n(ai.confidence, 2)} · ${esc(ai.model || '')} · ${since(ai.ts)}</span></h2>${a.ai_enabled ? `<button class="btn" onclick="anaAsk(${esc(JSON.stringify(a.token))},1)">Ask again</button>` : ''}</div>
     <p>${esc(ai.summary)}</p>${ai.findings?.length ? `<ul class="flags">${ai.findings.map((f) => `<li>${esc(f)}</li>`).join('')}</ul>` : ''}<p><b>Conclusion.</b> ${esc(ai.conclusion)}</p>
     <p class="small muted">Written by NEAR AI from the figures on this page; check the tables before relying on it.</p></div>`;
-  if (a.ai_job?.running) return `<div class="card muted">NEAR AI is writing the assessment (started ${since(a.ai_job.started)}; usually 1-3 min) …</div>`;
+  if (a.ai_job?.running) return `<div class="card muted">NEAR AI is writing the assessment (started ${since(a.ai_job.started)}; usually under a minute) …</div>`;
   if (!a.ai_enabled) return '';
   return `<div class="card"><div class="head"><h2>NEAR AI assessment</h2><button class="btn" onclick="anaAsk(${esc(JSON.stringify(a.token))})">Ask NEAR AI</button></div>
     ${a.ai_job?.error ? `<p class="r small">Last attempt failed: ${esc(a.ai_job.error)}</p>` : ''}<p class="muted small">A written summary, key findings and a conclusion from the figures below.</p></div>`;
