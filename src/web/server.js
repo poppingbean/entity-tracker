@@ -19,6 +19,8 @@ import { getAnalysis } from '../analysis/token.js';
 import { assessWithAi, getRun } from '../analysis/ai.js';
 
 const page = fs.readFileSync(new URL('./index.html', import.meta.url), 'utf8');
+// Google Search Console ownership file for app.safe-near.org, served as is at /<name>.html (before the password check, so Google can read it).
+const SITE_VERIFY = { '/google65675d2fcb9ab898.html': fs.readFileSync(new URL('./google65675d2fcb9ab898.html', import.meta.url), 'utf8') };
 // pages of the single-page UI; each is served the same HTML and the browser routes with the History API (no # in URLs)
 const UI_VIEWS = new Set(['analysis', 'creators', 'explore', 'audit', 'monitor', 'sim', 'scans', 'overview', 'signals', 'groups', 'entities', 'wallets', 'tokens', 'logs', 'config']);
 const HIDDEN_PUBLIC = new Set(['/api/logs', '/api/config']);
@@ -489,6 +491,8 @@ function authorized(req) {
 export function startWeb() {
   const server = http.createServer(async (req, res) => {
     try {
+      const verify = req.method === 'GET' && SITE_VERIFY[req.url.split('?')[0]];
+      if (verify) { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end(verify); return; }
       if (exposed() && config.web.password && !authorized(req)) { res.writeHead(401, { 'www-authenticate': 'Basic realm="entity tracker"' }).end('authentication required'); return; }
       const u = new URL(req.url, 'http://localhost');
       if (req.method === 'POST' && u.pathname === '/api/sim/sell') {
