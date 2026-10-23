@@ -342,7 +342,7 @@ test('public mode: thresholds, rule names and reasons are removed from API respo
   const tok = redact('/api/token', { id: 't', rug: { flagged: true, reason: 'creator sold at launch' }, outcome: { rugged: true, rug_kinds: ['creator_exit'], rug_reason: 'x', creator_exit: { share: 0.99, minutes: 3 }, peak_multiple: 2 },
     scan: { score: 70, pass: false, failed: ['min_mcap', 'min_buyers'], decision: 'rules failed: min_mcap' }, audit: { available: true, findings: [{ key: 'fullAccessKeyExists', weight: 35, detail: '1 key' }] },
     creator_info: { launches: 3, rugged: 1, blacklisted: { ts: 1, reason: 'creator balance fell 100% while we held', source: 'scanner', token: 'a', symbol: 'A' }, tokens: [{ id: 'a', kinds: ['flagged'] }] } });
-  assert.equal(tok.rug, undefined); assert.equal(tok.outcome.rug_kinds, undefined); assert.equal(tok.outcome.rug_reason, undefined); assert.equal(tok.outcome.creator_exit, true); assert.equal(tok.outcome.rugged, true); assert.equal(tok.outcome.peak_multiple, 2);
+  assert.deepEqual(tok.rug, { source: 'blacklist' }, 'no internal reason text'); assert.deepEqual(tok.outcome.rug_kinds, ['creator_exit'], 'the kind of rug stays so the page can explain it'); assert.equal(tok.outcome.rug_reason, undefined); assert.ok(!/creator sold at launch|\b0\.99\b/.test(JSON.stringify(tok.outcome))); assert.equal(tok.outcome.creator_exit, true); assert.equal(tok.outcome.rugged, true); assert.equal(tok.outcome.peak_multiple, 2);
   assert.deepEqual(tok.scan.failed, [{ id: 'min_mcap' }, { id: 'min_buyers' }]); assert.equal(tok.scan.decision, 'did not pass the checks');
   const sc = redact('/api/scan', { id: 's', pass: false, failed: [{ id: 'min_buyers', why: '3 distinct external buyers (< 5)' }], decision: 'rules failed', features: { x: 1 } });
   assert.deepEqual(sc.failed, [{ id: 'min_buyers' }]); assert.ok(!/< 5|distinct/.test(JSON.stringify(sc))); assert.equal(sc.features, undefined);
@@ -355,7 +355,7 @@ test('public mode: thresholds, rule names and reasons are removed from API respo
   assert.deepEqual(redact('/api/health', { ok: true }), { ok: true });
 });
 
-test('full ledger: 24 h outcome ignores later trades; the ledger and roi_now follow them', () => {
+test('full ledger: 24 h checkpoints ignore later trades, the rug rules and roi_now do not', () => {
   const lcfg = { minutes: cfg.minutes, rugDrawdown: 0.9 };
   const DAY = 1440;
   const trades = [
@@ -366,8 +366,9 @@ test('full ledger: 24 h outcome ignores later trades; the ledger and roi_now fol
   ];
   const now = T0 + DAY * 6 * MIN;
   const o = buildOutcome(token, trades, now, lcfg);
-  assert.ok(Math.abs(o.last_multiple - 3) < 1e-9, '24 h outcome stops at the last checkpoint');
-  assert.equal(o.rugged, false);
+  assert.ok(Math.abs(o.last_multiple - 3) < 1e-9, '24 h numbers stop at the last checkpoint');
+  assert.equal(o.rugged, true, 'the crash on day 6 counts: rugs are judged on all-time trades'); assert.deepEqual(o.rug_kinds, ['price_crash']);
+  assert.ok(Math.abs(o.rug_basis.drawdown - 0.95) < 1e-9); assert.ok(Math.abs(o.rug_basis.peak_multiple - 10) < 1e-9);
   const L = buildLedger(token, trades, lcfg);
   assert.ok(Math.abs(L.ath_multiple - 10) < 1e-9);
   assert.equal(L.ath_after_cp, true);
@@ -382,15 +383,19 @@ test('full ledger: 24 h outcome ignores later trades; the ledger and roi_now fol
   assert.ok(Math.abs(a.roi_now - (-0.5)) < 1e-9, 'roi_now uses the latest price');
 });
 
-test('creator sold after the first 24 h: the ledger sees it, and a ledger flag reads as creator sold', () => {
+test('creator sold after the first 24 h: a rug on its own (all-time trades); an old ledger flag adds nothing', () => {
   const lcfg = { minutes: cfg.minutes, rugDrawdown: 0.9 };
   const trades = [trade('a', true, 10, 1000, 1), trade('b', true, 30, 1000, 60), trade('creator.near', false, 4, 100, 1440 * 3)];
-  assert.equal(buildOutcome(token, trades, T0 + 1440 * 4 * MIN, lcfg).rugged, false, 'the 24 h outcome cannot see a later sale');
+  const o = buildOutcome(token, trades, T0 + 1440 * 4 * MIN, lcfg);
+  assert.equal(o.rugged, true); assert.deepEqual(o.rug_kinds, ['creator_sold']);
+  assert.equal(o.creator_sold, false, 'the 24 h numbers do not include it'); assert.equal(o.rug_basis.creator_sell_after_24h_near, 4);
+  assert.equal(buildOutcome(token, trades, T0 + 1440 * 4 * MIN, { ...lcfg, creatorSellRugNear: 5 }).rugged, false, 'under CREATOR_SELL_RUG_NEAR');
+  const old = buildOutcome({ ...token, rug: { flagged: true, source: 'ledger', reason: 'creator sold 4.00 N after the first 24 h' } }, trades, T0 + 1440 * 4 * MIN, { ...lcfg, creatorSellRugNear: 5 });
+  assert.equal(old.rugged, false, 'a stale ledger flag does not keep the token rugged');
   const L = buildLedger(token, trades, lcfg);
-  assert.equal(L.creator_sell_near_after_cp, 4); assert.equal(L.creator_first_sell_after_cp_ts, T0 + 1440 * 3 * MIN);
-  const o = buildOutcome({ ...token, rug: { flagged: true, source: 'ledger', reason: 'creator sold 4.00 N after the first 24 h' } }, trades, T0 + 1440 * 4 * MIN, lcfg);
-  assert.equal(o.rugged, true); assert.deepEqual(o.rug_kinds, ['creator_sold']); assert.match(o.rug_reason, /after the first 24 h/);
+  assert.equal(L.creator_sell_near_after_cp, 4);
 });
+
 
 import { creatorAnchors, relateCreators } from '../src/evaluate/creators.js';
 test('creator network: anchors and how two creators are tied', () => {

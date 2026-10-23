@@ -10,6 +10,7 @@ import { recentLogs, info, error } from '../log.js';
 import { aiEnabled, aiStatus } from '../ai/nearai.js';
 import { simSell, ensureAccount, positionPnl } from '../sim/portfolio.js';
 import { startFetch, jobStatus } from '../collect/ondemand.js';
+import { recomputeToken } from '../collect/rugs.js';
 import { redact } from './redact.js';
 import { creatorIndex, creatorBrief, creatorFlag, creatorNetwork } from '../evaluate/creators.js';
 import { auditNearContract, getCachedAudit, validNearAddress, summarizeAudit } from '../audit/service.js';
@@ -30,6 +31,7 @@ function limited(map, ip, max) {
   if (list.length >= max) { map.set(ip, list); return true; }
   list.push(now); map.set(ip, list); return false;
 }
+const reanalyseHits = new Map(); // ip -> [timestamps]: a re-analysis reads only stored trades, but is still a DB-heavy write
 const fetchHits = new Map();
 function fetchAllowed(ip) {
   const now = Date.now(), list = (fetchHits.get(ip) || []).filter((t) => now - t < 10 * 60e3);
@@ -276,6 +278,19 @@ const routes = {
   },
 
   /** Fetch a token the tracker has not seen: find its launch, read trades and early buyers, audit and analyse it (background job). */
+  /** Re-apply the latest rug rules to one token from its stored trades (no chain reads): outcome, rug verdict, early buyers' ROI. */
+  '/api/reanalyse': async (u, req) => {
+    const id = (u.searchParams.get('id') || '').trim().toLowerCase();
+    if (!validNearAddress(id)) return { error: 'invalid NEAR account id' };
+    const t = await col('tokens').findOne({ _id: id });
+    if (!t) return { error: 'not found' };
+    if (limited(reanalyseHits, req.socket.remoteAddress || 'ip', 20)) return { error: 'too many re-analyses, try again in a few minutes' };
+    const n = await recomputeToken(t);
+    if (n == null) return { error: 'no trades stored yet: use Sync now first' };
+    const o = (await col('tokens').findOne({ _id: id }, { projection: { outcome: 1 } }))?.outcome || {};
+    return { ok: true, rugged: !!o.rugged, rug_kinds: o.rug_kinds || [], trades: o.rug_basis?.trades ?? null, was_rugged: !!t.outcome?.rugged };
+  },
+
   '/api/fetch-token': async (u, req) => {
     const id = (u.searchParams.get('id') || '').trim().toLowerCase();
     if (!validNearAddress(id)) return { error: 'invalid NEAR account id' };

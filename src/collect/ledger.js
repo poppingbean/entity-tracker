@@ -24,12 +24,9 @@ export async function followToken(t, { passes = 1 } = {}) {
   const trades = await col('trades').find({ token: t._id }).sort({ ts: 1 }).toArray();
   const now = Date.now();
   const ledger = buildLedger(fresh, trades, cfg.outcome);
-  // a creator sale is a rug whenever it happens: one after the first 24 h flags the token (the 24 h outcome cannot see it)
-  const over = ledger.creator_sell_near_after_cp > (cfg.outcome.creatorSellRugNear ?? 0);
-  const late = over && !fresh.rug?.flagged;
-  const rug = late ? { flagged: true, source: 'ledger', reason: `creator sold ${ledger.creator_sell_near_after_cp.toFixed(2)} N after the first 24 h`, creator: fresh.creator, ts: ledger.creator_first_sell_after_cp_ts } : null;
-  const clear = !over && fresh.rug?.flagged && fresh.rug.source === 'ledger'; // CREATOR_SELL_RUG_NEAR was raised above this creator's later sales
-  const tok = rug ? { ...fresh, rug } : clear ? { ...fresh, rug: null } : fresh;
+  // the rug rules read every stored trade (a creator sale after day 1 is a "creator sold" rug on its own); an old "ledger" flag is dropped
+  const clear = !!(fresh.rug?.flagged && fresh.rug.source === 'ledger');
+  const tok = clear ? { ...fresh, rug: null } : fresh;
   const outcome = buildOutcome(tok, trades, now, cfg.outcome); // also re-applies the current rug rules to tokens finished before they changed
   const entries = buildEntries(tok, trades, now, cfg.entry);
   for (const e of entries) e.token_rugged = outcome.rugged;
@@ -42,9 +39,9 @@ export async function followToken(t, { passes = 1 } = {}) {
   else next = now + (idle > L.quietDays * DAY ? L.quietHours : L.activeHours) * HOUR;
   await col('tokens').updateOne({ _id: t._id }, { $set: {
     ledger: { ...ledger, synced_ts: now, synced_to_ts: caughtUp ? now : lastTs, caught_up: caughtUp, next_ts: next, stopped },
-    ledger_next_ts: next, trades_n: trades.length, outcome, ...(rug ? { rug } : {}),
+    ledger_next_ts: next, trades_n: trades.length, outcome,
   }, ...(clear ? { $unset: { rug: '' } } : {}) });
-  if (rug) info(`RUG ${fresh.symbol || ''} ${t._id}: ${rug.reason}`);
+  if (outcome.rugged && !fresh.outcome?.rugged) info(`RUG ${fresh.symbol || ''} ${t._id}: ${outcome.rug_kinds.join(', ')} (all-time trades)`);
   if (added || caughtUp && !t.ledger?.caught_up) info(`LEDGER ${fresh.symbol || ''} ${t._id}: +${added} trades, ${trades.length} stored${caughtUp ? ', up to date' : ', more to read'}${stopped ? ', following stopped (' + stopped + ')' : ''}`);
   return { added, caughtUp };
 }
