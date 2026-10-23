@@ -22,6 +22,7 @@ export const config = {
   },
 
   rpcUrls: list(process.env.NEAR_RPC_URLS, ['https://rpc.mainnet.fastnear.com', 'https://free.rpc.fastnear.com', 'https://near.lava.build']),
+  httpTimeoutMs: num(process.env.NEAR_HTTP_TIMEOUT_SECONDS, 30) * 1000, // one NEAR RPC / FastNEAR / indexer request; a stalled one is retried
   txIndexerUrl: process.env.FASTNEAR_TX_URL || 'https://tx.main.fastnear.com',
   fastnearApiUrl: process.env.FASTNEAR_API_URL || 'https://api.fastnear.com',
   fastnearApiKey: process.env.FASTNEAR_API_KEY || '',
@@ -56,6 +57,7 @@ export const config = {
     stopDays: num(process.env.LEDGER_STOP_DAYS, 14),          // stop following after this many days without a trade ("Sync now" still reads it)
     perCycle: num(process.env.LEDGER_TOKENS_PER_CYCLE, 4),    // tokens followed per worker cycle (newest launch first)
     rowsPerPass: num(process.env.LEDGER_ROWS_PER_PASS, 1000), // transactions read per token per pass; a long history is read over several passes
+    syncNowMinutes: num(process.env.SYNC_NOW_MAX_MINUTES, 20), // how long "Sync now" reads a token's history; the worker reads the rest
   },
 
   graph: {
