@@ -4,7 +4,7 @@ import { config } from '../config.js';
 import { adapters } from '../launchpads.js';
 import { fetchTxs, newTxHashes, accountRows } from '../near/indexer.js';
 import { view } from '../near/rpc.js';
-import { DCL, QUOTES } from '../near/quotes.js';
+import { DCL, REFV2, WNEAR, QUOTES } from '../near/quotes.js';
 import { info, warn } from '../log.js';
 import { isKnownQuote } from '../near/quotes.js';
 
@@ -33,29 +33,51 @@ export async function saveLaunches(launchpad, txs) {
   return added;
 }
 
+const REF_SWAP = /^Swapped (\d+) ([^\s,]+) for (\d+) ([^\s,]+)/; // "..., total fee N, admin fee N" follows
+/** The Ref v2 pool id a swap in this transaction names for `token` (in an ft_transfer_call message's actions), or null. */
+function refv2PoolId(tx, token) {
+  for (const c of tx.calls) {
+    let msg = null; try { msg = typeof c.args?.msg === 'string' ? JSON.parse(c.args.msg) : null; } catch {}
+    const a = (msg?.actions || []).find((x) => x.pool_id != null && (x.token_in === token || x.token_out === token));
+    if (a) return a.pool_id;
+  }
+  return null;
+}
+
 /**
- * tkn.near tokens get a pool whenever their owner adds liquidity on Ref DCL. For tokens still "awaiting_pool", look through the token's own
- * history for a DCL create_pool / liquidity_added / swap event naming it; the pool opening is the token's live time. Gives up after 7 days.
+ * tkn.near tokens get a pool whenever their owner adds liquidity: on Ref DCL, or on a classic Ref v2 pool against wNEAR (BLACKDRAGON's
+ * pool #4276). Look through the token's own early history for the first DCL create_pool / liquidity_added / swap event or Ref v2 wNEAR
+ * swap naming it; that transaction is the token's live time. Returns true when a pool was found and stored.
  */
+export async function checkTknPool(t, maxRows = 200) {
+  const now = Date.now();
+  const { rows } = await accountRows(t._id, { desc: false, maxRows });
+  let hit = null;
+  for (const tx of await fetchTxs(rows.filter((r) => r.ok).map((r) => r.hash))) {
+    if (tx.failed) continue;
+    const e = tx.events.find((x) => x.executor === DCL && ['create_pool', 'liquidity_added', 'swap'].includes(x.event) && (x.data?.[0]?.pool_id || '').split('|').slice(0, 2).includes(t._id));
+    if (e) { hit = { tx, pool: { dex: 'dcl', poolId: e.data[0].pool_id, quote: e.data[0].pool_id.split('|').slice(0, 2).find((x) => x !== t._id) } }; break; }
+    const swap = tx.logs.some((l) => { const m = l.executor === REFV2 && REF_SWAP.exec(l.text); return m && ((m[2] === t._id && m[4] === WNEAR) || (m[2] === WNEAR && m[4] === t._id)); });
+    if (swap) { hit = { tx, pool: { dex: 'refv2', poolId: refv2PoolId(tx, t._id) ?? QUOTES[t._id]?.bridge?.poolId ?? null, quote: WNEAR } }; break; }
+  }
+  if (!hit) {
+    await col('tokens').updateOne({ _id: t._id }, { $set: { pool_check_ts: now, ...(t.status === 'awaiting_pool' && now - t.created_ts > 7 * 86400e3 ? { status: 'no_pool' } : {}) } });
+    return false;
+  }
+  const { quote } = hit.pool;
+  await col('tokens').updateOne({ _id: t._id }, { $set: { pool: hit.pool, live_ts: hit.tx.ts, live_height: hit.tx.height, live_tx: hit.tx.hash, status: isKnownQuote(quote) ? 'new' : 'skipped_quote', next_process_ts: 0, sync_height: null, pool_check_ts: now } });
+  info(`POOL ${t.launchpad} ${t.symbol || ''} ${t._id}: ${hit.pool.dex} ${hit.pool.poolId ?? ''}`);
+  return true;
+}
+
+/** For tkn.near tokens still "awaiting_pool", look for their pool every 10 minutes; after 7 days without one a token becomes "no_pool". */
 export async function discoverTknPools(limit = 12) {
   const now = Date.now();
   const todo = await col('tokens').find({ status: 'awaiting_pool', $or: [{ pool_check_ts: null }, { pool_check_ts: { $lt: now - 10 * 60e3 } }] }).sort({ pool_check_ts: 1 }).limit(limit).toArray();
   let found = 0;
   for (const t of todo) {
-    try {
-      const { rows } = await accountRows(t._id, { desc: false, maxRows: 80 });
-      let hit = null;
-      for (const tx of await fetchTxs(rows.filter((r) => r.ok).map((r) => r.hash))) {
-        if (tx.failed) continue;
-        const e = tx.events.find((x) => x.executor === DCL && ['create_pool', 'liquidity_added', 'swap'].includes(x.event) && (x.data?.[0]?.pool_id || '').split('|').slice(0, 2).includes(t._id));
-        if (e) { hit = { tx, poolId: e.data[0].pool_id }; break; }
-      }
-      if (hit) {
-        const quote = hit.poolId.split('|').slice(0, 2).find((x) => x !== t._id);
-        await col('tokens').updateOne({ _id: t._id }, { $set: { pool: { dex: 'dcl', poolId: hit.poolId, quote }, live_ts: hit.tx.ts, live_height: hit.tx.height, live_tx: hit.tx.hash, status: isKnownQuote(quote) ? 'new' : 'skipped_quote', next_process_ts: 0, sync_height: null, pool_check_ts: now } });
-        info(`POOL ${t.launchpad} ${t.symbol || ''} ${t._id}: ${hit.poolId}`); found++;
-      } else await col('tokens').updateOne({ _id: t._id }, { $set: { pool_check_ts: now, ...(now - t.created_ts > 7 * 86400e3 ? { status: 'no_pool' } : {}) } });
-    } catch (e) { warn(`pool discovery for ${t._id} failed: ${e.message}`); await col('tokens').updateOne({ _id: t._id }, { $set: { pool_check_ts: now } }); }
+    try { if (await checkTknPool(t)) found++; }
+    catch (e) { warn(`pool discovery for ${t._id} failed: ${e.message}`); await col('tokens').updateOne({ _id: t._id }, { $set: { pool_check_ts: now } }); }
   }
   return found;
 }
