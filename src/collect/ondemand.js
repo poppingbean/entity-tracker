@@ -48,7 +48,7 @@ async function run(id, job) {
   if (t.status === 'awaiting_pool' || t.status === 'no_pool') {
     // a tkn.near token without a known pool: look for it now instead of waiting for the next 10-minute round
     step('looking for its pool');
-    if (!(await checkTknPool(t))) { job.message = 'No pool found for it yet (Ref DCL or a Ref v2 pool against wNEAR); it is checked again every 10 minutes.'; return; }
+    if (!(await checkTknPool(t, { maxRows: 3000 }))) { job.message = 'No pool found for it yet (Ref DCL or a Ref v2 pool against wNEAR); it is checked again every 10 minutes.'; return; }
     t = await col('tokens').findOne({ _id: id });
   }
   if (t.status === 'skipped_quote') { job.message = 'Its pool is quoted in a token that cannot be valued in NEAR, so trades are not read.'; return; }
