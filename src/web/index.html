@@ -369,6 +369,21 @@ const exitChip = (o) => {
   if (x === true) return '<span class="v neutral">creator exit</span>';
   return x && x.share >= 0.8 && !(o.rug_kinds || []).includes('creator_exit') ? `<span class="v neutral" title="sold ${n(x.sold_near, 1)} N of a ${n(x.dev_buy_near, 1)} N dev buy within the first hour; first sale ${x.minutes} min after launch">creator exit · ${x.minutes} min</span>` : '';
 };
+/** Why a token counts as rugged, in plain words with its own on-chain numbers (no rule thresholds: safe on the public dashboard). */
+function rugWhy(o, rug) {
+  const lines = (o.rug_kinds || []).map((k) => {
+    const txt = k === 'price_crash' ? `The price collapsed: it fell ${pct(o.drawdown)} from its peak (x${n(o.peak_multiple, 1)} of launch) to x${n(o.last_multiple, 2)}.`
+      : k === 'creator_dump' ? `The price fell ${pct(o.drawdown)} from its peak while the creator sold ${n(o.creator_sell_near, 2)} N of the token.`
+      : k === 'round_trip' ? `It pumped to x${n(o.peak_multiple, 1)} of its launch price and came back to x${n(o.last_multiple, 2)}: everyone who bought after launch is flat or under.`
+      : k === 'creator_exit' ? `The creator sold ${o.creator_exit && o.creator_exit !== true ? pct(o.creator_exit.share) + ' of' : 'most of'} their dev buy within the first hour${o.creator_exit?.minutes != null ? ` (first sale ${o.creator_exit.minutes} min after launch)` : ''}, and the price is back near launch (x${n(o.last_multiple, 2)}).`
+      : k === 'creator_sold' ? [o.creator_sold ? `The creator sold ${n(o.creator_sell_near, 2)} N of their own token in the first 24 h.` : '', rug?.source === 'ledger' ? `The creator sold after the first 24 h${rug.reason ? ': ' + rug.reason.replace(/^creator sold /, '') : ''}.` : ''].filter(Boolean).join(' ') || 'The creator sold some of their own token.'
+      : k === 'flagged' ? `The creator is on the dev-rug blacklist: their token balance dropped while the token was being held${o.rug_reason ? ` (${o.rug_reason})` : ''}.`
+      : 'Flagged as rugged.';
+    return `<li><b>${esc(rugKind[k] || k)}</b> · ${esc(txt)}</li>`;
+  });
+  if (!lines.length) lines.push(`<li>${rug?.source === 'ledger' ? esc(`The creator sold after the first 24 h${rug.reason ? ': ' + rug.reason.replace(/^creator sold /, '') : ''}.`) : rug?.source === 'blacklist' ? 'The creator is on the dev-rug blacklist: their token balance dropped while the token was being held.' : 'Flagged as rugged. The detailed reason is recomputed on the next sync.'}</li>`);
+  return lines.join('');
+}
 const rugChips = (o) => (o?.rugged ? (o.rug_kinds?.length ? o.rug_kinds : ['rug']).map((k) => `<span class="v bad" title="${esc(o.rug_reason || 'rugged')}">${esc(rugKind[k] || 'rug')}</span>`).join(' ') : '');
 /** A token's latest multiple: today's price once its full ledger is read, otherwise the 24 h one (marked "24h" once that window is over). */
 const xm = (m) => 'x' + n(m, m != null && m < 0.1 ? 3 : m != null && m < 10 ? 2 : 1); // a price multiple: a dead token still reads as x0.004, not x0
@@ -595,8 +610,7 @@ async function tokenPage(id) {
       <p style="margin-bottom:0">${N.creators > 1 ? `<b>${N.creators - 1}</b> other creator(s) tied to it by funding or payments launched ${N.others_launches} tokens, <b class="${N.others_rugged ? 'r' : 'g'}">${N.others_rugged} rugged</b>${N.ruggers ? ` · ${N.ruggers} of those creators rugged` : ''}.` : 'No other token creator is tied to it.'}</p>
       ${cn.siblings.length ? `<div style="margin-top:8px">${cn.siblings.map((s) => `<a class="gchip" href="${esc(P.creator(s.account))}" onclick="return navA(event,this)" title="${esc(s.relations.map((r) => REL[r.type] || r.type).join(', '))}"><i style="background:${s.rugged || s.blacklisted ? 'var(--loss)' : 'var(--unknown)'}"></i><span>${esc(short(s.account, 22))} · ${s.rugged}/${s.launches}</span></a>`).join('')}</div>` : ''}</div>`;
   }
-  if (o.rugged && !(o.rug_kinds || []).length) h += '<div class="card"><h2>Rugged</h2><p>This token is flagged as rugged.</p></div>';
-  else if (o.rugged) h += `<div class="card"><h2>Why it counts as rugged</h2><ul class="flags">${(o.rug_kinds || []).map((k) => `<li><b>${esc(rugKind[k] || k)}</b> ${k === 'creator_exit' ? `the creator sold ${pct(o.creator_exit?.share)} of their dev buy ${o.creator_exit?.minutes} min after launch and the price is x${n(o.last_multiple, 2)} of its launch price at 24 h` : k === 'round_trip' ? `pumped to x${n(o.peak_multiple, 1)} and is back at x${n(o.last_multiple, 1)} of its launch price` : k === 'price_crash' ? `price fell ${pct(o.drawdown)} from its peak (x${n(o.peak_multiple, 1)}) to x${n(o.last_multiple, 1)}` : k === 'creator_dump' ? `price fell ${pct(o.drawdown)} from its peak while the creator sold ${n(o.creator_sell_near, 1)} N` : k === 'creator_sold' ? [o.creator_sold ? `the creator sold ${n(o.creator_sell_near, 2)} N in the first 24 h` : '', t.rug?.source === 'ledger' ? esc(t.rug.reason) : ''].filter(Boolean).join(' · ') + ' (any sale by the creator counts as a dump)' : `the creator was put on the dev-rug blacklist: ${esc(o.rug_reason || t.rug?.reason || 'creator emptied their balance')}`}</li>`).join('')}</ul></div>`;
+  if (o.rugged) h += `<div class="card err"><h2>Why it counts as rugged</h2><ul class="flags">${rugWhy(o, t.rug)}</ul></div>`;
   h += `<div class="card"><div class="head"><h2>Contract audit</h2>${ilink(P.audit(t.id), 'Open the full audit →')}</div>` + (au?.available ? `<p><span class="v ${riskCls === 'g' ? 'good' : riskCls === 'a' ? 'neutral' : 'bad'}">risk ${au.risk_score} · ${esc(au.risk_level)}</span> <span class="v ${au.trust_level === 'high' ? 'good' : 'unknown'}">trust ${au.trust_score}</span> · full-access keys ${au.full_access_keys ?? '–'} · ${(au.confirmed_malicious || []).length ? '<span class="r">confirmed: ' + au.confirmed_malicious.map((c) => esc(c.key)).join(', ') + '</span>' : 'no confirmed malicious finding'}</p>${(au.findings || []).length ? '<ul class="flags">' + au.findings.map((f) => `<li>${esc(f.key)}${f.weight != null ? ` (+${f.weight})` : ''}${f.detail ? ' <span class="muted">' + esc(f.detail) + '</span>' : ''}</li>`).join('') + '</ul>' : ''}` : '<p class="muted">Not audited yet.</p>') + '</div>';
   return h;
 }

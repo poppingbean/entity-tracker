@@ -8,14 +8,18 @@ const label = (x) => (x && x.label && RULE_TAGS.has(x.label) ? { ...x, label: nu
 const HIDDEN_METRICS = ['fresh_share', 'sync_share', 'first_movers_share', 'avg_delay_s', 'creator_linked_share', 'creator_linked_tokens', 'win_rate_in_rugs', 'pnl_in_rugs'];
 const exitFlag = (o) => !!o && (o === true || (typeof o === 'object' && o.share >= 0.8));
 
-/** Token outcome without the rug rule that fired, its reason or the creator-exit numbers. */
+/** Token outcome without the free-text rug reason or the creator-exit numbers. Which kind of rug it was stays (rug_kinds), so the page
+ * can say why in plain words using the token's own on-chain facts (price fall, creator sale amount); the rule thresholds never leave. */
 export function outcome(o) {
   if (!o) return o;
   const x = { ...o };
   x.creator_exit = exitFlag(o.creator_exit) ? true : null;
-  delete x.rug_kinds; delete x.rug_reason;
+  delete x.rug_reason;
   return x;
 }
+/** What the page may say about a manual / ledger rug flag: a creator sale found after the first 24 h (amount included: a chain fact),
+ * or the dev-rug blacklist, without its internal reason text. */
+const rugPublic = (r) => (r?.flagged ? (r.source === 'ledger' ? { source: 'ledger', reason: r.reason || null } : { source: 'blacklist' }) : null);
 /** Failed gates as their codes only: the reason text holds the threshold. */
 const gateIds = (failed) => (failed || []).map((g) => ({ id: g?.id ?? g }));
 /** A scan summary with the failed gate codes but without their reasons or the decision text. */
@@ -46,7 +50,7 @@ export function redact(path, d) {
   switch (path) {
     case '/api/token': {
       const { rug, scanner, ...x } = d; // scanner = the imported scanner evaluation (gate ids)
-      return { ...x, outcome: outcome(x.outcome), scan: scanBrief(x.scan), audit: auditSummary(x.audit), creator_info: creatorInfo(x.creator_info), entries: (x.entries || []).map((e) => (e.cluster ? { ...e, cluster: label(e.cluster) } : e)) };
+      return { ...x, rug: rugPublic(rug), outcome: outcome(x.outcome), scan: scanBrief(x.scan), audit: auditSummary(x.audit), creator_info: creatorInfo(x.creator_info), entries: (x.entries || []).map((e) => (e.cluster ? { ...e, cluster: label(e.cluster) } : e)) };
     }
     case '/api/tokens': return { ...d, rows: d.rows.map(({ rug, scanner, ...t }) => ({ ...t, outcome: outcome(t.outcome), scan: scanBrief(t.scan), creator_risk: creatorRisk(t.creator_risk), groups: (t.groups || []).map(label) })) };
     case '/api/signals': return { ...d, rows: d.rows.map((s) => ({ ...s, outcome: outcome(s.outcome), groups: (s.groups || []).map(label) })) };
