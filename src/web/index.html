@@ -667,7 +667,7 @@ async function groupPage(id) {
       <td class="wrap">${(x.tokens || []).map((t) => `<a class="gchip" href="${esc(P.tok(t.id))}" onclick="event.stopPropagation();return navA(event,this)"><i style="background:${t.rugged ? 'var(--loss)' : 'var(--unknown)'}"></i><span>${esc(t.symbol || short(t.id, 12))}${t.rugged ? ' · rug' : ''}</span></a>`).join('') || '<span class="muted small">no launches recorded</span>'}${x.blacklisted?.symbol && !(x.tokens || []).length ? esc(x.blacklisted.symbol) : ''}</td></tr>`).join('')}</table></div>`;
   h += `<div class="card"><h2>Member wallets <span class="muted">${c.wallets.length}</span></h2><table><tr><th>Wallet</th><th>Funded by</th><th>Kind</th><th class="num">Age</th><th class="num">Txs</th><th class="num">Tokens</th><th>Tag</th><th class="num">Profitable</th><th class="num">ROI</th><th class="num">P&amp;L N</th><th class="num">Realized</th><th class="num">Unrealized</th></tr>
     ${c.wallets.map((w) => `<tr ${row(P.wal(w.id))}><td>${walLink(w.id)}</td><td>${acct(w.funder, 20)} <span class="muted">${esc(w.funder_kind || '')}</span></td><td>${esc(w.kind || '')}</td><td class="num">${w.created_ts ? ago(Date.now() - w.created_ts) : '–'}</td><td class="num">${w.tx_count ?? '–'}</td><td class="num">${w.stats?.tokens_n ?? '–'}</td><td>${tg(w.tag)}</td><td class="num">${pct(w.stats?.profit_rate)}</td><td class="num ${roiCls(w.stats?.roi_weighted)}">${pct(w.stats?.roi_weighted)}</td><td class="num ${roiCls(w.stats?.pnl_near)}">${signed(w.stats?.pnl_near)}</td><td class="num ${roiCls(w.stats?.realized_near)}">${signed(w.stats?.realized_near)}</td><td class="num ${roiCls(w.stats?.unrealized_near)}">${signed(w.stats?.unrealized_near)}</td></tr>`).join('')}</table></div>`;
-  h += `<div class="card"><h2>Funding &amp; money-flow graph</h2>${graphSvg(g)}<div class="legend"><span><span class="lg-dot" style="background:var(--accent)"></span>member wallet</span><span><span class="lg-dot neutral"></span>funder / anchor</span><span><span class="lg-dot unknown"></span>exchange / relayer / other</span><span class="g">— funded by</span><span class="r">— NEAR sent to</span></div></div>`;
+  h += `<div class="card"><h2>Funding &amp; money-flow graph</h2>${graphBlock(g, 'grp')}<div class="legend"><span><span class="lg-dot" style="background:var(--accent)"></span>member wallet</span><span><span class="lg-dot neutral"></span>funder / anchor</span><span><span class="lg-dot unknown"></span>exchange / relayer / other</span><span class="g">— funded by</span><span class="r">— NEAR sent to</span></div></div>`;
   const netByDepth = [1, 2, 3].map((d) => (c.network || []).filter((x) => x.depth === d));
   h += `<div class="card"><h2>Linked wallets <span class="muted">${c.network_n ?? 0} around the members: funders, destinations and the wallets behind them</span></h2>
     <div class="tiles">${netByDepth.map((l, i) => tile(`${i + 1} hop${i ? 's' : ''} away`, l.length, `${l.filter((x) => x.tokens_traded).length} trade launch tokens`)).join('')}</div>
@@ -678,25 +678,59 @@ async function groupPage(id) {
   return h;
 }
 
-// Layered picture: funders on top, member wallets in the middle, destinations of NEAR at the bottom.
-function graphSvg(g) {
-  if (!g.nodes?.length) return '<p class="muted">no graph data</p>';
-  const nodes = new Map(g.nodes.map((x) => [x.id, { ...x, level: x.member ? 0 : null }]));
-  const fund = g.edges.filter((e) => e.type === 'fund'), flow = g.edges.filter((e) => e.type === 'flow');
-  // funders: one level above whoever they fund
-  for (let pass = 0; pass < 6; pass++) for (const e of fund) { const c = nodes.get(e.to), f = nodes.get(e.from); if (c && f && c.level != null && (f.level == null || f.level > c.level - 1)) f.level = c.level - 1; }
-  for (const e of flow) { const d = nodes.get(e.to); if (d && d.level == null) d.level = 1; }
-  for (const x of nodes.values()) if (x.level == null) x.level = -1;
-  const levels = [...new Set([...nodes.values()].map((x) => x.level))].sort((a, b) => a - b);
-  const W = 1000, rowH = 110, H = levels.length * rowH + 30;
-  const pos = new Map();
-  levels.forEach((lv, li) => { const r = [...nodes.values()].filter((x) => x.level === lv); r.forEach((x, i) => pos.set(x.id, { x: 20 + ((i + 0.5) * (W - 40)) / r.length, y: 30 + li * rowH })); });
+// Funding & money-flow graph. Full view: funders on top, member wallets in the middle, destinations of NEAR at the bottom, long rows
+// wrapped. Click an address: only the wallets it received NEAR from (above) or sent NEAR to (below) stay; Reset shows everyone again.
+const GRAPHS = {};
+const GMAX_ROW = 28; // nodes per row before a level wraps onto another row
+function graphBlock(g, key = 'g') {
+  GRAPHS[key] = { g, focus: null };
+  return `<div id="graph-${key}">${graphView(key)}</div>`;
+}
+function graphFocus(key, id) { const st = GRAPHS[key]; if (!st) return; st.focus = st.focus === id ? null : id; $(`graph-${key}`).innerHTML = graphView(key); }
+function graphReset(key) { const st = GRAPHS[key]; if (!st) return; st.focus = null; $(`graph-${key}`).innerHTML = graphView(key); }
+function graphView(key) {
+  const { g, focus } = GRAPHS[key];
+  if (!g?.nodes?.length) return '<p class="muted">no graph data</p>';
+  const byId = new Map(g.nodes.map((x) => [x.id, x]));
+  let nodes, edges, rows;
+  if (focus) {
+    // only the transfers in and out of the focused address, and the addresses on their other end
+    edges = g.edges.filter((e) => e.from === focus || e.to === focus);
+    const inn = new Set(edges.filter((e) => e.to === focus).map((e) => e.from)), out = new Set(edges.filter((e) => e.from === focus).map((e) => e.to));
+    const both = [...inn].filter((x) => out.has(x));
+    rows = [[...inn].filter((x) => !out.has(x)), both, [focus], [...out].filter((x) => !inn.has(x))].filter((r) => r.length);
+    nodes = new Set([focus, ...inn, ...out]);
+  } else {
+    edges = g.edges;
+    const lvl = new Map(g.nodes.map((x) => [x.id, x.member ? 0 : null]));
+    const fund = edges.filter((e) => e.type === 'fund'), flow = edges.filter((e) => e.type === 'flow');
+    for (let pass = 0; pass < 6; pass++) for (const e of fund) { const c = lvl.get(e.to), f = lvl.get(e.from); if (c != null && lvl.has(e.from) && (f == null || f > c - 1)) lvl.set(e.from, c - 1); } // funders above whoever they fund
+    for (const e of flow) if (lvl.has(e.to) && lvl.get(e.to) == null) lvl.set(e.to, 1);
+    for (const [id, v] of lvl) if (v == null) lvl.set(id, -1);
+    rows = [...new Set(lvl.values())].sort((a, b) => a - b).map((v) => [...lvl].filter(([, x]) => x === v).map(([id]) => id));
+    nodes = new Set(g.nodes.map((x) => x.id));
+  }
+  // wrap long rows so a big group does not become one solid bar
+  const lines = rows.flatMap((r) => Array.from({ length: Math.ceil(r.length / GMAX_ROW) }, (_, k) => r.slice(k * GMAX_ROW, (k + 1) * GMAX_ROW)));
+  const W = 1000, rowH = focus ? 130 : 90, H = lines.length * rowH + 40, pos = new Map();
+  lines.forEach((r, li) => r.forEach((id, i) => pos.set(id, { x: 20 + ((i + 0.5) * (W - 40)) / r.length, y: 34 + li * rowH + (r.length > 12 && !focus ? (i % 2) * 14 : 0) })));
+  const node = (id) => byId.get(id) || { id, member: false, kind: null };
   const color = (x) => (x.member ? 'var(--accent)' : x.kind === 'wallet' || x.kind == null ? 'var(--neutral)' : 'var(--unknown)');
-  const edgeSvg = g.edges.map((e) => { const a = pos.get(e.from), b = pos.get(e.to); if (!a || !b) return ''; const col = e.type === 'fund' ? 'var(--good)' : 'var(--bad)';
-    return `<path d="M${a.x},${a.y} C${a.x},${(a.y + b.y) / 2} ${b.x},${(a.y + b.y) / 2} ${b.x},${b.y}" fill="none" style="stroke:${col}" stroke-opacity=".5" stroke-width="${Math.min(3, 0.6 + Math.log10(1 + (e.near || 0)))}"><title>${esc(e.type)} ${esc(short(e.from, 20))} → ${esc(short(e.to, 20))} ${n(e.near, 2)} N</title></path>`; }).join('');
-  const nodeSvg = [...nodes.values()].map((x) => { const p = pos.get(x.id), href = x.member ? P.wal(x.id) : P.ent(x.id);
-    return `<a href="${esc(href)}" onclick="return navA(event,this)"><g><circle cx="${p.x}" cy="${p.y}" r="${x.member ? 7 : 5}" style="fill:${color(x)}"><title>${esc(x.id)}${x.kind ? ' · ' + esc(x.kind) : ''}${x.tx_count != null ? ' · ' + x.tx_count + ' txs' : ''}</title></circle>${nodes.size <= 40 ? `<text x="${p.x}" y="${p.y + 18}" style="fill:var(--muted)" font-size="9" text-anchor="middle">${esc(short(x.id, 14))}</text>` : ''}</g></a>`; }).join('');
-  return `<svg class="graph" viewBox="0 0 ${W} ${H}">${edgeSvg}${nodeSvg}</svg>`;
+  const labels = focus || nodes.size <= 40;
+  const edgeSvg = edges.map((e) => { const a = pos.get(e.from), b = pos.get(e.to); if (!a || !b) return ''; const col = e.type === 'fund' ? 'var(--good)' : 'var(--bad)';
+    const mid = a.y === b.y ? `${(a.x + b.x) / 2},${a.y - 40}` : null;
+    const d = mid ? `M${a.x},${a.y} Q${mid} ${b.x},${b.y}` : `M${a.x},${a.y} C${a.x},${(a.y + b.y) / 2} ${b.x},${(a.y + b.y) / 2} ${b.x},${b.y}`;
+    const amt = focus && e.near ? `<text x="${(a.x + b.x) / 2}" y="${(a.y + b.y) / 2 - 4}" text-anchor="middle" font-size="10" pointer-events="none" style="fill:${col}">${esc(n(e.near, 1))} N</text>` : '';
+    return `<path d="${d}" fill="none" pointer-events="none" style="stroke:${col}" stroke-opacity="${focus ? 0.8 : 0.5}" stroke-width="${Math.min(3.5, 0.8 + Math.log10(1 + (e.near || 0)))}"><title>${e.type === 'fund' ? 'funded' : 'NEAR sent'}: ${esc(short(e.from, 24))} → ${esc(short(e.to, 24))} · ${n(e.near, 2)} N${e.n ? ' · ' + e.n + ' transfers' : ''}</title></path>${amt}`; }).join('');
+  const nodeSvg = [...nodes].map((id) => { const x = node(id), p = pos.get(id); if (!p) return ''; const me = id === focus;
+    return `<g style="cursor:pointer" onclick="graphFocus('${key}', this.dataset.id)" data-id="${esc(id)}"><circle cx="${p.x}" cy="${p.y}" r="${me ? 16 : 11}" fill="transparent"/><circle cx="${p.x}" cy="${p.y}" r="${me ? 11 : x.member ? 7 : 5}" style="fill:${color(x)}${me ? ';stroke:var(--text);stroke-width:2.5' : ''}"><title>${esc(id)}${x.kind ? ' · ' + esc(x.kind) : ''}${x.tx_count != null ? ' · ' + x.tx_count + ' txs' : ''}\nclick: ${me ? 'show everyone again' : 'show only its transfers'}</title></circle>${labels ? `<text x="${p.x}" y="${p.y + (me ? 26 : 18)}" style="fill:${me ? 'var(--text)' : 'var(--muted)'}" font-size="${me ? 12 : 9}" font-weight="${me ? 700 : 400}" text-anchor="middle">${esc(short(id, me ? 30 : 14))}</text>` : ''}</g>`; }).join('');
+  let bar;
+  if (focus) {
+    const x = node(focus), inN = new Set(edges.filter((e) => e.to === focus).map((e) => e.from)).size, outN = new Set(edges.filter((e) => e.from === focus).map((e) => e.to)).size;
+    const page = x.member ? ilink(P.wal(focus), 'Wallet page →') : ilink(P.ent(focus), 'Entity page →');
+    bar = `<div class="bar" style="margin-bottom:8px"><span>Showing <b class="acct">${esc(short(focus, 40))}</b> · <span class="g">${inN} sent NEAR to it</span> · <span class="r">${outN} received NEAR from it</span></span>${page}${ext(nbAddr(focus), 'NearBlocks ↗')}<span class="spacer"></span><button class="primary" onclick="graphReset('${key}')">Reset · show all ${g.nodes.length}</button></div>`;
+  } else bar = `<div class="muted small" style="margin-bottom:6px">Click an address to show only the wallets it received NEAR from or sent NEAR to.</div>`;
+  return `${bar}<svg class="graph" viewBox="0 0 ${W} ${H}">${edgeSvg}${nodeSvg}</svg>`;
 }
 
 views.wallets = async () => {

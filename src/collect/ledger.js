@@ -25,9 +25,11 @@ export async function followToken(t, { passes = 1 } = {}) {
   const now = Date.now();
   const ledger = buildLedger(fresh, trades, cfg.outcome);
   // a creator sale is a rug whenever it happens: one after the first 24 h flags the token (the 24 h outcome cannot see it)
-  const late = ledger.creator_sell_near_after_cp > (cfg.outcome.creatorSellRugNear ?? 0) && !fresh.rug?.flagged;
+  const over = ledger.creator_sell_near_after_cp > (cfg.outcome.creatorSellRugNear ?? 0);
+  const late = over && !fresh.rug?.flagged;
   const rug = late ? { flagged: true, source: 'ledger', reason: `creator sold ${ledger.creator_sell_near_after_cp.toFixed(2)} N after the first 24 h`, creator: fresh.creator, ts: ledger.creator_first_sell_after_cp_ts } : null;
-  const tok = rug ? { ...fresh, rug } : fresh;
+  const clear = !over && fresh.rug?.flagged && fresh.rug.source === 'ledger'; // CREATOR_SELL_RUG_NEAR was raised above this creator's later sales
+  const tok = rug ? { ...fresh, rug } : clear ? { ...fresh, rug: null } : fresh;
   const outcome = buildOutcome(tok, trades, now, cfg.outcome); // also re-applies the current rug rules to tokens finished before they changed
   const entries = buildEntries(tok, trades, now, cfg.entry);
   for (const e of entries) e.token_rugged = outcome.rugged;
@@ -41,7 +43,7 @@ export async function followToken(t, { passes = 1 } = {}) {
   await col('tokens').updateOne({ _id: t._id }, { $set: {
     ledger: { ...ledger, synced_ts: now, synced_to_ts: caughtUp ? now : lastTs, caught_up: caughtUp, next_ts: next, stopped },
     ledger_next_ts: next, trades_n: trades.length, outcome, ...(rug ? { rug } : {}),
-  } });
+  }, ...(clear ? { $unset: { rug: '' } } : {}) });
   if (rug) info(`RUG ${fresh.symbol || ''} ${t._id}: ${rug.reason}`);
   if (added || caughtUp && !t.ledger?.caught_up) info(`LEDGER ${fresh.symbol || ''} ${t._id}: +${added} trades, ${trades.length} stored${caughtUp ? ', up to date' : ', more to read'}${stopped ? ', following stopped (' + stopped + ')' : ''}`);
   return { added, caughtUp };
