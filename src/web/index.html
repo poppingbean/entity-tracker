@@ -362,6 +362,12 @@ const views = {};
 
 // ================================================================== EXPLORE
 const ASSESS = { rugger: ['r', 'Rugger in'], bullish: ['g', 'Winners in'], warning: ['r', 'Loss wallets in'], mixed: ['a', 'Mixed money'] };
+// Creator sales over every stored trade (what the rug check uses); falls back to the 24 h fields on old outcomes.
+const creatorSale = (o) => {
+  const b = o?.rug_basis;
+  if (!b) return { sold: !!o?.creator_sold, near: o?.creator_sell_near || 0, after: 0 };
+  return { sold: !!b.creator_sold, near: b.creator_sell_near || 0, after: b.creator_sell_after_24h_near || 0 };
+};
 const rugKind = { creator_exit: 'creator exit', round_trip: 'round trip', price_crash: 'price crash', creator_dump: 'creator dump', creator_sold: 'creator sold', flagged: 'dev rug (blacklist)' };
 /** The creator sold (most of) their dev buy within the first hour: a warning, not a rug by itself. */
 const exitChip = (o) => {
@@ -496,7 +502,7 @@ views.tokens = async () => {
       <td>${scanState(t, m.scan)}</td><td class="num ${t.scan?.score == null ? 'muted' : 'b'}">${t.scan?.score ?? '–'}</td>
       <td class="wrap small" style="min-width:170px" title="${esc(failTitle(t.scan))}">${t.scan?.pass === false ? gateCodes(t.scan) + '<br>' : ''}${t.scan?.decision && t.scan.decision !== 'did not pass the checks' ? `<span class="muted">${esc(t.scan.decision)}</span>` : ''}${t.scan?.id ? ' ' + ilink(P.scan(t.scan.id), 'evaluation →') : ''}</td>
       <td class="num">${t.outcome?.buyers ?? '–'}</td><td class="num">x${n(t.outcome?.peak_multiple, 1)}</td><td class="num">${nowOf(t)}</td>${volCell(t.vol24)}
-      <td>${crChip(t.creator_risk)} ${rugChips(t.outcome)} ${t.outcome?.rugged ? '' : exitChip(t.outcome) || (t.outcome?.creator_sold ? '<span class="v neutral">creator sold</span>' : '')}${!t.outcome?.rugged && !t.outcome?.creator_sold ? `<span class="chip">${esc(t.status)}</span>` : ''}</td></tr>`).join('') || empty(12, 'no tokens')}</table>
+      <td>${crChip(t.creator_risk)} ${rugChips(t.outcome)} ${t.outcome?.rugged ? '' : exitChip(t.outcome) || (creatorSale(t.outcome).sold ? '<span class="v neutral">creator sold</span>' : '')}${!t.outcome?.rugged && !creatorSale(t.outcome).sold ? `<span class="chip">${esc(t.status)}</span>` : ''}</td></tr>`).join('') || empty(12, 'no tokens')}</table>
     <div class="legend">${MIXV.map(([v, l]) => `<span><span class="lg-dot ${v}"></span>${l}</span>`).join('')}<span>· green / red % = early NEAR from winners (win80 + win50 + sniper) / loss wallets</span></div></div>`;
 };
 
@@ -593,7 +599,7 @@ async function tokenPage(id) {
       : tile('Peak', 'x' + n(o.peak_multiple, 1)) + tile(at24 ? 'At 24 h' : 'Now', 'x' + n(o.last_multiple, 1), o.drawdown != null ? `drawdown ${pct(o.drawdown)}` : null, roiCls((o.last_multiple ?? 1) - 1))}
       ${L?.last_multiple != null ? tile('Buyers (all time)', n(L.buyers, 0), `${n(L.buy_near, 0)} N in · ${n(L.sell_near, 0)} N out · ${n(L.trades, 0)} trades`) : tile('Buyers', o.buyers ?? '–', `${n(o.buy_near, 0)} N in · ${n(o.sell_near, 0)} N out`)}${tile('Early wallets', es.length, `${n(total, 0)} N in the first minutes`)}
       ${tile('From winners (win80 / win50 / sniper)', pct(total ? (mix.win80.near + mix.win50.near + mix.sniper.near) / total : null), `${mix.win80.w + mix.win50.w + mix.sniper.w} wallets`, 'g')}${tile('From loss wallets', pct(total ? mix.loss.near / total : null), `${mix.loss.w} wallets`, 'r')}${(() => { const rg = es.filter((e) => e.rugger), rn = rg.reduce((x, e) => x + (e.buy_near || 0), 0); return tile(`From ruggers ${RUG_ICON}`, pct(total ? rn / total : null), `${rg.length} wallets tied to rugs`, rg.length ? 'r' : 'g'); })()}
-      ${tile('Creator sold', o.creator_sold ? 'yes' : 'no', o.creator_sold ? n(o.creator_sell_near, 1) + ' N' : null, o.creator_sold ? 'r' : 'g')}${tile('Contract risk', au?.available ? au.risk_score : '–', au?.available ? au.risk_level : 'not audited', riskCls)}</div></div>`;
+      ${(() => { const cs = creatorSale(o); return tile('Creator sold', cs.sold ? 'yes' : 'no', cs.sold ? n(cs.near, 1) + ' N' + (!cs.after ? ' · first 24 h' : cs.after >= cs.near ? ' · after 24 h' : ` · ${n(cs.after, 1)} after 24 h`) : o.rug_basis ? 'all stored trades' : null, cs.sold ? 'r' : 'g'); })()}${tile('Contract risk', au?.available ? au.risk_score : '–', au?.available ? au.risk_level : 'not audited', riskCls)}</div></div>`;
   h += syncBanner(t);
   if (L?.collapsed && !o.rugged) h += `<div class="card warn"><b>Collapsed after its first day.</b> The price is ${pct(L.drawdown, 1)} below its all-time high (${xm(L.ath_multiple)}, ${when(L.ath_ts)}) and now ${xm(L.last_multiple)} of launch. Verdicts and tags judge the first 24 h only, so they do not count this.</div>`;
   h += `<div class="grid2 wide-l"><div class="card"><h2>Early money by tag <span class="muted">who put NEAR in during the first minutes</span></h2>${mixBar(mix, 'lg')}${mixLegend(mix)}
@@ -934,7 +940,7 @@ async function scanPage(id) {
   if (ig) {
     h += `<div class="card"><h2>Entity intelligence <span class="muted">early buying by group verdict at the time of the check</span></h2><p class="small"><span class="g">good ${pct(ig.good.share)} (${ig.good.wallets} w)</span> · <span class="r">dangerous ${pct(ig.bad.share)} (${ig.bad.wallets} w)</span> · bots/losers ${pct(ig.bots_losers?.share)} · neutral ${pct(ig.neutral.share)} · unknown ${pct(ig.unknown.share)} · creator's earlier rugs: ${f.intel.creator_prior_rugs_or_dumps}/${f.intel.creator_prior_launches}</p></div>`;
   }
-  if (s.features) h += `<div class="grid2"><div class="card"><h2>Key numbers</h2><table class="kv">${[['Pool', n(f.pool?.nearReserve, 1) + ' N · ' + (f.pool?.quoteSymbol || '') + ' · ' + (f.pool?.route || '')], ['Market cap', '$' + n(f.market?.mcapUsd, 0)], ['Buyers / sellers', `${f.trading?.uniqueBuyers} / ${f.trading?.uniqueSellers}`], ['Bought / sold', `${n(f.trading?.buyNear, 0)} / ${n(f.trading?.sellNear, 0)} N`], ['Price vs first trade', 'x' + f.trading?.priceMultipleSinceFirstTrade], ['Linked buyer share', pct(f.wallets?.linkedBuyerShare)], ['Creator sold', f.trading?.creatorSold ? 'yes' : 'no'], ['Tax', JSON.stringify(f.launch?.tax)], ['Contract matches template', String(f.contract?.matchesTemplate)], ['Top-10 holders', pct(f.holders?.top10ShareExPool, 1)]].map(([k, v]) => `<tr><td>${k}</td><td class="wrap">${esc(v)}</td></tr>`).join('')}</table></div>
+  if (s.features) h += `<div class="grid2"><div class="card"><h2>Key numbers</h2><table class="kv">${[['Pool', n(f.pool?.nearReserve, 1) + ' N · ' + (f.pool?.quoteSymbol || '') + ' · ' + (f.pool?.route || '')], ['Market cap', '$' + n(f.market?.mcapUsd, 0)], ['Buyers / sellers', `${f.trading?.uniqueBuyers} / ${f.trading?.uniqueSellers}`], ['Bought / sold', `${n(f.trading?.buyNear, 0)} / ${n(f.trading?.sellNear, 0)} N`], ['Price vs first trade', 'x' + f.trading?.priceMultipleSinceFirstTrade], ['Linked buyer share', pct(f.wallets?.linkedBuyerShare)], ['Creator sold (at scan)', f.trading?.creatorSold ? 'yes' : 'no'], ['Tax', JSON.stringify(f.launch?.tax)], ['Contract matches template', String(f.contract?.matchesTemplate)], ['Top-10 holders', pct(f.holders?.top10ShareExPool, 1)]].map(([k, v]) => `<tr><td>${k}</td><td class="wrap">${esc(v)}</td></tr>`).join('')}</table></div>
     <div class="card"><h2>All features</h2><pre style="white-space:pre-wrap;color:var(--muted);max-height:520px">${esc(JSON.stringify(f, null, 1))}</pre></div></div>`;
   return h;
 }
@@ -1111,7 +1117,7 @@ async function creatorPage(id) {
   h += creatorNetHtml(c.network);
   if (c.groups.length) h += `<div class="card"><h2>Groups this creator is part of</h2><table><tr><th>Group</th><th>Tag</th><th class="num">Wallets</th><th>Role</th></tr>${c.groups.map((g) => `<tr ${row(P.grp(g.id))}><td>${ilink(P.grp(g.id), esc(short(g.label || g.id, 36)))}</td><td>${tg(g.tag)}</td><td class="num">${g.size}</td><td>${g.role === 'member' ? 'member wallet' : `linked wallet · ${g.depth ?? '?'} hops`}</td></tr>`).join('')}</table></div>`;
   h += `<div class="card"><h2>Tokens launched <span class="muted">${c.tokens.length}</span></h2><table><tr><th>Token</th><th>Live</th><th class="num">Peak</th><th class="num">Now</th><th>Rug</th><th>Creator sold</th></tr>
-    ${c.tokens.map((t) => `<tr ${row(P.tok(t.id))}><td>${tokCell(t.id, t.symbol, t.launchpad, 22)}</td><td>${when(t.live_ts)}</td><td class="num">x${n(t.outcome?.peak_multiple, 1)}</td><td class="num">${nowOf(t)}</td><td>${rugChips(t.outcome) || '<span class="muted">–</span>'}</td><td>${t.outcome?.creator_sold ? `<span class="r">${n(t.outcome.creator_sell_near, 1)} N</span>` : '<span class="muted">no</span>'}</td></tr>`).join('') || empty(6, 'no tracked launches')}</table></div>`;
+    ${c.tokens.map((t) => `<tr ${row(P.tok(t.id))}><td>${tokCell(t.id, t.symbol, t.launchpad, 22)}</td><td>${when(t.live_ts)}</td><td class="num">x${n(t.outcome?.peak_multiple, 1)}</td><td class="num">${nowOf(t)}</td><td>${rugChips(t.outcome) || '<span class="muted">–</span>'}</td><td>${creatorSale(t.outcome).sold ? `<span class="r">${n(creatorSale(t.outcome).near, 1)} N</span>` : '<span class="muted">no</span>'}</td></tr>`).join('') || empty(6, 'no tracked launches')}</table></div>`;
   return h;
 }
 
