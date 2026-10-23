@@ -112,15 +112,15 @@ const routes = {
       col('tokens').aggregate([{ $group: { _id: '$status', n: { $sum: 1 } } }]).toArray(),
       col('clusters').aggregate([{ $group: { _id: '$tag', n: { $sum: 1 }, wallets: { $sum: '$size' } } }]).toArray(),
       col('wallets').countDocuments({ is_early: true }), col('wallets').countDocuments({ is_early: true, profiled: true }), col('entries').estimatedDocumentCount(),
-      metaGet('worker'), col('tokens').find({}, { projection: { symbol: 1, launchpad: 1, live_ts: 1, status: 1, entries_n: 1, 'outcome.rugged': 1, 'outcome.peak_multiple': 1 } }).sort({ live_ts: -1 }).limit(10).toArray(),
+      metaGet('worker'), col('tokens').find({}, { projection: { symbol: 1, launchpad: 1, live_ts: 1, status: 1, entries_n: 1, 'outcome.rugged': 1, 'outcome.peak_multiple': 1, 'scan.score': 1, 'scan.pass': 1 } }).sort({ live_ts: -1 }).limit(10).toArray(),
       col('clusters').find({ tag: { $in: ['win80', 'win50', 'sniper'] } }, { projection: { tag: 1, size: 1, score: 1, 'metrics.tokens_n': 1, 'metrics.profit_rate': 1, 'metrics.pnl_near': 1, 'ai.label': 1 } }).sort({ 'metrics.profit_rate': -1, 'metrics.pnl_near': -1 }).limit(5).toArray(),
       col('clusters').find({ tag: 'loss' }, { projection: { tag: 1, size: 1, score: 1, 'metrics.tokens_n': 1, 'metrics.profit_rate': 1, 'metrics.pnl_near': 1, 'metrics.rug_share': 1, 'rule.tags': 1, 'ai.label': 1 } }).sort({ size: -1, 'metrics.pnl_near': 1 }).limit(5).toArray(),
       col('tokens').estimatedDocumentCount(), col('tokens').countDocuments({ 'outcome.rugged': true }), col('wallets').countDocuments({ net: true, profiled: true }),
       col('blacklist').estimatedDocumentCount(), col('clusters').countDocuments({ creator_flag: { $in: ['blacklisted', 'rugger'] } }),
       volume24(null, 10),
     ]);
-    const volToks = new Map((await col('tokens').find({ _id: { $in: vol.map((v) => v._id) } }, { projection: { symbol: 1, launchpad: 1, live_ts: 1, 'outcome.rugged': 1, 'outcome.last_multiple': 1, 'ledger.last_multiple': 1 } }).toArray()).map((t) => [t._id, t]));
-    const topVolume = vol.filter((v) => volToks.has(v._id)).map((v) => { const t = volToks.get(v._id); return { id: v._id, symbol: t.symbol, launchpad: t.launchpad, live_ts: t.live_ts, rugged: !!t.outcome?.rugged, now_multiple: t.ledger?.last_multiple ?? t.outcome?.last_multiple ?? null, vol24: volBrief(v) }; });
+    const volToks = new Map((await col('tokens').find({ _id: { $in: vol.map((v) => v._id) } }, { projection: { symbol: 1, launchpad: 1, live_ts: 1, 'outcome.rugged': 1, 'outcome.last_multiple': 1, 'ledger.last_multiple': 1, 'scan.score': 1, 'scan.pass': 1 } }).toArray()).map((t) => [t._id, t]));
+    const topVolume = vol.filter((v) => volToks.has(v._id)).map((v) => { const t = volToks.get(v._id); return { id: v._id, symbol: t.symbol, launchpad: t.launchpad, live_ts: t.live_ts, rugged: !!t.outcome?.rugged, scan: t.scan ? { score: t.scan.score, pass: t.scan.pass } : null, now_multiple: t.ledger?.last_multiple ?? t.outcome?.last_multiple ?? null, vol24: volBrief(v) }; });
     return {
       now: Date.now(), tokens, tokenStatus: tokStatus.map((r) => ({ status: r._id, n: r.n })), clusterTag: clusterTag.map((r) => ({ tag: tagOf(r._id), n: r.n, wallets: r.wallets })), rugged, netWallets, blacklisted, groupsWithCreators,
       wallets, profiled, entries, worker, latest: latest.map(strip), topWin: topWin.map(strip), topLoss: topLoss.map(strip), topVolume,
