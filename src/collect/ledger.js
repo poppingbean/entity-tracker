@@ -11,15 +11,23 @@ import { cfgFor } from './cfg.js';
 const HOUR = 3600e3, DAY = 24 * HOUR;
 const dueFilter = (now) => ({ status: 'done', $or: [{ ledger_next_ts: { $lte: now } }, { ledger_next_ts: { $exists: false } }] });
 
-/** Read up to `passes` x LEDGER_ROWS_PER_PASS more transactions of a done token, rebuild its live numbers and early entries, schedule the next pass. */
-export async function followToken(t, { passes = 1 } = {}) {
-  const L = config.ledger, cfg = cfgFor(t);
+/** Read up to `passes` x LEDGER_ROWS_PER_PASS more transactions of a done token (the read position is saved after each pass). Stops
+ *  early at the end of its history or at `deadline` (a timestamp). Nothing is rebuilt: call rebuildLedger once the reading is over. */
+export async function readLedger(t, { passes = 1, deadline = Infinity } = {}) {
+  const L = config.ledger;
   let cur = t, added = 0, caughtUp = false, lastTs = t.ledger?.synced_to_ts ?? null;
-  for (let i = 0; i < passes && !caughtUp; i++) {
+  for (let i = 0; i < passes && !caughtUp && Date.now() < deadline; i++) {
     if (i) cur = await col('tokens').findOne({ _id: t._id });
     const r = await syncTokenTrades(cur, { maxRows: L.rowsPerPass, full: true });
     added += r.added; caughtUp = r.reachedEnd; lastTs = r.lastTs ?? lastTs;
   }
+  return { added, caughtUp, lastTs };
+}
+
+/** Rebuild a done token's live numbers and early entries from all its stored trades and schedule its next pass. This loads every trade,
+ *  so a long catch-up should read first (readLedger) and rebuild once at the end, not after every pass. */
+export async function rebuildLedger(t, { added = 0, caughtUp = false, lastTs = t.ledger?.synced_to_ts ?? null } = {}) {
+  const L = config.ledger, cfg = cfgFor(t);
   const fresh = await col('tokens').findOne({ _id: t._id });
   const trades = await col('trades').find({ token: t._id }).sort({ ts: 1 }).toArray();
   const now = Date.now();
@@ -44,6 +52,11 @@ export async function followToken(t, { passes = 1 } = {}) {
   if (outcome.rugged && !fresh.outcome?.rugged) info(`RUG ${fresh.symbol || ''} ${t._id}: ${outcome.rug_kinds.join(', ')} (all-time trades)`);
   if (added || caughtUp && !t.ledger?.caught_up) info(`LEDGER ${fresh.symbol || ''} ${t._id}: +${added} trades, ${trades.length} stored${caughtUp ? ', up to date' : ', more to read'}${stopped ? ', following stopped (' + stopped + ')' : ''}`);
   return { added, caughtUp };
+}
+
+/** Read up to `passes` more passes of a done token, then rebuild it and schedule its next pass. */
+export async function followToken(t, { passes = 1 } = {}) {
+  return rebuildLedger(t, await readLedger(t, { passes }));
 }
 
 /** Follow the done tokens that are due, newest launch first, a few per cycle. Returns how many were followed. */

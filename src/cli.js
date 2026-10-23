@@ -22,7 +22,7 @@ import { connectDb, closeDb, col, metaGet } from './db.js';
 import { enableDbLog, flushLogs, info } from './log.js';
 import { backfill } from './collect/launches.js';
 import { processToken } from './collect/process.js';
-import { followToken, followDue } from './collect/ledger.js';
+import { followDue, readLedger, rebuildLedger } from './collect/ledger.js';
 import { profilePending } from './graph/profile.js';
 import { evaluateGroups, reviewPending } from './evaluate/run.js';
 import { buildEntities } from './evaluate/entities.js';
@@ -152,7 +152,10 @@ try {
     if (args[0]) {
       let t = await col('tokens').findOne({ _id: args[0] });
       if (t?.status !== 'done') throw new Error(`${args[0]}: not a token whose first 24 h are read (status ${t?.status ?? 'unknown'})`);
-      while (!(await followToken(t, { passes: 5 })).caughtUp) t = await col('tokens').findOne({ _id: args[0] });
+      // read the whole history first, then rebuild once (rebuilding loads every stored trade)
+      let r = { added: 0 };
+      for (;;) { const p = await readLedger(t, { passes: 5 }); r = { ...p, added: r.added + p.added }; if (p.caughtUp) break; t = await col('tokens').findOne({ _id: args[0] }); }
+      await rebuildLedger(await col('tokens').findOne({ _id: args[0] }), r);
     } else { let n, total = 0; while ((n = await followDue(10, 3))) total += n; info(`ledger: ${total} passes, nothing left to read`); }
   } else if (cmd === 'review') {
     info(`reviewed ${await reviewPending(Number(args[0]) || 5)} groups`);

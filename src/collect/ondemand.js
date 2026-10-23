@@ -8,7 +8,7 @@ import { adapters } from '../launchpads.js';
 import { accountRows, fetchTxs } from '../near/indexer.js';
 import { saveLaunches } from './launches.js';
 import { processToken } from './process.js';
-import { followToken } from './ledger.js';
+import { readLedger, rebuildLedger } from './ledger.js';
 import { auditNearContract, validNearAddress } from '../audit/service.js';
 import { analyseOnDemand } from '../scanner/pipeline.js';
 import { flagRug } from './rugs.js';
@@ -48,18 +48,27 @@ async function run(id, job) {
   if (t.status === 'awaiting_pool') { job.message = 'The token exists but has no pool yet; it is checked again every 10 minutes.'; return; }
   if (t.status === 'skipped_quote') { job.message = 'Its pool is quoted in a token that cannot be valued in NEAR, so trades are not read.'; return; }
   const lastCp = config.outcome.minutes[config.outcome.minutes.length - 1] * 60e3;
-  for (let i = 0; i < 30; i++) {
+  const deadline = job.started + config.ledger.syncNowMinutes * 60e3; // a very long history is finished by the worker, not here
+  for (let i = 0; i < 30 && Date.now() < deadline; i++) {
     t = await col('tokens').findOne({ _id: id });
     step(`reading trades (${t.trades_n || 0} so far)`);
     const r = await processToken(t);
     if (r.done || Date.now() - t.live_ts < lastCp) break;
   }
-  // past its first 24 h: read the rest of its history up to now (the full ledger)
+  // past its first 24 h: read the rest of its history up to now (the full ledger), then rebuild its numbers once at the end
   t = await col('tokens').findOne({ _id: id });
-  if (t.status === 'done' && config.ledger.enabled) for (let i = 0; i < 40; i++) {
-    step(`reading the full ledger (${t.trades_n || 0} trades so far)`);
-    if ((await followToken(t, { passes: 3 })).caughtUp) break;
-    t = await col('tokens').findOne({ _id: id });
+  if (t.status === 'done' && config.ledger.enabled) {
+    let r = { added: 0, caughtUp: false };
+    while (Date.now() < deadline) {
+      step(`reading the full ledger (${t.trades_n || 0} trades so far)`);
+      const p = await readLedger(t, { passes: 3, deadline });
+      r = { ...p, added: r.added + p.added };
+      t = await col('tokens').findOne({ _id: id });
+      if (p.caughtUp) break;
+    }
+    step(`rebuilding its numbers from ${t.trades_n || 0} trades`);
+    await rebuildLedger(t, r); // not caught up: its next pass is due at once, so the worker keeps reading
+    if (!r.caughtUp) job.partial = true;
   }
   step('auditing the contract');
   await auditNearContract(id).catch((e) => warn(`on-demand audit of ${id}: ${e.message}`));
@@ -67,7 +76,8 @@ async function run(id, job) {
     step('running the analysis');
     await analyseOnDemand(id).catch((e) => warn(`on-demand analysis of ${id}: ${e.message}`));
   }
-  job.message = 'Early buyers are profiled and grouped in the background; their tags appear within a few minutes.';
+  job.message = (job.partial ? `Its history is longer than one sync reads (${config.ledger.syncNowMinutes} min): the rest is read in the background. ` : '')
+    + 'Early buyers are profiled and grouped in the background; their tags appear within a few minutes.';
 }
 
 /** Start (or report) the background job for one token. */
@@ -78,8 +88,13 @@ export function startFetch(id) {
   if ([...jobs.values()].filter((j) => j.state === 'running').length >= MAX_JOBS) return { state: 'error', message: 'the server is busy fetching other tokens, try again in a minute' };
   const job = { state: 'running', step: 'starting', message: null, started: Date.now(), finished: null };
   jobs.set(id, job);
-  run(id, job).then(() => { job.state = 'done'; job.finished = Date.now(); info(`FETCHED on demand ${id}`); })
-    .catch((e) => { job.state = 'error'; job.message = e.message; job.finished = Date.now(); warn(`on-demand fetch of ${id} failed: ${e.message}`); });
+  // a watchdog: whatever step stalls, the job ends, so "Sync now" can be pressed again instead of showing "working" forever
+  let watchdog;
+  const limit = (config.ledger.syncNowMinutes + 10) * 60e3;
+  const timedOut = new Promise((_, rej) => { watchdog = setTimeout(() => rej(new Error(`stopped after ${Math.round(limit / 60e3)} min (${job.step}); what was read is kept, press Sync now to continue`)), limit); });
+  Promise.race([run(id, job), timedOut]).then(() => { job.state = 'done'; job.finished = Date.now(); info(`FETCHED on demand ${id}`); })
+    .catch((e) => { job.state = 'error'; job.message = e.message; job.finished = Date.now(); warn(`on-demand fetch of ${id} failed: ${e.message}`); })
+    .finally(() => clearTimeout(watchdog));
   for (const [k, j] of jobs) if (j.finished && Date.now() - j.finished > 3600e3) jobs.delete(k);
   return job;
 }

@@ -4,6 +4,8 @@ import { config } from '../config.js';
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let rr = 0;
 const isFastnear = (url) => /(^|\.)fastnear\.com$/.test(new URL(url).hostname);
+/** Every request gets a deadline: a connection that stalls without answering or closing would otherwise hang its caller forever. */
+const timeout = () => AbortSignal.timeout(config.httpTimeoutMs);
 const fastnearHeaders = () => (config.fastnearApiKey ? { authorization: `Bearer ${config.fastnearApiKey}` } : {});
 
 export async function rpc(method, params) {
@@ -11,7 +13,7 @@ export async function rpc(method, params) {
   for (let i = 0; i < config.rpcUrls.length * 3; i++) {
     const url = config.rpcUrls[rr++ % config.rpcUrls.length];
     try {
-      const res = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json', ...(isFastnear(url) ? fastnearHeaders() : {}) }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }) });
+      const res = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json', ...(isFastnear(url) ? fastnearHeaders() : {}) }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }), signal: timeout() });
       const j = await res.json();
       if (j.result !== undefined) return j.result;
       lastErr = new Error(JSON.stringify(j.error).slice(0, 200));
@@ -30,7 +32,7 @@ export async function view(contractId, methodName, args = {}) {
 
 export async function fastnearGet(pathname) {
   for (let i = 0; i < 5; i++) {
-    try { const r = await fetch(config.fastnearApiUrl + pathname, { headers: fastnearHeaders() }); if (r.ok) return r.json(); } catch {}
+    try { const r = await fetch(config.fastnearApiUrl + pathname, { headers: fastnearHeaders(), signal: timeout() }); if (r.ok) return r.json(); } catch {}
     await sleep(1000 * (i + 1));
   }
   return null;
@@ -39,7 +41,7 @@ export async function fastnearGet(pathname) {
 export async function txIndexer(pathname, body) {
   for (let i = 0; i < 6; i++) {
     try {
-      const r = await fetch(config.txIndexerUrl + pathname, { method: 'POST', headers: { 'content-type': 'application/json', ...fastnearHeaders() }, body: JSON.stringify(body) });
+      const r = await fetch(config.txIndexerUrl + pathname, { method: 'POST', headers: { 'content-type': 'application/json', ...fastnearHeaders() }, body: JSON.stringify(body), signal: timeout() });
       if (r.ok) return r.json();
     } catch {}
     await sleep(1200 * (i + 1));
