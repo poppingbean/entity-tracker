@@ -371,17 +371,20 @@ const exitChip = (o) => {
 };
 /** Why a token counts as rugged, in plain words with its own on-chain numbers (no rule thresholds: safe on the public dashboard). */
 function rugWhy(o, rug) {
+  const b = o.rug_basis || o; // the all-time numbers the rug rules used (older outcomes: the 24 h ones)
+  const after = o.rug_basis?.creator_sell_after_24h_near || 0, first = o.creator_sold ? o.creator_sell_near || 0 : 0;
   const lines = (o.rug_kinds || []).map((k) => {
-    const txt = k === 'price_crash' ? `The price collapsed: it fell ${pct(o.drawdown)} from its peak (x${n(o.peak_multiple, 1)} of launch) to x${n(o.last_multiple, 2)}.`
-      : k === 'creator_dump' ? `The price fell ${pct(o.drawdown)} from its peak while the creator sold ${n(o.creator_sell_near, 2)} N of the token.`
-      : k === 'round_trip' ? `It pumped to x${n(o.peak_multiple, 1)} of its launch price and came back to x${n(o.last_multiple, 2)}: everyone who bought after launch is flat or under.`
-      : k === 'creator_exit' ? `The creator sold ${o.creator_exit && o.creator_exit !== true ? pct(o.creator_exit.share) + ' of' : 'most of'} their dev buy within the first hour${o.creator_exit?.minutes != null ? ` (first sale ${o.creator_exit.minutes} min after launch)` : ''}, and the price is back near launch (x${n(o.last_multiple, 2)}).`
-      : k === 'creator_sold' ? [o.creator_sold ? `The creator sold ${n(o.creator_sell_near, 2)} N of their own token in the first 24 h.` : '', rug?.source === 'ledger' ? `The creator sold after the first 24 h${rug.reason ? ': ' + rug.reason.replace(/^creator sold /, '') : ''}.` : ''].filter(Boolean).join(' ') || 'The creator sold some of their own token.'
+    const txt = k === 'price_crash' ? `The price collapsed: it fell ${pct(b.drawdown)} from its peak (x${n(b.peak_multiple, 1)} of launch${b.peak_ts ? ', ' + when(b.peak_ts) : ''}) to x${n(b.last_multiple, 2)}.`
+      : k === 'creator_dump' ? `The price fell ${pct(b.drawdown)} from its peak while the creator sold ${n(b.creator_sell_near, 2)} N of the token.`
+      : k === 'round_trip' ? `It pumped to x${n(b.peak_multiple, 1)} of its launch price and came back to x${n(b.last_multiple, 2)}: everyone who bought after launch is flat or under.`
+      : k === 'creator_exit' ? `The creator sold ${o.creator_exit && o.creator_exit !== true ? pct(o.creator_exit.share) + ' of' : 'most of'} their dev buy within the first hour${o.creator_exit?.minutes != null ? ` (first sale ${o.creator_exit.minutes} min after launch)` : ''}, and the price is back near launch (x${n(b.last_multiple, 2)}).`
+      : k === 'creator_sold' ? ([first ? `${n(first, 2)} N in the first 24 h` : '', after ? `${n(after, 2)} N after the first 24 h` : ''].filter(Boolean).length ? `The creator sold their own token: ${[first ? `${n(first, 2)} N in the first 24 h` : '', after ? `${n(after, 2)} N after the first 24 h` : ''].filter(Boolean).join(' and ')}.` : rug?.source === 'ledger' && rug.reason ? `The creator ${rug.reason}.` : 'The creator sold some of their own token.')
       : k === 'flagged' ? `The creator is on the dev-rug blacklist: their token balance dropped while the token was being held${o.rug_reason ? ` (${o.rug_reason})` : ''}.`
       : 'Flagged as rugged.';
     return `<li><b>${esc(rugKind[k] || k)}</b> · ${esc(txt)}</li>`;
   });
-  if (!lines.length) lines.push(`<li>${rug?.source === 'ledger' ? esc(`The creator sold after the first 24 h${rug.reason ? ': ' + rug.reason.replace(/^creator sold /, '') : ''}.`) : rug?.source === 'blacklist' ? 'The creator is on the dev-rug blacklist: their token balance dropped while the token was being held.' : 'Flagged as rugged. The detailed reason is recomputed on the next sync.'}</li>`);
+  if (!lines.length) lines.push(`<li>${rug?.source === 'blacklist' ? 'The creator is on the dev-rug blacklist: their token balance dropped while the token was being held.' : 'Flagged as rugged. Use Re-analyse to apply the latest rules.'}</li>`);
+  if (o.rug_basis?.trades != null) lines.push(`<li class="muted small">Judged on all ${n(o.rug_basis.trades, 0)} stored trades${o.rug_basis.last_trade_ts ? ', up to ' + when(o.rug_basis.last_trade_ts) : ''}.</li>`);
   return lines.join('');
 }
 const rugChips = (o) => (o?.rugged ? (o.rug_kinds?.length ? o.rug_kinds : ['rug']).map((k) => `<span class="v bad" title="${esc(o.rug_reason || 'rugged')}">${esc(rugKind[k] || 'rug')}</span>`).join(' ') : '');
@@ -514,6 +517,17 @@ function fetchPage(id) {
     <p id="fetchState"><span class="b">starting…</span></p></div>`;
 }
 let fetchTimer = null;
+/** "Re-analyse": re-apply the latest rug rules to the stored trades of this token, then show the page again. */
+async function reanalyse(id) {
+  const box = document.getElementById('fetchState');
+  if (box) box.innerHTML = '<span class="b">re-analysing with the latest rules…</span>';
+  try {
+    const j = await get('/api/reanalyse', { id });
+    if (j.error) { if (box) box.innerHTML = `<span class="r">${esc(j.error)}</span>`; return; }
+    if (box) box.innerHTML = `<span class="${j.rugged ? 'r' : 'g'}">Re-analysed${j.trades != null ? ` ${n(j.trades, 0)} trades` : ''} with the latest rules: ${j.rugged ? 'rugged (' + esc((j.rug_kinds || []).map((k) => rugKind[k] || k).join(', ')) + ')' : 'not rugged'}${j.was_rugged !== j.rugged ? ` · was ${j.was_rugged ? 'rugged' : 'not rugged'} before` : ' · no change'}</span>`;
+    setTimeout(render, 1500);
+  } catch (e) { if (box) box.innerHTML = `<span class="r">${esc(e.message)}</span>`; }
+}
 async function startFetch(id) {
   const box = () => document.getElementById('fetchState');
   if (!box()) return;
@@ -543,7 +557,7 @@ function syncBanner(t) {
   else if (t.status === 'done') {
     // first 24 h read (what verdicts use); the full ledger follows it up to today
     const L = t.ledger;
-    txt = 'First 24 h read (what verdicts use) · ';
+    txt = `Rug check uses every stored trade${t.outcome?.rug_basis?.trades != null ? ` (${n(t.outcome.rug_basis.trades, 0)})` : ''}; win / loss tags use the first 24 h · `;
     if (!L) txt += 'full ledger: queued, the newest tokens are read first';
     else if (L.error && !L.caught_up) txt += `full ledger: last pass failed (${L.error}), retried in ${ago(Math.max(0, (L.next_ts ?? Date.now()) - Date.now()))}`;
     else if (!L.caught_up) txt += `full ledger: reading, ${n(t.trades_n, 0)} trades so far, up to ${when(L.synced_to_ts)}`;
@@ -551,7 +565,7 @@ function syncBanner(t) {
     if (L?.caught_up) cls = 'win80';
   }
   else txt = `Last synced ${since(t.processed_ts)} · next sync ${due ? 'due now' : 'in ' + ago(t.next_process_ts - Date.now())}`;
-  return `<div class="banner"><span class="v ${cls}">sync</span><div style="flex:1;min-width:0"><span class="small">${esc(txt)}</span><div id="fetchState" class="small"></div></div>${t.status === 'awaiting_pool' || t.status === 'skipped_quote' ? '' : `<button onclick="startFetch('${esc(t.id)}')">Sync now</button>`}</div>`;
+  return `<div class="banner"><span class="v ${cls}">sync</span><div style="flex:1;min-width:0"><span class="small">${esc(txt)}</span><div id="fetchState" class="small"></div></div>${t.processed_ts ? `<button title="Re-apply the latest rug rules to every stored trade of this token (no chain reads)" onclick="reanalyse('${esc(t.id)}')">Re-analyse</button>` : ''}${t.status === 'awaiting_pool' || t.status === 'skipped_quote' ? '' : `<button onclick="startFetch('${esc(t.id)}')">Sync now</button>`}</div>`;
 }
 
 async function tokenPage(id) {

@@ -2,7 +2,7 @@
 // rugs from outside the price series: the scanner's dev-rug blacklist (the creator emptied their balance while a position was held).
 import { col } from '../db.js';
 import { info } from '../log.js';
-import { buildEntries, buildOutcome, buildLedger, RUG_RULES_V } from './analyze.js';
+import { buildEntries, buildOutcome, RUG_RULES_V } from './analyze.js';
 import { cfgFor } from './cfg.js';
 
 /** Rebuild one token's outcome and entries from its stored trades and write them. Returns the entries count, or null when no trades are stored. */
@@ -10,15 +10,16 @@ export async function recomputeToken(t, now = Date.now()) {
   const trades = await col('trades').find({ token: t._id }).sort({ ts: 1 }).toArray();
   if (!trades.length) return null;
   const cfg = cfgFor(t);
-  // a "creator sold after the first 24 h" flag is re-checked against the current CREATOR_SELL_RUG_NEAR: raising it clears small sales
-  const clear = t.rug?.flagged && t.rug.source === 'ledger' && !(buildLedger(t, trades, cfg.outcome).creator_sell_near_after_cp > (cfg.outcome.creatorSellRugNear ?? 0));
+  // old "creator sold after the first 24 h" flags are dropped: the rug rules now read every stored trade, so a later creator sale above
+  // CREATOR_SELL_RUG_NEAR is a "creator sold" rug on its own, and one under it no longer counts
+  const clear = !!(t.rug?.flagged && t.rug.source === 'ledger');
   if (clear) t = { ...t, rug: null };
   const outcome = buildOutcome(t, trades, now, cfg.outcome);
   const entries = buildEntries(t, trades, now, cfg.entry);
   for (const e of entries) e.token_rugged = outcome.rugged;
   if (entries.length) await col('entries').bulkWrite(entries.map((e) => ({ replaceOne: { filter: { _id: e._id }, replacement: e, upsert: true } })), { ordered: false });
   await col('tokens').updateOne({ _id: t._id }, { $set: { outcome, entries_n: entries.length }, ...(clear ? { $unset: { rug: '' } } : {}) });
-  if (clear) info(`RUG cleared ${t.symbol || ''} ${t._id}: the creator's later sales are within CREATOR_SELL_RUG_NEAR`);
+  if (clear) info(`RUG flag replaced ${t.symbol || ''} ${t._id}: later creator sales are now judged by the all-time rug rules`);
   return entries.length;
 }
 
