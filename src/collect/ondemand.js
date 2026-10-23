@@ -30,6 +30,38 @@ async function findLaunch(id) {
   throw new Error('not a token launched on a supported launchpad (nearly.trade, justhoot, meme.cooking, gaypad, tkn, qlyphs)');
 }
 
+/**
+ * Read a token's trades up to now: its first 24 h (processToken) and, once those are read, the rest of its history (the full ledger),
+ * then rebuild its numbers once. Stops at `deadline`; whatever is left stays due, so the worker keeps reading it. Used by Sync now and
+ * before an AI review. Returns { caughtUp }.
+ */
+export async function catchUp(id, { deadline, step = () => {} }) {
+  const lastCp = config.outcome.minutes[config.outcome.minutes.length - 1] * 60e3;
+  let t = await col('tokens').findOne({ _id: id });
+  if (!t || ['awaiting_pool', 'no_pool', 'skipped_quote'].includes(t.status)) return { caughtUp: false };
+  for (let i = 0; i < 30 && t.status !== 'done' && Date.now() < deadline; i++) {
+    step(`reading trades (${t.trades_n || 0} so far)`);
+    const r = await processToken(t);
+    if (r.done || Date.now() - t.live_ts < lastCp) break;
+    t = await col('tokens').findOne({ _id: id });
+  }
+  // past its first 24 h: read the rest of its history up to now (the full ledger), then rebuild its numbers once at the end
+  t = await col('tokens').findOne({ _id: id });
+  if (t.status !== 'done') return { caughtUp: Date.now() < deadline }; // still inside its first 24 h: read up to now unless time ran out
+  if (!config.ledger.enabled) return { caughtUp: true };
+  let r = { added: 0, caughtUp: false };
+  while (Date.now() < deadline) {
+    step(`reading the full ledger (${t.trades_n || 0} trades so far)`);
+    const p = await readLedger(t, { passes: 3, deadline });
+    r = { ...p, added: r.added + p.added };
+    t = await col('tokens').findOne({ _id: id });
+    if (p.caughtUp) break;
+  }
+  step(`rebuilding its numbers from ${t.trades_n || 0} trades`);
+  await rebuildLedger(t, r); // not caught up: its next pass is due at once, so the worker keeps reading
+  return { caughtUp: r.caughtUp };
+}
+
 async function run(id, job) {
   const step = (s) => { job.step = s; };
   let t = await col('tokens').findOne({ _id: id });
@@ -52,29 +84,8 @@ async function run(id, job) {
     t = await col('tokens').findOne({ _id: id });
   }
   if (t.status === 'skipped_quote') { job.message = 'Its pool is quoted in a token that cannot be valued in NEAR, so trades are not read.'; return; }
-  const lastCp = config.outcome.minutes[config.outcome.minutes.length - 1] * 60e3;
   const deadline = job.started + config.ledger.syncNowMinutes * 60e3; // a very long history is finished by the worker, not here
-  for (let i = 0; i < 30 && Date.now() < deadline; i++) {
-    t = await col('tokens').findOne({ _id: id });
-    step(`reading trades (${t.trades_n || 0} so far)`);
-    const r = await processToken(t);
-    if (r.done || Date.now() - t.live_ts < lastCp) break;
-  }
-  // past its first 24 h: read the rest of its history up to now (the full ledger), then rebuild its numbers once at the end
-  t = await col('tokens').findOne({ _id: id });
-  if (t.status === 'done' && config.ledger.enabled) {
-    let r = { added: 0, caughtUp: false };
-    while (Date.now() < deadline) {
-      step(`reading the full ledger (${t.trades_n || 0} trades so far)`);
-      const p = await readLedger(t, { passes: 3, deadline });
-      r = { ...p, added: r.added + p.added };
-      t = await col('tokens').findOne({ _id: id });
-      if (p.caughtUp) break;
-    }
-    step(`rebuilding its numbers from ${t.trades_n || 0} trades`);
-    await rebuildLedger(t, r); // not caught up: its next pass is due at once, so the worker keeps reading
-    if (!r.caughtUp) job.partial = true;
-  }
+  if (!(await catchUp(id, { deadline, step })).caughtUp) job.partial = true;
   step('auditing the contract');
   await auditNearContract(id).catch((e) => warn(`on-demand audit of ${id}: ${e.message}`));
   if (!(await col('tokens').findOne({ _id: id }))?.track_only) {

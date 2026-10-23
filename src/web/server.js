@@ -9,7 +9,7 @@ import { config } from '../config.js';
 import { recentLogs, info, error } from '../log.js';
 import { aiEnabled, aiStatus } from '../ai/nearai.js';
 import { simSell, ensureAccount, positionPnl } from '../sim/portfolio.js';
-import { startFetch, jobStatus } from '../collect/ondemand.js';
+import { startFetch, jobStatus, catchUp } from '../collect/ondemand.js';
 import { recomputeToken } from '../collect/rugs.js';
 import { redact } from './redact.js';
 import { creatorIndex, creatorBrief, creatorFlag, creatorNetwork } from '../evaluate/creators.js';
@@ -445,7 +445,7 @@ const routes = {
     const a = await getAnalysis(id, { refresh });
     if (!a) return { error: 'not found' };
     const job = aiRunning.get(id);
-    return { ...a, ai_enabled: aiEnabled(), ai_job: job ? { running: !job.error && !job.unchanged, error: job.error || null, unchanged: !!job.unchanged, started: job.started } : null };
+    return { ...a, ai_enabled: aiEnabled(), ai_job: job ? { running: !job.error && !job.unchanged, step: job.step || null, error: job.error || null, unchanged: !!job.unchanged, started: job.started } : null };
   },
   /** One earlier AI analyst run, with the figures it was written from and what changed since the run before. */
   '/api/analysis-run': async (u) => (await getRun(u.searchParams.get('id') || '')) || { error: 'not found' },
@@ -453,14 +453,18 @@ const routes = {
     const id = (u.searchParams.get('id') || '').trim();
     if (!validNearAddress(id)) return { error: 'invalid NEAR account id' };
     if (!aiEnabled()) return { error: 'NEAR AI is not configured' };
-    const job = aiRunning.get(id);
-    if (job && !job.error && !job.unchanged) return { running: true, started: job.started };
+    const cur = aiRunning.get(id);
+    if (cur && !cur.error && !cur.unchanged) return { running: true, started: cur.started };
     if (limited(aiHits, req.socket.remoteAddress || 'ip', 5)) return { error: 'too many AI requests, try again in a few minutes' };
-    // run only on request; every run rebuilds the analysis from the latest data, then writes the first assessment or updates the last one
-    // with what changed since it (no model call when nothing did)
-    const started = Date.now();
-    aiRunning.set(id, { started });
-    getAnalysis(id, { refresh: true }).then((a) => { if (!a) throw new Error('not found'); return assessWithAi(a); })
+    // run only on request; every run first reads the token's latest trades (its full ledger, for up to ANALYSIS_SYNC_MINUTES), rebuilds
+    // the analysis from them (with the transfer trails), then writes the first assessment or updates the last one with what changed since it
+    // (no model call when nothing did)
+    const started = Date.now(), job = { started, step: 'reading the latest trades' };
+    aiRunning.set(id, job);
+    catchUp(id, { deadline: started + config.analysis.syncMinutes * 60e3, step: (x) => { job.step = x; } })
+      .catch((e) => error(`AI review of ${id}: reading the latest trades failed: ${e.message}`)) // the review still runs on what is stored
+      .then(() => { job.step = 'building the analysis'; return getAnalysis(id, { refresh: true }); })
+      .then((a) => { if (!a) throw new Error('not found'); job.step = 'NEAR AI is writing the review'; return assessWithAi(a); })
       .then((ai) => (ai.unchanged ? aiRunning.set(id, { started, unchanged: true, done: Date.now() }) : aiRunning.delete(id)))
       .catch((e) => aiRunning.set(id, { started, error: e.message }))
       .finally(() => setTimeout(() => { if (aiRunning.get(id)?.started === started) aiRunning.delete(id); }, 10 * 60e3));

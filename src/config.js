@@ -99,6 +99,11 @@ export const config = {
     ignoreRunupBelowMcapUsd: num(process.env.IGNORE_RUNUP_BELOW_MCAP_USD, 10000),
     minScore: num(process.env.MIN_RULE_SCORE, 55),
   },
+  // the token analysis page's AI review: it reads the latest trades first, then follows tokens moved out by transfer
+  analysis: {
+    syncMinutes: num(process.env.ANALYSIS_SYNC_MINUTES, 5),  // how long an AI review reads new trades before writing (the worker reads the rest)
+    flowHops: num(process.env.ANALYSIS_FLOW_HOPS, 5),        // how many transfer hops to follow tokens that left the creator / early buyers
+  },
   analyst: {
     minConfidence: num(process.env.AI_MIN_CONFIDENCE, 0.65),
     holdBuyMinScore: num(process.env.HOLD_BUY_MIN_SCORE, 75),        // a clean pass with this score is still bought when the AI only says HOLD

@@ -8,11 +8,12 @@ import { getCachedAudit, summarizeAudit } from '../audit/service.js';
 import { creatorIndex, creatorNetwork } from '../evaluate/creators.js';
 import { priceSeries } from '../collect/analyze.js';
 import { tagOf, ruggerGroup, ruggerWallet } from '../evaluate/tags.js';
+import { config } from '../config.js';
 
 const MIN = 60e3, DAY = 86400e3;
 export const CACHE_MS = 15 * MIN;
 const WINDOWS = [15, 60, 1440]; // minutes after launch
-const EARLY_ROWS = 30, HOLDERS_VERIFIED = 15;
+const EARLY_ROWS = 30, HOLDERS_VERIFIED = 15, FLOW_TRAILS = 10, FLOW_NODES = 60;
 const r = (x, d = 2) => (x == null || !Number.isFinite(x) ? null : Math.round(x * 10 ** d) / 10 ** d);
 // routers and launchpad services that trade on behalf of users (justhoot in-app buys settle through NEAR Intents): not holders or sellers
 export const INFRA = /^(intents|wrap)\.near$|^(aa-[\w-]+|reward-distribute)\.justhoot\.near$|(^|\.)(ref-finance|ref-labs)\.near$/;
@@ -45,6 +46,65 @@ function windowFlows(trades, live, min, supply) {
   const netTokens = sum(buys, (t) => t.tokens) - sum(sells, (t) => t.tokens);
   return { minutes: min, trades: w.length, buys: buys.length, sells: sells.length, buy_near: r(sum(buys, (t) => t.near)), sell_near: r(sum(sells, (t) => t.near)),
     buyers: new Set(buys.map((t) => t.trader)).size, sellers: new Set(sells.map((t) => t.trader)).size, net_supply_share: supply ? r(netTokens / supply, 4) : null };
+}
+
+/**
+ * Where the tokens went after leaving the creator and the early buyers by plain transfer (not a sale): follow the stored wallet-to-wallet
+ * transfers of this token hop by hop, up to `hops`, and say for every account reached whether it sold on the pool, passed the tokens on or
+ * kept them, and what it is (exchange, early buyer, group). One trail per source that sent tokens out, largest first.
+ */
+export async function tokenFlows(id, sources, { hops, traders, supply }) {
+  const transfers = await col('transfers').find({ token: id }, { projection: { from: 1, to: 1, tokens: 1, ts: 1 } }).toArray();
+  const out = new Map(); // from -> Map(to -> edge)
+  for (const x of transfers) {
+    if (!x.from || !x.to || x.from === x.to) continue;
+    const m = out.get(x.from) || new Map(), e = m.get(x.to) || { tokens: 0, n: 0, first_ts: x.ts };
+    e.tokens += x.tokens || 0; e.n++; e.first_ts = Math.min(e.first_ts, x.ts); m.set(x.to, e); out.set(x.from, m);
+  }
+  const share = (tokens) => (supply ? r(tokens / supply, 4) : null);
+  const trails = [];
+  for (const src of sources) {
+    const first = out.get(src.account); if (!first) continue;
+    const seen = new Set([src.account]), reached = [];
+    let frontier = [src.account];
+    for (let hop = 1; hop <= hops && frontier.length && reached.length < FLOW_NODES; hop++) {
+      const next = [];
+      for (const from of frontier) for (const [to, e] of [...(out.get(from) || [])].sort((a, b) => b[1].tokens - a[1].tokens)) {
+        if (seen.has(to) || reached.length >= FLOW_NODES) continue;
+        seen.add(to); next.push(to);
+        reached.push({ account: to, hop, from, tokens: r(e.tokens, 0), supply_share: share(e.tokens), transfers: e.n, first_ts: e.first_ts });
+      }
+      frontier = next;
+    }
+    const outTokens = [...first.values()].reduce((s, e) => s + e.tokens, 0);
+    trails.push({ ...src, out_tokens: r(outTokens, 0), out_share: share(outTokens), reached });
+  }
+  trails.sort((a, b) => b.out_tokens - a.out_tokens).splice(FLOW_TRAILS);
+  // what each account reached is and did
+  const ids = [...new Set(trails.flatMap((t) => t.reached.map((x) => x.account)))];
+  const [ws, ents] = await Promise.all([
+    col('wallets').find({ _id: { $in: ids } }, { projection: { cluster_id: 1, tag: 1, kind: 1 } }).toArray(),
+    col('entities').find({ _id: { $in: ids } }, { projection: { label: 1, type: 1 } }).toArray(),
+  ]);
+  const wm = new Map(ws.map((w) => [w._id, w])), em = new Map(ents.map((x) => [x._id, x]));
+  const cs = await col('clusters').find({ _id: { $in: [...new Set(ws.map((w) => w.cluster_id).filter(Boolean))] } }, { projection: { size: 1, tag: 1, 'ai.label': 1, 'rule.tags': 1, creator_flag: 1 } }).toArray();
+  const cm = new Map(cs.map((c) => [c._id, c]));
+  for (const t of trails) {
+    for (const x of t.reached) {
+      const w = wm.get(x.account), ent = em.get(x.account), tr = traders.get(x.account);
+      const exchange = ent?.type === 'exchange' || w?.kind === 'exchange';
+      x.kind = exchange ? 'exchange' : INFRA.test(x.account) ? 'venue' : w?.kind || ent?.type || null;
+      x.label = ent?.label || null; x.tag = w ? tagOf(w.tag) : null; x.group = groupBrief(cm.get(w?.cluster_id));
+      x.sold_near = tr ? r(tr.sell_near) : 0; x.bought_near = tr ? r(tr.buy_near) : 0;
+      x.passed_on = out.has(x.account);
+      x.outcome = exchange ? 'exchange' : x.sold_near > 0 ? 'sold' : x.passed_on ? 'passed on' : 'kept';
+    }
+    const sold = t.reached.filter((x) => x.sold_near > 0);
+    t.summary = { accounts: t.reached.length, max_hop: t.reached.reduce((m, x) => Math.max(m, x.hop), 0), sold_accounts: sold.length,
+      sold_near: r(sold.reduce((s, x) => s + x.sold_near, 0)), exchanges: t.reached.filter((x) => x.outcome === 'exchange').map((x) => x.label || x.account),
+      early_or_group: t.reached.filter((x) => x.group || x.tag).length };
+  }
+  return { hops, transfers: transfers.length, trails };
 }
 
 /** Build the analysis from stored data (and live balances for the largest holders). */
@@ -175,6 +235,11 @@ export async function buildAnalysis(id) {
   const top10 = holders.slice(0, 10).reduce((s, h) => s + (h.supply_share || 0), 0);
   const holdersSec = { holders_est: est.length, top10_share: supply ? r(top10, 4) : null, rows: holders };
 
+  // ---- where the tokens went: transfers out of the creator and the early buyers, followed up to ANALYSIS_FLOW_HOPS hops
+  const flowSources = [...(creator ? [{ account: creator, role: 'creator', rank: null }] : []),
+    ...entries.filter((e) => e.wallet !== creator).map((e) => ({ account: e.wallet, role: 'early buyer', rank: e.rank }))];
+  const tokenFlowsSec = await tokenFlows(id, flowSources, { hops: config.analysis.flowHops, traders, supply });
+
   // ---- risk notes: facts worth flagging, high first
   const flags = [];
   const add = (level, text) => flags.push({ level, text });
@@ -204,11 +269,16 @@ export async function buildAnalysis(id) {
   if (strongShared.length) add('medium', `${strongShared.length} funder(s) paid several early buyers that the groups do not link yet.`);
   if (holdersSec.top10_share != null && holdersSec.top10_share >= 0.5) add('medium', `The 10 largest holders checked hold ${(holdersSec.top10_share * 100).toFixed(0)}% of supply.`);
   if (launch.transfer_fee_pct) add('info', `Transfer fee ${launch.transfer_fee_pct}%.`);
+  const devTrail = tokenFlowsSec.trails.find((x) => x.role === 'creator');
+  if (devTrail?.summary.sold_near > 0) add('high', `Tokens the creator moved out by transfer reached ${devTrail.summary.accounts} account(s) within ${devTrail.summary.max_hop} hop(s); ${devTrail.summary.sold_accounts} of them sold ${devTrail.summary.sold_near} NEAR on the pool.`);
+  else if (devTrail) add('medium', `The creator moved ${devTrail.out_share != null ? (devTrail.out_share * 100).toFixed(1) + '% of supply' : devTrail.out_tokens + ' tokens'} out by transfer to ${devTrail.summary.accounts} account(s) (up to ${devTrail.summary.max_hop} hop(s)).`);
+  const earlyTrails = tokenFlowsSec.trails.filter((x) => x.role === 'early buyer'), earlySold = earlyTrails.reduce((s, x) => s + x.summary.sold_near, 0);
+  if (earlySold > 0) add('medium', `${earlyTrails.length} early buyer(s) moved tokens out by transfer; the accounts that received them (up to ${config.analysis.flowHops} hops) sold ${r(earlySold)} NEAR on the pool.`);
   const order = { high: 0, medium: 1, info: 2 };
   flags.sort((a, b) => order[a.level] - order[b.level]);
 
   return { token: id, symbol: t.symbol || null, name: t.name || null, built_ts: Date.now(), age_min: Math.round((Date.now() - live) / MIN), data_to_ts: t.ledger?.synced_to_ts ?? trades.at(-1)?.ts ?? null,
-    launch, creator: creatorSec, flows, early: { wallets: entries.length, near_in: r(earlyNear), rows: early }, groups, shared_funders: sharedFunders, repeat, sellers, holders: holdersSec, flags };
+    launch, creator: creatorSec, flows, early: { wallets: entries.length, near_in: r(earlyNear), rows: early }, groups, shared_funders: sharedFunders, repeat, sellers, holders: holdersSec, token_flows: tokenFlowsSec, flags };
 }
 
 /** Cached analysis (rebuilt when older than CACHE_MS or when `refresh`). */

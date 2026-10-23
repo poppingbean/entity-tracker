@@ -17,7 +17,10 @@ const SYSTEM = `You are an on-chain analyst writing a short investigation of a N
 You get one JSON evidence packet built by a tracker: launch mechanics and contract audit, the creator (age, funders, earlier launches, trades in this token, current balance),
 price and flows after launch, the early buyers (entry rank, delay, NEAR in, share of supply, wallet age, win-rate tag, group), the linked GROUPS among early buyers
 (wallets the tracker links by funding chains, money flow and synchronised buys; their tag and lifetime record), funders shared by several early buyers,
-repeat actors seen early in other launches, the biggest sellers, the largest holders (balances checked live) and rule-based risk flags.
+repeat actors seen early in other launches, the biggest sellers, the largest holders (balances checked live), TOKEN_FLOWS and rule-based risk flags.
+TOKEN_FLOWS follows tokens that left the creator and the early buyers by plain transfer (not a sale), hop by hop: each account reached has its hop, the account it
+received from, the tokens received, and its outcome (sold = it sold on the pool, sold_near counts all its sales of this token; passed on; kept; exchange). Use it to say
+where the dev's and insiders' tokens really ended up: a creator or early buyer that "never sold" but passed tokens to wallets that then sold is a hidden dump.
 ${COMMON}
 Reply with ONE JSON object and nothing else, with exactly these keys:
 {"summary":"3-5 sentences: what happened at launch, who bought, who is in control now","findings":["4-7 short findings, most important first"],
@@ -26,7 +29,8 @@ Reply with ONE JSON object and nothing else, with exactly these keys:
 const SYSTEM_UPDATE = `You are an on-chain analyst keeping an investigation of a NEAR Protocol meme token up to date.
 You get: "previous" = your last assessment and when it was written; "since" = what changed on chain between that assessment and now (trades in the window, the biggest
 buyers and sellers in it with their tag and group, price, the creator, early buyers and linked groups that sold, holders that entered, left or moved, risk flags added or
-removed); "now" = a compact view of the current state. Update the assessment: keep what still holds, revise what the new activity changes, and do not retell the launch.
+removed); "now" = a compact view of the current state, with TOKEN_FLOWS (tokens that left the creator and early buyers by transfer, followed hop by hop: who received
+them and whether they sold on the pool, passed them on, kept them or sent them to an exchange). Update the assessment: keep what still holds, revise what the new activity changes, and do not retell the launch.
 ${COMMON}
 Reply with ONE JSON object and nothing else, with exactly these keys:
 {"changes":["2-6 short points on what happened since the previous assessment, most important first"],"summary":"3-5 sentences: the current picture",
@@ -49,8 +53,18 @@ export function aiPacket(a) {
     repeat: a.repeat.slice(0, 8).map((x) => ({ ...x, wallet: short(x.wallet), group: x.group?.id || null })),
     sellers: a.sellers.slice(0, 6).map((x) => ({ ...x, account: short(x.account), group: x.group?.id || null })),
     holders: { top10_share: a.holders.top10_share, rows: a.holders.rows.slice(0, 10).map((x) => ({ account: short(x.account), tokens: x.tokens, verified: x.verified, supply_share: x.supply_share, early_rank: x.early_rank, tag: x.tag, group: x.group?.id || null, is_creator: x.is_creator || undefined })) },
+    token_flows: flowsBrief(a.token_flows),
     flags: a.flags,
   };
+}
+
+/** The transfer trails, trimmed for the model: the largest trails and the accounts that matter most in each (sold, exchange, then by tokens). */
+function flowsBrief(f) {
+  if (!f) return null;
+  const rank = { exchange: 0, sold: 1, 'passed on': 2, kept: 3 };
+  return { hops: f.hops, transfers: f.transfers, trails: (f.trails || []).slice(0, 6).map((t) => ({ source: short(t.account), role: t.role, rank: t.rank ?? undefined, out_tokens: t.out_tokens, out_share: t.out_share, summary: t.summary,
+    reached: [...t.reached].sort((a, b) => rank[a.outcome] - rank[b.outcome] || b.tokens - a.tokens).slice(0, 15)
+      .map((x) => ({ account: short(x.account), hop: x.hop, from: short(x.from), tokens: x.tokens, supply_share: x.supply_share, outcome: x.outcome, sold_near: x.sold_near || undefined, label: x.label || undefined, tag: x.tag || undefined, group: x.group?.id || undefined })) })) };
 }
 
 /** Compare two packets (previous snapshot, current): what moved, without the trades (see changesSince). No I/O. */
@@ -108,7 +122,10 @@ export async function changesSince(analysis, prevAi) {
   const cur = aiPacket(analysis);
   const trades = await tradesSince(analysis.token, prevAi.data_to_ts, analysis.data_to_ts);
   const diff = diffPackets(prevAi.snapshot, cur);
-  const material = trades.trades > 0 || diff.flags.added.length > 0 || diff.flags.removed.length > 0 || !!diff.creator;
+  // tokens moved by transfer change the picture even without a trade (and a snapshot from before the trails existed has none)
+  const trailKey = (p) => JSON.stringify((p?.token_flows?.trails || []).map((t) => [t.source, t.summary]));
+  const flowsMoved = trailKey(prevAi.snapshot) !== trailKey(cur);
+  const material = trades.trades > 0 || diff.flags.added.length > 0 || diff.flags.removed.length > 0 || !!diff.creator || flowsMoved;
   return { cur, since: { from: { assessed_ts: prevAi.ts, data_to_ts: prevAi.data_to_ts }, to: { data_to_ts: analysis.data_to_ts }, trades, ...diff }, material };
 }
 
@@ -139,7 +156,7 @@ export async function assessWithAi(analysis) {
     await col('analyses').updateOne({ _id: analysis.token }, { $set: { 'ai.checked_ts': Date.now(), 'ai.checked_to_ts': analysis.data_to_ts } });
     return { ...prev, checked_ts: Date.now(), unchanged: true };
   }
-  const now = { age_min: cur.age_min, flows: cur.flows, creator: cur.creator && { balance: cur.creator.balance, balance_share: cur.creator.balance_share, traded: cur.creator.traded }, holders: cur.holders, flags: cur.flags };
+  const now = { age_min: cur.age_min, flows: cur.flows, creator: cur.creator && { balance: cur.creator.balance, balance_share: cur.creator.balance_share, traded: cur.creator.traded }, holders: cur.holders, token_flows: cur.token_flows, flags: cur.flags };
   const packet = { previous: { ts: prev.ts, risk_level: prev.risk_level, confidence: prev.confidence, summary: prev.summary, findings: prev.findings, conclusion: prev.conclusion, changes: prev.changes }, since, now };
   const { json, model } = await ask(SYSTEM_UPDATE, JSON.stringify(packet));
   const ai = { ...clean(json), mode: 'update', model, ts: Date.now(), since_ts: prev.ts, since_data_to_ts: prev.data_to_ts, data_to_ts: analysis.data_to_ts, for_built_ts: analysis.built_ts,

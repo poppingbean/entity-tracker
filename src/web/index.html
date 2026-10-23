@@ -1033,6 +1033,16 @@ async function analysisPage(id, refresh) {
   // sellers
   h += `<div class="card"><h2>Who sold <span class="muted">largest NEAR taken out</span></h2><table><tr><th>Account</th><th class="num">Bought</th><th class="num">Sold</th><th class="num">Net</th><th class="num">Early #</th><th>Group</th></tr>
     ${a.sellers.map((x) => `<tr><td>${anaAcct(x.account, x.known, 18)}${x.is_creator ? ' <span class="v bad">creator</span>' : ''}</td><td class="num">${n(x.buy_near, 1)}</td><td class="num">${n(x.sell_near, 1)}</td><td class="num ${roiCls(x.net_near)}">${signed(x.net_near)}</td><td class="num">${x.early_rank ?? '–'}</td><td>${grpChip(x.group)}</td></tr>`).join('') || empty(6, 'no sales yet')}</table></div></div>`;
+  // where the tokens went: transfers out of the creator and the early buyers, hop by hop
+  const TF = a.token_flows;
+  if (TF) {
+    const outc = { sold: '<span class="r">sold</span>', exchange: '<span class="v neutral">exchange</span>', 'passed on': '<span class="b">passed on</span>', kept: '<span class="muted">kept</span>' };
+    h += `<div class="card"><h2>Where the tokens went <span class="muted">moved out by transfer (not sold) from the creator and early buyers, followed up to ${TF.hops} hops · ${n(TF.transfers, 0)} transfers stored</span></h2>
+    ${TF.trails.map((t) => `<h3>${anaAcct(t.account, true, 22)} <span class="muted small">${esc(t.role)}${t.rank ? ' #' + t.rank : ''} · sent ${n(t.out_tokens, 0)} tokens${t.out_share != null ? ` (${pct(t.out_share, 2)} of supply)` : ''} · reached ${t.summary.accounts} account(s), ${t.summary.max_hop} hop(s)${t.summary.sold_near ? ` · <span class="r">${t.summary.sold_accounts} sold ${n(t.summary.sold_near, 1)} N</span>` : ''}</span></h3>
+      <table><tr><th class="num">Hop</th><th>Account</th><th>From</th><th class="num">Tokens</th><th class="num">Supply</th><th>Then</th><th class="num">Sold</th><th>Group</th></tr>
+      ${t.reached.slice(0, 25).map((x) => `<tr><td class="num">${x.hop}</td><td>${anaAcct(x.account, !!(x.tag || x.group), 20)}${x.label ? ` <span class="muted small">${esc(x.label)}</span>` : ''}</td><td>${anaAcct(x.from, true, 16)}</td><td class="num">${n(x.tokens, 0)}</td><td class="num">${pct(x.supply_share, 2)}</td><td>${outc[x.outcome] || esc(x.outcome)}</td><td class="num">${x.sold_near ? n(x.sold_near, 1) + ' N' : '–'}</td><td>${grpChip(x.group)}</td></tr>`).join('')}</table>`).join('') || '<p class="muted small">No tokens left the creator or the early buyers by transfer (only through trades).</p>'}
+    <p class="small muted">"Sold" counts every sale of this token by that account on the pool. Transfers are read with the token's trades, so the trail is as complete as its ledger.</p></div>`;
+  }
   // holders
   const H = a.holders;
   h += `<div class="card"><h2>Largest holders <span class="muted">${H.top10_share != null ? `top 10 hold ${pct(H.top10_share, 1)} of supply · ` : ''}balances read live with ft_balance_of</span></h2><table><tr><th>Account</th><th class="num">Tokens</th><th class="num">Supply</th><th>Checked</th><th class="num">Early #</th><th>Tag</th><th>Group</th></tr>
@@ -1044,13 +1054,13 @@ function anaAiBody(a) {
   const ai = a.ai, job = a.ai_job, running = !!job?.running, tok = esc(JSON.stringify(a.token));
   const btn = a.ai_enabled ? `<button ${running ? 'disabled' : ''} onclick="this.disabled=true;anaAsk(${tok})">${ai ? 'Update with the latest activity' : 'Ask the AI analyst'}</button>` : '';
   const checked = ai?.checked_ts && ai.checked_ts > ai.ts ? ai.checked_ts : null;
-  const status = running ? `<p class="muted small">${ai ? `Updating the assessment with what changed since ${when(ai.ts)}` : 'Writing the assessment'} (started ${since(job.started)}; usually under a minute) …</p>`
+  const status = running ? `<p class="muted small">${ai ? `Updating the assessment with what changed since ${when(ai.ts)}` : 'Writing the assessment'} (started ${since(job.started)}${job.step ? ` · ${esc(job.step)}` : ''}; the latest trades are read first, then the review is written) …</p>`
     : job?.error ? `<p class="r small">Last run failed: ${esc(job.error)}</p>`
     : checked || job?.unchanged ? `<p class="muted small">No new on-chain activity since this assessment (checked ${since(checked || job.started)}).</p>` : '';
   const ul = (xs) => (xs?.length ? `<ul class="flags">${xs.map((f) => `<li>${esc(f)}</li>`).join('')}</ul>` : '');
   const risk = (lvl) => `<span class="v ${lvl === 'high' ? 'bad' : lvl === 'medium' ? 'neutral' : 'good'}">risk ${esc(lvl)}</span>`;
   if (!ai) return `<div class="card"><div class="head"><h2>AI analyst</h2>${btn}</div>${status}
-    <p class="muted small">Runs only when asked. The first run writes an assessment from the figures below; every later run updates it with what changed on chain since the previous run.</p></div>`;
+    <p class="muted small">Runs only when asked. Every run first reads the token's latest trades and follows tokens moved out by transfer (up to 5 hops). The first run writes an assessment from the figures below; every later run updates it with what changed on chain since the previous run.</p></div>`;
   let h = `<div class="card"><div class="head"><h2>AI analyst ${risk(ai.risk_level)}${ai.previous_risk && ai.previous_risk !== ai.risk_level ? ` <span class="muted small">was ${esc(ai.previous_risk)}</span>` : ''}
       <span class="muted small">${ai.mode === 'update' ? 'update' : 'first assessment'} · ${when(ai.ts)} · confidence ${n(ai.confidence, 2)} · ${esc(ai.model || '')}</span></h2>${btn}</div>${status}`;
   if (ai.changes?.length) h += `<h3>Since the previous assessment <span class="muted small">${when(ai.since_ts)}${ai.window ? ` · ${ai.window.trades} trades · ${n(ai.window.buy_near, 1)} N in / ${n(ai.window.sell_near, 1)} N out` : ''}</span></h3>${ul(ai.changes)}`;
