@@ -71,8 +71,8 @@ export const adapters = {
     },
   },
 
-  // tkn.near: plain FT factory ("<symbol>.tkn.near"). The token is minted without a pool; the owner adds liquidity on Ref DCL later, so the
-  // token waits as "awaiting_pool" until discoverTknPools() (collect/launches.js) finds its pool.
+  // tkn.near: plain FT factory ("<symbol>.tkn.near"). The token is minted without a pool; the owner adds liquidity later (Ref DCL, or a
+  // Ref v2 pool against wNEAR as BLACKDRAGON did), so the token waits as "awaiting_pool" until checkTknPool() (collect/launches.js) finds it.
   tkn: {
     account: 'tkn.near',
     parse(tx) {

@@ -47,7 +47,7 @@ export async function tradesFromTxs(token, pool, txs) {
       }
     } else {
       for (const l of tx.logs.filter((x) => x.executor === REFV2)) {
-        const m = l.text.match(/^Swapped (\d+) (\S+) for (\d+) (\S+)/); if (!m) continue;
+        const m = l.text.match(/^Swapped (\d+) ([^\s,]+) for (\d+) ([^\s,]+)/); if (!m) continue; // "..., total fee N, admin fee N" follows
         const buy = m[2] === WNEAR && m[4] === token, sell = m[2] === token && m[4] === WNEAR; if (!buy && !sell) continue;
         out.push({ _id: `${tx.hash}|${idx++}`, token, ts: tx.ts, height: tx.height, hash: tx.hash, trader: tx.signer, buy, near: yoctoToNear(buy ? m[1] : m[3]), tokens: units(buy ? m[3] : m[1], dec) });
       }

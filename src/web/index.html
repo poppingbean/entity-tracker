@@ -559,7 +559,8 @@ async function startFetch(id) {
 function syncBanner(t) {
   const due = t.next_process_ts != null && t.next_process_ts <= Date.now();
   let txt, cls = 'unrated';
-  if (t.status === 'awaiting_pool') txt = 'Waiting for its pool: checked again every 10 minutes.';
+  if (t.status === 'awaiting_pool') txt = 'Waiting for its pool: checked again every 10 minutes. Sync now looks for it right away.';
+  else if (t.status === 'no_pool') txt = 'No pool found in its first week. Sync now looks for it again.';
   else if (t.status === 'skipped_quote') txt = 'Not synced: its pool is quoted in a token that cannot be valued in NEAR.';
   else if (!t.processed_ts) { txt = 'Not synced yet: queued for its first sync (the newest launches go first). Trades and early buyers appear after it.'; cls = 'win30'; }
   else if (t.status === 'done') {
@@ -573,7 +574,7 @@ function syncBanner(t) {
     if (L?.caught_up) cls = 'win80';
   }
   else txt = `Last synced ${since(t.processed_ts)} · next sync ${due ? 'due now' : 'in ' + ago(t.next_process_ts - Date.now())}`;
-  return `<div class="banner"><span class="v ${cls}">sync</span><div style="flex:1;min-width:0"><span class="small">${esc(txt)}</span><div id="fetchState" class="small"></div></div>${t.processed_ts ? `<button title="Re-apply the latest rug rules to every stored trade of this token (no chain reads)" onclick="reanalyse('${esc(t.id)}')">Re-analyse</button>` : ''}${t.status === 'awaiting_pool' || t.status === 'skipped_quote' ? '' : `<button onclick="startFetch('${esc(t.id)}')">Sync now</button>`}</div>`;
+  return `<div class="banner"><span class="v ${cls}">sync</span><div style="flex:1;min-width:0"><span class="small">${esc(txt)}</span><div id="fetchState" class="small"></div></div>${t.processed_ts ? `<button title="Re-apply the latest rug rules to every stored trade of this token (no chain reads)" onclick="reanalyse('${esc(t.id)}')">Re-analyse</button>` : ''}${t.status === 'skipped_quote' ? '' : `<button onclick="startFetch('${esc(t.id)}')">Sync now</button>`}</div>`;
 }
 
 async function tokenPage(id) {

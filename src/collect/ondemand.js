@@ -6,7 +6,7 @@ import { config } from '../config.js';
 import { info, warn } from '../log.js';
 import { adapters } from '../launchpads.js';
 import { accountRows, fetchTxs } from '../near/indexer.js';
-import { saveLaunches } from './launches.js';
+import { saveLaunches, checkTknPool } from './launches.js';
 import { processToken } from './process.js';
 import { readLedger, rebuildLedger } from './ledger.js';
 import { auditNearContract, validNearAddress } from '../audit/service.js';
@@ -45,7 +45,12 @@ async function run(id, job) {
     const bl = await col('blacklist').findOne({ token: id }); // a creator already blacklisted for this very token
     if (bl) await flagRug(id, { source: bl.source || 'tracker', reason: bl.reason, creator: bl._id, ts: bl.ts }).catch(() => {});
   }
-  if (t.status === 'awaiting_pool') { job.message = 'The token exists but has no pool yet; it is checked again every 10 minutes.'; return; }
+  if (t.status === 'awaiting_pool' || t.status === 'no_pool') {
+    // a tkn.near token without a known pool: look for it now instead of waiting for the next 10-minute round
+    step('looking for its pool');
+    if (!(await checkTknPool(t))) { job.message = 'No pool found for it yet (Ref DCL or a Ref v2 pool against wNEAR); it is checked again every 10 minutes.'; return; }
+    t = await col('tokens').findOne({ _id: id });
+  }
   if (t.status === 'skipped_quote') { job.message = 'Its pool is quoted in a token that cannot be valued in NEAR, so trades are not read.'; return; }
   const lastCp = config.outcome.minutes[config.outcome.minutes.length - 1] * 60e3;
   const deadline = job.started + config.ledger.syncNowMinutes * 60e3; // a very long history is finished by the worker, not here
