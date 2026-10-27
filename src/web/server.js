@@ -16,17 +16,35 @@ import { creatorIndex, creatorBrief, creatorFlag, creatorNetwork } from '../eval
 import { auditNearContract, getCachedAudit, validNearAddress, summarizeAudit } from '../audit/service.js';
 import { TAGS, tagOf, ruggerGroup, ruggerWallet, BEHAVIOURS, TAG_GROUPS } from '../evaluate/tags.js';
 import { getAnalysis } from '../analysis/token.js';
+import { getNftAnalysis } from '../nft/analysis.js';
+import { assessNftWithAi } from '../nft/ai.js';
+import { registerCollection, syncCollection, SOURCES } from '../nft/sync.js';
+import { view } from '../near/rpc.js';
 import { assessWithAi, getRun } from '../analysis/ai.js';
 
 const page = fs.readFileSync(new URL('./index.html', import.meta.url), 'utf8');
 // Google Search Console ownership file for app.safe-near.org, served as is at /<name>.html (before the password check, so Google can read it).
 const SITE_VERIFY = { '/google65675d2fcb9ab898.html': fs.readFileSync(new URL('./google65675d2fcb9ab898.html', import.meta.url), 'utf8') };
 // pages of the single-page UI; each is served the same HTML and the browser routes with the History API (no # in URLs)
-const UI_VIEWS = new Set(['taggroups', 'analysis', 'creators', 'explore', 'audit', 'monitor', 'sim', 'scans', 'overview', 'signals', 'groups', 'entities', 'wallets', 'tokens', 'logs', 'config']);
+const UI_VIEWS = new Set(['nfts', 'taggroups', 'analysis', 'creators', 'explore', 'audit', 'monitor', 'sim', 'scans', 'overview', 'signals', 'groups', 'entities', 'wallets', 'tokens', 'logs', 'config']);
 const HIDDEN_PUBLIC = new Set(['/api/logs', '/api/config']);
 const auditHits = new Map(); // ip -> [timestamps]
 const analysisHits = new Map(), aiHits = new Map();
 const aiRunning = new Map(); // token -> { started, error }
+const nftJobs = new Map();   // collection -> { started, passes, events, done, error }
+/** Read a hand-added collection's whole history in the background (a pass at a time, up to 40 passes per request). */
+function startNftSync(id) {
+  const job = { started: Date.now(), passes: 0, events: 0, done: false, error: null };
+  nftJobs.set(id, job);
+  (async () => {
+    for (; job.passes < 40; job.passes++) {
+      const c = await col('nft_collections').findOne({ _id: id });
+      const r = await syncCollection(c); job.events += r.added;
+      if (r.caughtUp) { job.done = true; break; }
+    }
+  })().catch((e) => { job.error = e.message; }).finally(() => { job.done = true; setTimeout(() => { if (nftJobs.get(id) === job) nftJobs.delete(id); }, 30 * 60e3); });
+  return job;
+}
 /** At most `max` calls per IP in 10 minutes. */
 function limited(map, ip, max) {
   const now = Date.now(), list = (map.get(ip) || []).filter((t) => now - t < 10 * 60e3);
@@ -489,6 +507,61 @@ const routes = {
       .then((ai) => (ai.unchanged ? aiRunning.set(id, { started, unchanged: true, done: Date.now() }) : aiRunning.delete(id)))
       .catch((e) => aiRunning.set(id, { started, error: e.message }))
       .finally(() => setTimeout(() => { if (aiRunning.get(id)?.started === started) aiRunning.delete(id); }, 10 * 60e3));
+    return { running: true, started };
+  },
+
+  // ------------------------------------------------------------ NFT collectibles
+  '/api/nfts': async (u) => {
+    const f = {};
+    const tab = u.searchParams.get('tab') || '';
+    if (tab === 'spam') f.spam = true; else { f.spam = { $ne: true }; if (tab === 'active') f.last_event_ts = { $gt: Date.now() - 24 * 3600e3 }; else if (tab) f.source = tab; }
+    const q = (u.searchParams.get('q') || '').trim(); if (q) f.$or = [{ _id: rx(q) }, { name: rx(q) }, { symbol: rx(q) }];
+    const sort = { recent: { last_event_ts: -1 }, launched: { launched_ts: -1, created_ts: -1 }, events: { events_n: -1 }, holders: { 'nb.holders': -1 } }[u.searchParams.get('sort')] || { last_event_ts: -1, 'nb.transfers_day': -1 };
+    const limit = clamp(u.searchParams.get('limit'), 50, 200), offset = Math.max(0, Number(u.searchParams.get('offset')) || 0);
+    const [total, rows, bySource] = await Promise.all([col('nft_collections').countDocuments(f), col('nft_collections').find(f).sort(sort).skip(offset).limit(limit).toArray(),
+      col('nft_collections').aggregate([{ $group: { _id: { $cond: ['$spam', 'spam', '$source'] }, n: { $sum: 1 } } }]).toArray()]);
+    const stats = new Map((await col('nft_events').aggregate([{ $match: { collection: { $in: rows.map((c) => c._id) } } },
+      { $group: { _id: '$collection', minted: { $sum: { $cond: [{ $eq: ['$kind', 'mint'] }, '$count', 0] } }, sales: { $sum: { $cond: [{ $eq: ['$kind', 'sale'] }, '$count', 0] } }, volume: { $sum: { $cond: [{ $eq: ['$kind', 'sale'] }, { $ifNull: ['$pay_near', 0] }, 0] } }, raised: { $sum: { $cond: [{ $eq: ['$kind', 'mint'] }, { $ifNull: ['$pay_near', 0] }, 0] } } } }]).toArray()).map((x) => [x._id, x]));
+    return { total, sources: Object.fromEntries(bySource.map((x) => [x._id || 'unknown', x.n])), source_labels: SOURCES,
+      rows: rows.map((c) => ({ id: c._id, name: c.name || null, symbol: c.symbol || null, source: c.source || null, spam: !!c.spam, supply: c.supply ?? null, max_supply: c.max_supply ?? null, launched_ts: c.launched_ts ?? null,
+        last_event_ts: c.last_event_ts ?? null, caught_up: !!c.caught_up, synced: c.sync_height != null, nb: c.nb || null, ...(stats.get(c._id) ? { minted: stats.get(c._id).minted, sales: stats.get(c._id).sales, volume_near: stats.get(c._id).volume, raised_near: stats.get(c._id).raised } : {}) })) };
+  },
+  '/api/nft': async (u, req) => {
+    const id = (u.searchParams.get('id') || '').trim().toLowerCase();
+    if (!validNearAddress(id)) return { error: 'invalid NEAR account id' };
+    const c = await col('nft_collections').findOne({ _id: id }, { projection: { sync_height: 1 } });
+    const job = nftJobs.get(id);
+    if (!c) return { error: 'not tracked', can_add: true };
+    if (c.sync_height == null && !job) return { error: 'not synced yet', can_add: true, syncing: false };
+    const refresh = u.searchParams.get('refresh') === '1' && !limited(analysisHits, req.socket.remoteAddress || 'ip', 6);
+    const a = await getNftAnalysis(id, { refresh });
+    const aj = aiRunning.get(`nft:${id}`);
+    return { ...a, ai_kind: 'nft', token: id, sync_job: job || null, ai_enabled: aiEnabled(), ai_job: aj ? { running: !aj.error && !aj.unchanged, error: aj.error || null, unchanged: !!aj.unchanged, started: aj.started } : null };
+  },
+  '/api/nft-add': async (u, req) => {
+    const id = (u.searchParams.get('id') || '').trim().toLowerCase();
+    if (!validNearAddress(id)) return { error: 'invalid NEAR account id' };
+    const job = nftJobs.get(id); if (job && !job.done) return { id, ...job };
+    if (!fetchAllowed(req.socket.remoteAddress || 'ip')) return { error: 'too many requests, try again in a few minutes' };
+    const meta = await view(id, 'nft_metadata').catch(() => null);
+    if (!meta?.spec && !meta?.name) return { error: 'this account is not an NFT collection (no nft_metadata)' };
+    await registerCollection(id, { name: meta.name || null, symbol: meta.symbol || null });
+    await col('nft_collections').updateOne({ _id: id, source: { $exists: false } }, { $set: { source: 'manual' } });
+    return { id, ...startNftSync(id) };
+  },
+  '/api/nft-ai': async (u, req) => {
+    const id = (u.searchParams.get('id') || '').trim().toLowerCase();
+    if (!validNearAddress(id)) return { error: 'invalid NEAR account id' };
+    if (!aiEnabled()) return { error: 'NEAR AI is not configured' };
+    const key = `nft:${id}`, job = aiRunning.get(key);
+    if (job && !job.error && !job.unchanged) return { running: true, started: job.started };
+    if (limited(aiHits, req.socket.remoteAddress || 'ip', 5)) return { error: 'too many AI requests, try again in a few minutes' };
+    const started = Date.now();
+    aiRunning.set(key, { started });
+    getNftAnalysis(id, { refresh: true }).then((a) => { if (!a) throw new Error('not found'); return assessNftWithAi(a); })
+      .then((ai) => (ai.unchanged ? aiRunning.set(key, { started, unchanged: true }) : aiRunning.delete(key)))
+      .catch((e) => aiRunning.set(key, { started, error: e.message }))
+      .finally(() => setTimeout(() => { if (aiRunning.get(key)?.started === started) aiRunning.delete(key); }, 10 * 60e3));
     return { running: true, started };
   },
 

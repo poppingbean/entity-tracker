@@ -496,3 +496,25 @@ test('tag groups: behaviours and the verdict the gate falls back to', () => {
   assert.equal(tagVerdict('loss', []), 'bots');
   assert.equal(tagVerdict('unrated', []), null);
 });
+
+// ---------------------------------------------------------------- NFT collectibles
+import { nftEventsOf, ownersOf, isSpamCollection } from '../src/nft/decode.js';
+test('NFT events: mints with proceeds, sales (buyer pays / accepted offer), free transfers, burns, owners', () => {
+  const C = 'nft.dragons.near', ev = (event, data) => ({ executor: C, standard: 'nep171', event, data: [data] });
+  const mint = nftEventsOf({ signer: 'm.near', receiver: C, calls: [{ method: 'nft_mint', depositNear: 50 }], inflows: [{ from: C, to: 'team.near', near: 49.9 }, { from: C, to: 'm.near', near: 0.05 }],
+    events: [ev('nft_mint', { owner_id: 'm.near', token_ids: ['1', '2', '3', '4', '5'] })] }, C)[0];
+  assert.equal(mint.kind, 'mint'); assert.equal(mint.count, 5); assert.equal(mint.price_near, 10); assert.deepEqual(mint.proceeds.map((p) => p.to), ['team.near'], 'refund to the minter is not proceeds');
+  const buy = nftEventsOf({ signer: 'b.near', receiver: 'market.near', calls: [{ method: 'buy', depositNear: 18 }], inflows: [{ from: 'market.near', to: 's.near', near: 15.84 }, { from: 'market.near', to: 'fees.near', near: 2.16 }],
+    events: [ev('nft_transfer', { old_owner_id: 's.near', new_owner_id: 'b.near', token_ids: ['498'] })] }, C)[0];
+  assert.equal(buy.kind, 'sale'); assert.equal(buy.price_near, 18); assert.equal(buy.seller_near, 15.84); assert.equal(buy.market, 'market.near'); assert.deepEqual(buy.fees, [{ to: 'fees.near', near: 2.16 }]);
+  const offer = nftEventsOf({ signer: 's.near', receiver: 'market.near', calls: [{ method: 'accept_offer', depositNear: 0 }], inflows: [{ from: 'market.near', to: 's.near', near: 9 }, { from: 'market.near', to: 'fees.near', near: 1 }],
+    events: [ev('nft_transfer', { old_owner_id: 's.near', new_owner_id: 'b.near', token_ids: ['7'] })] }, C)[0];
+  assert.equal(offer.kind, 'sale'); assert.equal(offer.price_near, 10, 'seller proceeds plus fees');
+  const gift = nftEventsOf({ signer: 'a.near', receiver: C, calls: [{ method: 'nft_transfer', depositNear: 0.000001 }], inflows: [], events: [ev('nft_transfer', { old_owner_id: 'a.near', new_owner_id: 'c.near', token_ids: ['2'] })] }, C)[0];
+  assert.equal(gift.kind, 'transfer', 'the 1 yocto security deposit is not a payment');
+  assert.equal(nftEventsOf({ signer: 'x', receiver: 'other.near', calls: [], inflows: [], events: [{ executor: 'other.near', standard: 'nep171', event: 'nft_mint', data: [{ owner_id: 'x', token_ids: ['1'] }] }] }, C).length, 0, 'events of other contracts are ignored');
+  const burn = { kind: 'burn', from: 'm.near', token_ids: ['3'] };
+  const owners = ownersOf([mint, { ...gift, kind: 'transfer' }, burn]);
+  assert.equal(owners.get('2'), 'c.near'); assert.equal(owners.has('3'), false); assert.equal(owners.get('1'), 'm.near');
+  assert.ok(isSpamCollection({ name: 'SWEAT GIFTCARD', symbol: 'AIRDROP' })); assert.ok(isSpamCollection({ name: 'x', holders: 2800000 })); assert.ok(!isSpamCollection({ name: 'NEAR Dragons', symbol: 'DRAGONS', holders: 88 }));
+});
