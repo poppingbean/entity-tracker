@@ -542,3 +542,28 @@ test('AI guard: the AI cannot lower rule-based risk or clear a group the rules c
   assert.deepEqual(finalVerdict({ verdict: 'neutral' }, { verdict: 'good', confidence: 0.9 }), { verdict: 'good', source: 'ai' });
   assert.deepEqual(finalVerdict({ verdict: 'good' }, { verdict: 'bad', confidence: 0.8 }), { verdict: 'bad', source: 'ai' }, 'it may still raise the alarm');
 });
+
+// ---------------------------------------------------------------- alerts and watchlists
+import { isPublicIp, checkWebhookUrl, alertMessage } from '../src/alerts/deliver.js';
+import { alertTargets } from '../src/alerts/store.js';
+import { validKey, newKey } from '../src/alerts/watch.js';
+test('alerts: webhooks never reach private / local / metadata addresses (SSRF)', async () => {
+  for (const ip of ['127.0.0.1', '10.1.2.3', '172.16.0.9', '192.168.1.1', '169.254.169.254', '100.64.0.1', '0.0.0.0', '::1', 'fd00::1', 'fe80::1', '::ffff:127.0.0.1', '224.0.0.1']) assert.equal(isPublicIp(ip), false, ip);
+  for (const ip of ['1.1.1.1', '8.8.8.8', '2606:4700:4700::1111']) assert.equal(isPublicIp(ip), true, ip);
+  for (const url of ['http://example.com/hook', 'https://user:pw@example.com/x', 'https://example.com:8443/x', 'https://localhost/x', 'https://127.0.0.1/x', 'https://[::1]/x', 'https://169.254.169.254/latest', 'ftp://example.com', 'not a url'])
+    assert.equal((await checkWebhookUrl(url)).ok, false, url);
+  assert.equal((await checkWebhookUrl('https://1.1.1.1/hook')).ok, true, 'a public address is fine');
+});
+test('alerts: owner keys, alert matching, Telegram text is escaped', () => {
+  assert.ok(validKey(newKey('web')) && validKey(newKey('api')) && validKey('tg_-1001234567'));
+  for (const k of ['web_123', 'admin', 'tg_abc', '', null, 'api_' + 'g'.repeat(32)]) assert.ok(!validKey(k), String(k));
+  assert.deepEqual(alertTargets({ related: { tokens: ['t.near'], wallets: ['w.near'], groups: ['c_12345678'], creators: [], collections: ['n.near'] } }), ['token:t.near', 'wallet:w.near', 'group:c_12345678', 'collection:n.near']);
+  const m = alertMessage({ severity: 'high', title: '<b>X</b> rugged', text: 'a & b <script>' });
+  assert.ok(m.includes('&lt;b&gt;X&lt;/b&gt;') && m.includes('a &amp; b &lt;script&gt;') && !m.includes('<script>'));
+});
+test('NFT events: a transfer to the same account is never a sale (escrow / market bookkeeping)', () => {
+  const C = 'c.near';
+  const e = nftEventsOf({ signer: 'esc.near', receiver: 'esc.near', calls: [{ method: 'buy', depositNear: 3 }], inflows: [{ from: 'esc.near', to: 'esc.near', near: 3 }],
+    events: [{ executor: C, standard: 'nep171', event: 'nft_transfer', data: [{ old_owner_id: 'esc.near', new_owner_id: 'esc.near', token_ids: ['1'] }] }] }, C)[0];
+  assert.equal(e.kind, 'transfer');
+});
