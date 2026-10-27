@@ -1,6 +1,7 @@
 // The AI analyst (NEAR AI): reviews a launch that already passed the hard gates and says whether to buy it (simulated).
 import { config } from '../config.js';
 import { chatJSON } from '../ai/nearai.js';
+import { UNTRUSTED_RULE, evidenceMessage, maxRisk, MARKER } from '../ai/untrusted.js';
 
 const system = (ctx) => `You review brand-new memecoins on NEAR for an automated SIMULATED buyer that spends a fixed amount per token (paper money, but judge as if it were real).
 You receive on-chain features collected ${ctx.followUpMinutes ? `${ctx.followUpMinutes} minutes after` : 'a few minutes after'} the token's liquidity went live.
@@ -39,10 +40,12 @@ export function normaliseAnalysis(j) {
 
 /** ctx: { holding: {costNear} | null, followUpMinutes?: number, previous?: [earlier verdicts] } */
 export async function analyse(features, rules, ctx = {}) {
-  const user = `Rule engine: score ${rules.score}/100, ${rules.failed.length ? 'failed gates: ' + rules.failed.map((g) => g.id).join(', ') : 'all gates passed'}.\n`
-    + (ctx.previous?.length ? `Earlier reviews of this token: ${JSON.stringify(ctx.previous)}\n` : '') + `\nFeatures:\n${JSON.stringify(features)}`;
-  const { json, model, usage } = await chatJSON({ system: system(ctx), user, maxTokens: config.ai.maxTokens });
+  const { user, findings } = evidenceMessage(`Rule engine: score ${rules.score}/100, ${rules.failed.length ? 'failed gates: ' + rules.failed.map((g) => g.id).join(', ') : 'all gates passed'}.`,
+    { earlier_reviews: ctx.previous?.length ? ctx.previous : undefined, features });
+  const { json, model, usage } = await chatJSON({ system: system(ctx) + UNTRUSTED_RULE, user, maxTokens: config.ai.maxTokens });
   const a = normaliseAnalysis(json);
   if (!a) throw new Error('NEAR AI answer did not match the expected format');
-  return { ...a, model, usage, ts: Date.now() };
+  // chain data that tried to instruct the AI: never a buy, at least high risk, whatever the model said
+  if (findings.length) { if (a.action === 'BUY_MORE') a.action = 'HOLD'; a.risk_level = maxRisk(a.risk_level, 'high'); a.red_flags = [`metadata tried to instruct the AI (${findings.map((f) => f.path).join(', ')}): ${MARKER}`, ...a.red_flags].slice(0, 8); }
+  return { ...a, model, usage, ts: Date.now(), ...(findings.length ? { injection: findings } : {}) };
 }
