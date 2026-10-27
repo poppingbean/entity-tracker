@@ -33,7 +33,7 @@ export function nftEventsOf(tx, collection) {
         const sellerNear = sum(inflows.filter((f) => f.to === from).map((f) => f.near));
         const fees = inflows.filter((f) => f.to !== from && f.to !== tx.signer && f.from !== tx.signer).map((f) => ({ to: f.to, near: round(f.near) }));
         const buyerPaid = tx.signer === to && paid > 0;
-        const sale = buyerPaid || sellerNear > 0;
+        const sale = (buyerPaid || sellerNear > 0) && from !== to; // a move to itself (escrow / market bookkeeping) is never a sale
         const total = buyerPaid ? paid : sellerNear + sum(fees.map((f) => f.near));
         out.push({ idx: idx++, kind: sale ? 'sale' : 'transfer', from, to, token_ids: ids, count, signer: tx.signer, market: sale ? market || collection : null,
           ...(sale ? { pay_near: round(total), price_near: round(total / count), seller_near: round(sellerNear), fees } : {}) });

@@ -85,7 +85,7 @@ export async function buildNftAnalysis(id) {
   const lastOwnerBefore = new Map(); // token -> list of { owner, ts } to spot round trips
   const wash = [];
   for (const e of events) {
-    for (const id2 of e.token_ids || []) { const h = lastOwnerBefore.get(id2) || []; if (e.kind === 'sale') {
+    for (const id2 of e.token_ids || []) { const h = lastOwnerBefore.get(id2) || []; if (e.kind === 'sale' && e.from !== e.to) {
       const reasons = [];
       if (e.from && e.to && tg.has(e.from) && tg.get(e.from) === tg.get(e.to)) reasons.push('same owner (money-linked)');
       const fund = tiesTo(wmap.get(e.to), new Set([e.from])) || tiesTo(wmap.get(e.from), new Set([e.to]));
