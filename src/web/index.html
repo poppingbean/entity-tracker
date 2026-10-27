@@ -455,6 +455,7 @@ const GATE_TEXT = {
   creator_clean_history: 'The creator launched tokens before that were rugged or dumped.',
   creator_network_clean: 'Other token creators tied to this one by funding or payments have rugged.',
   bad_groups_not_dominant: 'Wallets from groups judged dangerous made up too much of the early buying.',
+  no_ai_manipulation: 'The token name or symbol tries to give instructions to AI reviewers.',
 };
 const gateId = (g) => (typeof g === 'string' ? g : g?.id);
 const gateText = (g) => GATE_TEXT[gateId(g)] || String(gateId(g) || 'unknown check').replace(/_/g, ' ');

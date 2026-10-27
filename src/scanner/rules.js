@@ -1,6 +1,7 @@
 // Deterministic gates + a 0-100 score (ported from the live scanner), plus two gates that only this tracker can apply because it
 // knows the entities: a creator with earlier rugged / dumped launches, and early buying dominated by groups judged bad.
 import { config } from '../config.js';
+import { looksLikeInjection } from '../ai/untrusted.js';
 
 export function applyRules(f) {
   const R = config.rules;
@@ -14,6 +15,8 @@ export function applyRules(f) {
   gate(f.market.mcapUsd != null && f.market.mcapUsd >= R.minMcapUsd, 'min_mcap', `market cap ${f.market.mcapUsd == null ? 'unknown' : '$' + f.market.mcapUsd.toLocaleString('en-US')} (< $${R.minMcapUsd.toLocaleString('en-US')})`);
   gate(f.trading.uniqueBuyers >= R.minUniqueBuyers, 'min_buyers', `${f.trading.uniqueBuyers} distinct external buyers (< ${R.minUniqueBuyers})`);
   gate(!f.trading.creatorSold, 'creator_not_selling', 'creator already sold');
+  // a name / symbol that addresses an AI is an attempt to manipulate automated reviewers (this one included)
+  gate(!looksLikeInjection(f.name, f.symbol), 'no_ai_manipulation', 'the token name or symbol contains instruction-like text aimed at AI reviewers');
   const tax = f.launch.tax || {};
   const taxBps = (tax.buyBps || 0) + (tax.sellBps || 0) + Math.round((tax.transferFeePips || 0) / 100) * 2;
   gate(taxBps <= R.maxTaxBps, 'tax_ok', `round-trip tax ~${taxBps / 100}% (> ${R.maxTaxBps / 100}%)`);
