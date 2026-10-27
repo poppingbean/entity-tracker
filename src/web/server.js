@@ -24,17 +24,18 @@ import { TYPES, SEVERITIES } from '../alerts/store.js';
 import { newKey, validKey, resolveTarget, setWatch, getWatchlist, alertsFor, KINDS } from '../alerts/watch.js';
 import { alertPayload, checkWebhookUrl } from '../alerts/deliver.js';
 import { assessWithAi, getRun } from '../analysis/ai.js';
+import { addFeedback, FEEDBACK_KINDS } from '../accuracy/feedback.js';
 
 const page = fs.readFileSync(new URL('./index.html', import.meta.url), 'utf8');
 // Google Search Console ownership file for app.safe-near.org, served as is at /<name>.html (before the password check, so Google can read it).
 const SITE_VERIFY = { '/google65675d2fcb9ab898.html': fs.readFileSync(new URL('./google65675d2fcb9ab898.html', import.meta.url), 'utf8') };
 // pages of the single-page UI; each is served the same HTML and the browser routes with the History API (no # in URLs)
-const UI_VIEWS = new Set(['alerts', 'nfts', 'taggroups', 'analysis', 'creators', 'explore', 'audit', 'monitor', 'sim', 'scans', 'overview', 'signals', 'groups', 'entities', 'wallets', 'tokens', 'logs', 'config']);
+const UI_VIEWS = new Set(['accuracy', 'alerts', 'nfts', 'taggroups', 'analysis', 'creators', 'explore', 'audit', 'monitor', 'sim', 'scans', 'overview', 'signals', 'groups', 'entities', 'wallets', 'tokens', 'logs', 'config']);
 const HIDDEN_PUBLIC = new Set(['/api/logs', '/api/config']);
 const auditHits = new Map(); // ip -> [timestamps]
 const analysisHits = new Map(), aiHits = new Map();
 const aiRunning = new Map(); // token -> { started, error }
-const watchHits = new Map(), keyHits = new Map();
+const watchHits = new Map(), keyHits = new Map(), feedbackHits = new Map();
 /** Watchlist changes over POST (JSON body): create a key, add / remove an item, set an API key's webhook. */
 const POSTS = {
   '/api/watch/key': async (b, ip) => {
@@ -59,6 +60,12 @@ const POSTS = {
     if (!chk.ok) return { error: chk.error };
     await col('watchlists').updateOne({ _id: b.key }, { $set: { webhook: String(b.url), kind: 'api' }, $setOnInsert: { items: [], created_ts: Date.now() } }, { upsert: true });
     return { ok: true, webhook: String(b.url) };
+  },
+  /** "This verdict is wrong": queued for review; an accepted report becomes ground truth for the accuracy numbers. */
+  '/api/feedback': async (b, ip) => {
+    if (limited(feedbackHits, ip, 10)) return { error: 'too many reports, try again later' };
+    try { const f = await addFeedback({ kind: b.kind, id: b.id, verdict: b.verdict, note: b.note, from: b.from }); return { ok: true, id: String(f._id) }; }
+    catch (e) { return { error: e.message }; }
   },
 };
 const nftJobs = new Map();   // collection -> { started, passes, events, done, error }
@@ -538,6 +545,13 @@ const routes = {
       .catch((e) => aiRunning.set(id, { started, error: e.message }))
       .finally(() => setTimeout(() => { if (aiRunning.get(id)?.started === started) aiRunning.delete(id); }, 10 * 60e3));
     return { running: true, started };
+  },
+
+  // ------------------------------------------------------------ measured accuracy
+  /** The latest accuracy pass (worker, hourly) plus the hand labels and the review queue size. */
+  '/api/accuracy': async () => {
+    const [acc, labels, pending] = await Promise.all([metaGet('accuracy'), col('ground_truth').aggregate([{ $group: { _id: { k: '$kind', l: '$label' }, n: { $sum: 1 } } }]).toArray(), col('feedback').countDocuments({ status: 'pending' })]);
+    return { accuracy: acc, labels: labels.map((x) => ({ kind: x._id.k, label: x._id.l, n: x.n })), feedback_pending: pending, feedback_kinds: FEEDBACK_KINDS };
   },
 
   // ------------------------------------------------------------ alerts and watchlists

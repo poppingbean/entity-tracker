@@ -17,6 +17,10 @@
 //   node src/cli.js review [n]                         NEAR AI review of up to n groups
 //   node src/cli.js status                             counts
 //   node src/cli.js check-ai                           test the NEAR AI key / model
+//   node src/cli.js accuracy                           score gates, rule score, audit risk, AI and group verdicts against what happened
+//   node src/cli.js backtest KEY=VALUE ...             replay the gates on every stored check with config.rules changed (e.g. minBuyers=8)
+//   node src/cli.js truth <kind> <id> bad|good|clear [note]   hand label (kind: token|group|wallet|collection)
+//   node src/cli.js feedback [accept|reject <id>]      list pending reports, or review one
 import { config, validateConfig } from './config.js';
 import { connectDb, closeDb, col, metaGet } from './db.js';
 import { enableDbLog, flushLogs, info } from './log.js';
@@ -35,6 +39,8 @@ import { expandNetworks } from './graph/expand.js';
 const buildEntries_done = async () => { await evaluateGroups(); };
 import { resetSim, simBuy, managePositions } from './sim/portfolio.js';
 import { checkAi, aiEnabled, aiStatus } from './ai/nearai.js';
+import { evaluateAccuracy, backtest } from './accuracy/run.js';
+import { listFeedback, resolveFeedback, setTruth, clearTruth } from './accuracy/feedback.js';
 
 const [cmd, ...args] = process.argv.slice(2);
 const errs = validateConfig();
@@ -162,6 +168,23 @@ try {
   } else if (cmd === 'check-ai') {
     const s = await checkAi();
     console.log(JSON.stringify({ enabled: aiEnabled(), model: config.ai.model, baseUrl: config.ai.baseUrl, ok: s.ok, error: s.error, calls: s.calls }, null, 1));
+  } else if (cmd === 'accuracy') {
+    console.log(JSON.stringify(await evaluateAccuracy(), null, 1));
+  } else if (cmd === 'backtest') {
+    const overrides = {};
+    for (const a of args) {
+      const [k, v] = a.split('=');
+      if (!(k in config.rules)) throw new Error(`unknown rule ${k} (one of: ${Object.keys(config.rules).join(', ')})`);
+      overrides[k] = v === 'true' ? true : v === 'false' ? false : Number.isFinite(Number(v)) ? Number(v) : v;
+    }
+    console.log(JSON.stringify(await backtest(overrides), null, 1));
+  } else if (cmd === 'truth') {
+    const [kind, id, label, ...note] = args;
+    if (label === 'clear') await clearTruth(kind, id); else await setTruth(kind, id, label, { note: note.join(' ') });
+    info(`truth ${kind}:${id} = ${label}`);
+  } else if (cmd === 'feedback') {
+    if (args[0] === 'accept' || args[0] === 'reject') { const f = await resolveFeedback(args[1], args[0] === 'accept'); info(`feedback ${args[1]} (${f.kind}:${f.id} ${f.verdict}) ${args[0]}ed`); }
+    else for (const f of await listFeedback('pending')) console.log(`${f._id}  ${new Date(f.ts).toISOString()}  ${f.kind}:${f.id}  says ${f.verdict}  ${f.note}`);
   } else if (cmd === 'status') {
     const [tokens, done, entries, wallets, profiled, clusters, byVerdict] = await Promise.all([
       col('tokens').countDocuments(), col('tokens').countDocuments({ status: 'done' }), col('entries').countDocuments(), col('wallets').countDocuments({ is_early: true }),

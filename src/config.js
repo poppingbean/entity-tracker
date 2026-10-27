@@ -118,6 +118,8 @@ export const config = {
     ignoreRunupBelowMcapUsd: num(process.env.IGNORE_RUNUP_BELOW_MCAP_USD, 10000),
     minScore: num(process.env.MIN_RULE_SCORE, 55),
   },
+  // ground truth for the accuracy numbers: a launch is "bad" when a buyer at the check held less than this share of the price 24 h later
+  accuracy: { badBelow: num(process.env.ACCURACY_BAD_BELOW, 0.85), everyMs: num(process.env.ACCURACY_EVERY_MS, 3600e3) },
   // the token analysis page's AI review: it reads the latest trades first, then follows tokens moved out by transfer
   analysis: {
     syncMinutes: num(process.env.ANALYSIS_SYNC_MINUTES, 5),  // how long an AI review reads new trades before writing (the worker reads the rest)

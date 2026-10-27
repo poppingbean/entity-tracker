@@ -9,6 +9,7 @@ import { positionPnl } from '../src/sim/portfolio.js';
 import { redact } from '../src/web/redact.js';
 import { normaliseReview } from '../src/ai/review.js';
 import { aiPacket, diffPackets } from '../src/analysis/ai.js';
+import { outcomeLabel, confusion, auc, calibration, gateLift, returnSplit } from '../src/accuracy/score.js';
 
 const MIN = 60e3;
 const T0 = 1_700_000_000_000;
@@ -566,4 +567,22 @@ test('NFT events: a transfer to the same account is never a sale (escrow / marke
   const e = nftEventsOf({ signer: 'esc.near', receiver: 'esc.near', calls: [{ method: 'buy', depositNear: 3 }], inflows: [{ from: 'esc.near', to: 'esc.near', near: 3 }],
     events: [{ executor: C, standard: 'nep171', event: 'nft_transfer', data: [{ old_owner_id: 'esc.near', new_owner_id: 'esc.near', token_ids: ['1'] }] }] }, C)[0];
   assert.equal(e.kind, 'transfer');
+});
+test('accuracy: ground truth label, confusion matrix, AUC, calibration, gate lift, return split', () => {
+  assert.equal(outcomeLabel({ priceAtCheck: 1, price24h: 0.8 }).label, 'bad');
+  assert.equal(outcomeLabel({ priceAtCheck: 1, price24h: 0.9 }).label, 'good');
+  assert.equal(outcomeLabel({ priceAtCheck: 1, price24h: 0.9, badBelow: 0.95 }).label, 'bad');
+  assert.equal(outcomeLabel({ priceAtCheck: 1, price24h: 0.1, manual: 'good' }).source, 'manual', 'a hand label wins');
+  assert.equal(outcomeLabel({ priceAtCheck: null, price24h: 1 }).label, null, 'no price at the check: not judged');
+  const c = confusion([{ flagged: true, bad: true }, { flagged: true, bad: false }, { flagged: false, bad: true }, { flagged: false, bad: false }, { flagged: false, bad: false }]);
+  assert.deepEqual([c.tp, c.fp, c.fn, c.tn, c.precision, c.recall, c.bad_rate_passed], [1, 1, 1, 2, 0.5, 0.5, 0.333]);
+  assert.equal(auc([{ risk: 3, bad: true }, { risk: 2, bad: true }, { risk: 1, bad: false }, { risk: 0, bad: false }]), 1);
+  assert.equal(auc([{ risk: 0, bad: true }, { risk: 1, bad: false }]), 0, 'backwards');
+  assert.equal(auc([{ risk: 1, bad: true }, { risk: 1, bad: false }]), 0.5, 'ties count half');
+  assert.equal(auc([{ risk: 1, bad: true }]), null, 'needs both classes');
+  assert.deepEqual(calibration([{ value: 10, bad: true }, { value: 50, bad: false }, { value: 60, bad: true }, { value: null, bad: true }], [0, 40, 101]).map((b) => [b.n, b.bad_rate]), [[1, 1], [2, 0.5]]);
+  const L = gateLift([{ failed: new Set(['a']), bad: true }, { failed: new Set(['a']), bad: false }, { failed: new Set(['b']), bad: false }, { failed: new Set(), bad: false }], ['a', 'b']);
+  assert.deepEqual(L.map((g) => [g.gate, g.lift, g.good_blocked]), [['a', 2, 1], ['b', 0, 1]]);
+  const R = returnSplit([{ flagged: true, ret: 0.5 }, { flagged: false, ret: 1.2 }, { flagged: false, ret: 0.8 }, { flagged: false, ret: null }]);
+  assert.deepEqual([R.passed.n, R.passed.mean, R.flagged.median], [2, 1, 0.5]);
 });
