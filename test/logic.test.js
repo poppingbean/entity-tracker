@@ -444,3 +444,55 @@ test('AI analyst updates: diffPackets reports only what moved since the previous
   assert.deepEqual(d.flags.added.map((f) => f.text), ['new flag']); assert.deepEqual(d.flags.removed.map((f) => f.text), ['old flag']);
   assert.equal(diffPackets(cur, cur).creator, undefined, 'an unchanged creator is left out');
 });
+
+// ---------------------------------------------------------------- linked groups vs tag groups
+import { tagVerdict, walletBehaviours } from '../src/evaluate/tags.js';
+test('linked groups: services never link; a shared funder links at most 10 wallets; a member funding members always does', () => {
+  const W = (id, funder) => ({ _id: id, funders: [{ account: funder, kind: 'wallet' }], chain: [{ account: funder, kind: 'wallet', hop: 1 }], flow_out: [] });
+  const c = { cobuySeconds: 15, cobuyMinTokens: 4, deepDepth: 0 };
+  // a service (account factory / trading-bot platform / labelled service) funding two wallets links nothing
+  let r = buildGroups([W('a', 'l000004.factory.shardsmarket.near'), W('b', 'l000004.factory.shardsmarket.near')], [], new Map(), c);
+  assert.notEqual(r.walletGroup.get('a'), r.walletGroup.get('b'), 'factory');
+  r = buildGroups([W('x.trade.unrlzd.near', 'trade.unrlzd.near'), W('y.trade.unrlzd.near', 'trade.unrlzd.near')], [], new Map(), c);
+  assert.notEqual(r.walletGroup.get('x.trade.unrlzd.near'), r.walletGroup.get('y.trade.unrlzd.near'), 'platform opening its users’ accounts');
+  r = buildGroups([W('a', 'svc.near'), W('b', 'svc.near')], [], new Map(), { ...c, services: new Set(['svc.near']) });
+  assert.notEqual(r.walletGroup.get('a'), r.walletGroup.get('b'), 'labelled service');
+  // a personal shared funder: up to 10 wallets link, 11 do not
+  const ten = Array.from({ length: 10 }, (_, i) => W(`t${i}`, 'boss.near')), eleven = Array.from({ length: 11 }, (_, i) => W(`e${i}`, 'big.near'));
+  r = buildGroups([...ten, ...eleven], [], new Map(), c);
+  assert.equal(new Set(ten.map((w) => r.walletGroup.get(w._id))).size, 1, '10 wallets of one funder are one group');
+  assert.equal(new Set(eleven.map((w) => r.walletGroup.get(w._id))).size, 11, 'a funder of 11 is a distributor');
+  // an early wallet that directly funded 15 others is ownership, whatever the count
+  const kids = Array.from({ length: 15 }, (_, i) => W(`k${i}`, 'op.near'));
+  r = buildGroups([{ _id: 'op.near', funders: [], chain: [], flow_out: [] }, ...kids], [], new Map(), c);
+  assert.equal(new Set(['op.near', ...kids.map((w) => w._id)].map((x) => r.walletGroup.get(x))).size, 1, 'member funding members');
+});
+
+test('linked groups: co-buys are weak links that never merge two money groups', () => {
+  const W = (id, funder) => ({ _id: id, funders: funder ? [{ account: funder, kind: 'wallet' }] : [], chain: funder ? [{ account: funder, kind: 'wallet', hop: 1 }] : [], flow_out: [] });
+  const wallets = [W('a1', 'f1.near'), W('a2', 'f1.near'), W('b1', 'f2.near'), W('b2', 'f2.near'), W('lone'), W('p1'), W('p2')];
+  const entries = [];
+  for (let t = 0; t < 4; t++) for (const w of ['a1', 'b1', 'lone']) entries.push({ token: `t${t}`, wallet: w, first_buy_ts: T0 + t * 1e6 });
+  for (let t = 10; t < 14; t++) for (const w of ['p1', 'p2']) entries.push({ token: `t${t}`, wallet: w, first_buy_ts: T0 + t * 1e6 });
+  const r = buildGroups(wallets, entries, new Map(), { cobuySeconds: 15, cobuyMinTokens: 4, deepDepth: 0 });
+  const g = (x) => r.walletGroup.get(x);
+  assert.notEqual(g('a1'), g('b1'), 'two money groups that co-buy stay apart');
+  assert.ok(g('lone') === g('a1') || g('lone') === g('b1'), 'a lone co-buyer attaches to a group');
+  const host = r.groups.find((x) => x.members.includes('lone'));
+  assert.deepEqual(host.weak_members, ['lone'], 'and is marked as attached only by co-buys');
+  assert.ok(host.links.some((l) => l.type === 'cobuy' && l.weak));
+  assert.equal(g('p1'), g('p2'), 'two lone co-buyers pair up');
+  assert.equal(r.groups.find((x) => x.members.includes('p1')).weak_only, true, 'as a co-buy-only group');
+  assert.ok(r.cobuyPartners.get('lone').length >= 2, 'partners are reported for the wallet page');
+});
+
+test('tag groups: behaviours and the verdict the gate falls back to', () => {
+  assert.deepEqual(walletBehaviours({ cobuyPartners: 2, insider: true, rugger: false }), ['cobuy', 'insider']);
+  assert.equal(tagVerdict('win80', ['insider']), 'dangerous', 'insider beats a good record');
+  assert.equal(tagVerdict('win50', ['rug-linked']), 'good', 'rug-linked through its group only: the group verdict decides');
+  assert.equal(tagVerdict('unrated', ['rug-linked'], { selfRugger: true }), 'dangerous', 'itself a rugging creator');
+  assert.equal(tagVerdict('win50', []), 'good');
+  assert.equal(tagVerdict('win30', ['cobuy']), 'bots');
+  assert.equal(tagVerdict('loss', []), 'bots');
+  assert.equal(tagVerdict('unrated', []), null);
+});

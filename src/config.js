@@ -66,7 +66,7 @@ export const config = {
     cobuyMinTokens: num(process.env.COBUY_MIN_TOKENS, 4),
     cobuySeconds: num(process.env.COBUY_SECONDS, 15),
     profileConcurrency: num(process.env.PROFILE_CONCURRENCY, 4),
-    deepDepth: num(process.env.DEEP_DEPTH, 3),                     // hops of funding / flow followed from each early wallet to find shared accounts
+    deepDepth: num(process.env.DEEP_DEPTH, 1),                     // hops of funding / flow followed from each early wallet to find shared accounts (2+ chains unrelated wallets through platforms)
     expandBatch: num(process.env.NETWORK_EXPAND_BATCH, 20),        // linked (non-early) wallets profiled per cycle; 0 turns the expansion off
     networkMaxNodes: num(process.env.NETWORK_MAX_NODES, 5000),     // cap on stored network wallets
   },

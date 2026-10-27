@@ -56,9 +56,9 @@ export function buildAdjacency(docs) {
 }
 
 /** Accounts that must not be walked through: wrong kind (exchange / relayer / hub ...) or too many neighbours (distributor). */
-export function blockedSet(adj, kinds, maxDegree = DEEP_MAX_DEGREE) {
+export function blockedSet(adj, kinds, maxDegree = DEEP_MAX_DEGREE, isService = () => false) {
   const blocked = new Set();
-  for (const [a, nb] of adj) if (nb.size > maxDegree || (kinds.has(a) && isGenericKind(kinds.get(a))) || isGenericKind(classifyAccount(a, null))) blocked.add(a);
+  for (const [a, nb] of adj) if (nb.size > maxDegree || (kinds.has(a) && isGenericKind(kinds.get(a))) || isGenericKind(classifyAccount(a, null)) || isService(a)) blocked.add(a);
   return blocked;
 }
 
@@ -90,8 +90,8 @@ export function pathTo(reach, node) {
  * Returns [{ anchor, depth, wallets, paths }] where depth is the longest leg and paths maps wallet -> [start, ..., anchor].
  * Reaches are returned too, for the per-group network summary.
  */
-export function deepAnchors(earlyIds, docs, { maxDepth = DEEP_DEPTH, maxReach = DEEP_MAX_REACH, maxDegree = DEEP_MAX_DEGREE } = {}) {
-  const adj = buildAdjacency(docs), kinds = kindMap(docs), blocked = blockedSet(adj, kinds, maxDegree);
+export function deepAnchors(earlyIds, docs, { maxDepth = DEEP_DEPTH, maxReach = DEEP_MAX_REACH, maxDegree = DEEP_MAX_DEGREE, isService = () => false } = {}) {
+  const adj = buildAdjacency(docs), kinds = kindMap(docs), blocked = blockedSet(adj, kinds, maxDegree, isService); // services (factories, bots, rewards) are never walked through
   const reaches = new Map(), byNode = new Map();
   for (const id of earlyIds) {
     if (!adj.has(id) || blocked.has(id)) continue;
