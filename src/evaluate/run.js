@@ -9,6 +9,8 @@ import { aiEnabled } from '../ai/nearai.js';
 import { reviewCluster } from '../ai/review.js';
 import { buildEntities } from './entities.js';
 import { creatorIndex, creatorBrief, creatorFlag } from './creators.js';
+import { serviceSet } from '../graph/services.js';
+import { tagVerdict, walletBehaviours, ruggerWallet } from './tags.js';
 
 const evalCfg = () => ({ minutes: config.outcome.minutes, winRoi: config.outcome.winRoi, cobuySeconds: config.graph.cobuySeconds, minTokens: config.evaluate.minTokens, goodScore: config.evaluate.goodScore, badScore: config.evaluate.badScore });
 const newId = (member) => `c_${crypto.createHash('sha1').update(member).digest('hex').slice(0, 8)}`;
@@ -31,7 +33,8 @@ export async function evaluateGroups() {
 
   // profiled "network" wallets (linked, not early buyers themselves) give the deeper links
   const extra = await col('wallets').find({ net: true, profiled: true }, { projection: { funders: 1, chain: 1, flow_out: 1, kind: 1 } }).toArray();
-  const { groups, insiderEntries, cobuyPairs, deepLinks } = buildGroups(wallets, entries, tokens, { cobuySeconds: config.graph.cobuySeconds, cobuyMinTokens: config.graph.cobuyMinTokens, deepDepth: config.graph.deepDepth }, extra);
+  const services = serviceSet(await col('entities').find({ type: { $in: ['service', 'exchange', 'bridge', 'fund'] } }, { projection: { type: 1 } }).toArray());
+  const { groups, insiderEntries, cobuyPairs, deepLinks, cobuyPartners } = buildGroups(wallets, entries, tokens, { cobuySeconds: config.graph.cobuySeconds, cobuyMinTokens: config.graph.cobuyMinTokens, deepDepth: config.graph.deepDepth, services }, extra);
   const old = await col('clusters').find({}, { projection: { members: 1, ai: 1, ai_print: 1, rule: 1, verdict: 1 } }).toArray();
   const oldByWallet = new Map();
   for (const c of old) for (const m of c.members || []) oldByWallet.set(m, c._id);
@@ -46,7 +49,7 @@ export async function evaluateGroups() {
   for (const { g } of sorted) {
     const es = g.members.flatMap((m) => entriesByWallet.get(m) || []);
     const { metrics, tokens: tokenRows } = computeMetrics(g.members, es, tokens, walletMap, insiderEntries, cfg);
-    if (g.members.length === 1 && metrics.tokens_n < cfg.minTokens) continue; // a lone wallet is only worth a record once it has a track record
+    if (g.members.length < 2) continue; // a wallet linked to nobody is not a group: it only sits in its tag groups
     const rule = ruleVerdict(metrics, g.members.length, cfg);
     // id inheritance: keep the id of the previous group these wallets mostly came from
     const votes = new Map();
@@ -65,7 +68,7 @@ export async function evaluateGroups() {
     if (creatorTop === 'blacklisted' || creatorTop === 'rugger') rule.tags = [...rule.tags, 'creator-rug']; else if (gc.length) rule.tags = [...rule.tags, 'token-creator'];
     const net = Object.entries(g.nodeDepth).sort((a, b) => a[1] - b[1]).slice(0, 150).map(([account, depth]) => ({ account, depth }));
     docs.push({
-      _id: id, members: g.members, size: g.members.length, nodes: g.nodes.slice(0, 200), links: g.links.slice(0, 200), metrics, tokens: tokenRows.slice(0, 40), rule,
+      _id: id, members: g.members, size: g.members.length, weak_members: g.weak_members, weak_only: g.weak_only, nodes: g.nodes.slice(0, 200), links: g.links.slice(0, 200), metrics, tokens: tokenRows.slice(0, 40), rule,
       tag: winTag(metrics.profit_rate, metrics.tokens_n, cfg.minTokens, metrics.roi_weighted), network: net, network_n: Object.keys(g.nodeDepth).length,
       creator_flag: creatorTop, creators_n: gc.length, creators_rugged: gc.filter((c) => c.rugged > 0 || c.blacklisted).length,
       creators: gc.slice(0, 30).map((c) => ({ account: c.account, role: memberSet.has(c.account) ? 'member' : 'linked', depth: g.nodeDepth[c.account] ?? 0, launches: c.launches, rugged: c.rugged, blacklisted: c.blacklisted ? { reason: c.blacklisted.reason, token: c.blacklisted.token, symbol: c.blacklisted.symbol, ts: c.blacklisted.ts } : null, tokens: c.tokens.slice(0, 6) })),
@@ -86,7 +89,12 @@ export async function evaluateGroups() {
     const es = entriesByWallet.get(w._id) || [];
     const { metrics } = computeMetrics([w._id], es, tokens, walletMap, insiderEntries, cfg);
     const c = cmap.get(w._id);
-    return { updateOne: { filter: { _id: w._id }, update: { $set: { cluster_id: c?._id ?? null, cluster_verdict: c?.verdict ?? null, cluster_tag: c?.tag ?? null, creator: creatorBrief(creators.get(w._id)), tag: winTag(metrics.profit_rate, metrics.tokens_n, cfg.minTokens, metrics.roi_weighted), stats: { tokens_n: metrics.tokens_n, entries_n: metrics.entries_n, win_rate: metrics.win_rate, profit_rate: metrics.profit_rate, roi_weighted: metrics.roi_weighted, pnl_near: metrics.pnl_near, realized_near: metrics.realized_near, unrealized_near: metrics.unrealized_near, rug_share: metrics.rug_share, total_buy_near: metrics.total_buy_near } } } } };
+    const tag = winTag(metrics.profit_rate, metrics.tokens_n, cfg.minTokens, metrics.roi_weighted), creator = creatorBrief(creators.get(w._id));
+    // tag groups: what the wallet does (its co-buy partners, insider buys, rug links), whatever group it is or is not in
+    const partners = (cobuyPartners.get(w._id) || []).slice(0, 12);
+    const behaviours = walletBehaviours({ cobuyPartners: partners.length, insider: es.some((e) => insiderEntries.has(`${e.token}|${w._id}`)), rugger: ruggerWallet({ creator }, c) });
+    return { updateOne: { filter: { _id: w._id }, update: { $set: { cluster_id: c?._id ?? null, cluster_verdict: c?.verdict ?? null, cluster_tag: c?.tag ?? null, creator, tag,
+      cobuy_partners: partners, behaviours, tag_verdict: tagVerdict(tag, behaviours, { selfRugger: !!(creator && (creator.rugged > 0 || creator.blacklisted)) }), stats: { tokens_n: metrics.tokens_n, entries_n: metrics.entries_n, win_rate: metrics.win_rate, profit_rate: metrics.profit_rate, roi_weighted: metrics.roi_weighted, pnl_near: metrics.pnl_near, realized_near: metrics.realized_near, unrealized_near: metrics.unrealized_near, rug_share: metrics.rug_share, total_buy_near: metrics.total_buy_near } } } } };
   });
   for (let i = 0; i < ops.length; i += 500) await col('wallets').bulkWrite(ops.slice(i, i + 500), { ordered: false });
 

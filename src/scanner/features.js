@@ -49,7 +49,7 @@ async function ensureProfiles(accounts) {
  * losers are also verdict "bad" in the tracker but buy every launch, so they are counted apart as "bots_losers".
  */
 async function intelFor(buyers, creator, tokenId) {
-  const ws = await col('wallets').find({ _id: { $in: buyers.map((b) => b[0]) } }, { projection: { cluster_id: 1, cluster_verdict: 1 } }).toArray();
+  const ws = await col('wallets').find({ _id: { $in: buyers.map((b) => b[0]) } }, { projection: { cluster_id: 1, cluster_verdict: 1, tag_verdict: 1 } }).toArray();
   const wmap = new Map(ws.map((w) => [w._id, w]));
   const cids = [...new Set(ws.map((w) => w.cluster_id).filter(Boolean))];
   const clusters = await col('clusters').find({ _id: { $in: cids } }, { projection: { 'rule.tags': 1, 'ai.archetype': 1 } }).toArray();
@@ -59,7 +59,10 @@ async function intelFor(buyers, creator, tokenId) {
   let total = 0;
   for (const [wallet, near] of buyers) {
     const w = wmap.get(wallet);
-    const k = w?.cluster_verdict === 'good' ? 'good' : w?.cluster_verdict === 'bad' ? (dangerous.has(w.cluster_id) ? 'bad' : 'bots_losers') : w?.cluster_verdict === 'neutral' ? 'neutral' : 'unknown';
+    // a linked group's verdict first; a wallet in no group (or an unjudged one) is judged by its tag groups: insider / rug-linked = dangerous
+    const byGroup = w?.cluster_verdict === 'good' ? 'good' : w?.cluster_verdict === 'bad' ? (dangerous.has(w.cluster_id) ? 'bad' : 'bots_losers') : w?.cluster_verdict === 'neutral' ? 'neutral' : null;
+    const byTag = { dangerous: 'bad', good: 'good', bots: 'bots_losers' }[w?.tag_verdict] || null;
+    const k = byGroup === 'bad' || byTag === 'bad' ? 'bad' : byGroup || byTag || 'unknown';
     agg[k].wallets++; agg[k].near += near; total += near;
   }
   const prior = creator ? await col('tokens').find({ creator, _id: { $ne: tokenId } }, { projection: { symbol: 1, 'outcome.rugged': 1, 'outcome.creator_sold': 1, 'outcome.peak_multiple': 1 } }).limit(30).toArray() : [];
