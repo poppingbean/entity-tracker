@@ -106,6 +106,7 @@
   .dh-main h1 { margin:0; font-size:24px; letter-spacing:-.3px; display:flex; align-items:center; gap:10px; flex-wrap:wrap; word-break:break-all; }
   .dh-main h1 .muted { font-size:15px; font-weight:500; }
   /* call to action: the token's on-chain analysis */
+  .watchbtn { padding:6px 12px; font-size:13px; } .watchbtn.on { color:var(--accent); border-color:var(--accent-line); }
   .cta-row { display:flex; align-items:center; gap:14px; flex-wrap:wrap; margin:4px 0 18px; }
   .cta { display:inline-flex; align-items:center; gap:10px; padding:13px 22px; border-radius:12px; font-size:16px; font-weight:700; letter-spacing:.1px;
          color:var(--accent-ink); background:linear-gradient(135deg, var(--accent), var(--accent-2)); box-shadow:0 8px 24px -8px var(--accent), 0 0 0 1px var(--accent-line);
@@ -340,7 +341,7 @@ const mixCell = (m, rug) => { const tot = mixTotal(m); if (!tot) return '<span c
 const wavg = (pairs) => { const w = pairs.reduce((s, [, x]) => s + (x || 0), 0); return w ? pairs.reduce((s, [r, x]) => s + r * (x || 0), 0) / w : null; };
 
 // ---- list state, filters, pager
-const ST = { scans: { kind: '', pass: '', bought: '', q: '', offset: 0 }, entities: { type: '', q: '', sort: 'funded', offset: 0 }, groups: { tag: '', q: '', sort: 'size', offset: 0 }, taggroups: { only: '', sort: 'pnl', offset: 0 }, nfts: { tab: '', q: '', sort: '', offset: 0 },
+const ST = { scans: { kind: '', pass: '', bought: '', q: '', offset: 0 }, entities: { type: '', q: '', sort: 'funded', offset: 0 }, groups: { tag: '', q: '', sort: 'size', offset: 0 }, taggroups: { only: '', sort: 'pnl', offset: 0 }, nfts: { tab: '', q: '', sort: '', offset: 0 }, alerts: { tab: '', group: '', offset: 0 },
   wallets: { q: '', tag: '', sort: 'tokens', offset: 0 }, creators: { q: '', filter: '', sort: '', offset: 0 }, tokens: { q: '', tab: '', status: '', launchpad: '', offset: 0 }, signals: { hours: 72 }, logs: { level: '' } };
 const setSt = (view, field, value, reset = true) => { ST[view][field] = value; if (reset && 'offset' in ST[view]) ST[view].offset = 0; render(); };
 const sel = (view, field, opts) => `<select onchange="setSt('${view}','${field}',this.value)">${opts.map(([v, l]) => `<option value="${esc(v)}" ${String(ST[view][field]) === String(v) ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select>`;
@@ -455,6 +456,7 @@ const GATE_TEXT = {
   creator_clean_history: 'The creator launched tokens before that were rugged or dumped.',
   creator_network_clean: 'Other token creators tied to this one by funding or payments have rugged.',
   bad_groups_not_dominant: 'Wallets from groups judged dangerous made up too much of the early buying.',
+  no_ai_manipulation: 'The token name or symbol tries to give instructions to AI reviewers.',
 };
 const gateId = (g) => (typeof g === 'string' ? g : g?.id);
 const gateText = (g) => GATE_TEXT[gateId(g)] || String(gateId(g) || 'unknown check').replace(/_/g, ' ');
@@ -590,7 +592,7 @@ async function tokenPage(id) {
   const total = mixTotal(mix), gl = [...groups.values()].sort((a, b) => b.near - a.near);
   const L = t.ledger, at24 = t.status === 'done'; // L: the full ledger, read past the first 24 h
   const riskCls = au?.available ? (au.risk_level === 'low' ? 'g' : au.risk_level === 'medium' ? 'a' : 'r') : 'muted';
-  let h = `<div class="card">${crumbs([['Tokens', '/tokens'], [t.symbol || short(t.id, 20)]])}
+  let h = `<div class="card">${crumbs([['Tokens', '/tokens'], [t.symbol || short(t.id, 20)]])}<div style="float:right;position:relative">${reportBtn('token', t.id)} ${watchBtn('token', t.id)}</div>
     <div class="dh-main">${avatar(t.id, t.symbol, 54)}<div style="min-width:0"><h1>${esc(t.symbol || short(t.id, 24))} <span class="muted">${esc(t.name || '')}</span> ${rugChips(o)} ${exitChip(o)}</h1>
       <div class="meta"><span class="chip">${esc(t.launchpad)}</span><span class="chip">${esc(t.status)}</span><span class="acct">${esc(t.id)}</span><span>live ${when(t.live_ts)} (${since(t.live_ts)})</span></div>
       <div class="meta"><span>creator ${t.creator ? ilink(P.creator(t.creator), esc(short(t.creator, 30)), t.creator) + ' ' + ext(nbAddr(t.creator), '↗', 'NearBlocks') + ' ' + crChip(t.creator_info) : '–'}</span><span>launch tx ${txl(t.live_tx)}</span>${ext(tokUrl(t.id, t.launchpad), 'Launchpad page ↗')}${ext(`${NB}/token/${encodeURIComponent(t.id)}`, 'NearBlocks ↗')}${ilink(P.audit(t.id), 'Full audit →')}</div></div></div>
@@ -712,7 +714,7 @@ views.groups = async () => {
 async function groupPage(id) {
   const [c, g] = await Promise.all([get('/api/cluster', { id }), get('/api/graph', { id })]);
   const m = c.metrics || {}, ai = c.ai, label = ai?.label || (c.rule?.tags || [])[0] || c.id;
-  let h = `<div class="card">${crumbs([['Groups', '/groups'], [short(label, 40)]])}
+  let h = `<div class="card">${crumbs([['Groups', '/groups'], [short(label, 40)]])}<div style="float:right;position:relative">${reportBtn('group', c.id)} ${watchBtn('group', c.id)}</div>${''}
     <div class="dh-main">${avatar(c.id, label, 54)}<div style="min-width:0"><h1>${esc(label)} ${tg(c.tag)} ${c.creator_flag === 'blacklisted' || c.creator_flag === 'rugger' ? '<span class="v bad" title="a token creator in this group rugged or is blacklisted">creator rug</span>' : ''} <span class="chip">${pct(m.profit_rate)} of ${m.tokens_n ?? 0} tokens in profit</span></h1>
       <div class="meta"><span class="acct">${esc(c.id)}</span><span>${c.weak_only ? `${c.size} wallets linked only by co-buys (no money link)` : `${c.size - (c.weak_members || []).length} wallets linked by money${(c.weak_members || []).length ? ` · ${c.weak_members.length} attached only by co-buys` : ''}`}</span>${c.rule ? `<span>rule score ${n(c.rule.score, 0)} (${esc(c.rule.verdict)})</span>` : ''}<span>updated ${since(c.updated_ts)}</span>${tags(c.rule?.tags)}</div></div></div>
     <div class="tiles">${tile('Judged tokens', m.tokens_n ?? '–', `${m.entries_n ?? '–'} entries`)}${tile('Profitable tokens', pct(m.profit_rate), `${m.profit_tokens_n ?? 0} of ${m.tokens_n ?? 0} · gained 20 %+ in ${pct(m.win_rate)}`, (m.profit_rate ?? 0) >= 0.5 ? 'g' : (m.profit_rate ?? 1) < 0.3 ? 'r' : 'a')}${tile('P&L', signed(m.pnl_near) + ' N', `${n(m.total_buy_near, 1)} N bought`, roiCls(m.pnl_near))}${tile('Realized P&L', signed(m.realized_near) + ' N', 'taken out of the tokens sold', roiCls(m.realized_near))}${tile('Unrealized P&L', signed(m.unrealized_near) + ' N', 'still held, at the latest price', roiCls(m.unrealized_near))}
@@ -810,7 +812,7 @@ const BEH = { cobuy: 'co-buy swarm', insider: 'insider', 'rug-linked': 'rug-link
 const tagGroupChips = (w) => [ilink(P.tgp(tagOk(w.tag)), tg(w.tag), 'tag group: ' + tagOk(w.tag)), ...(w.behaviours || []).map((b) => ilink(P.tgp(b), `<span class="chip">${esc(BEH[b] || b)}</span>`, BEH[b] || b))].join(' ');
 async function walletPage(id) {
   const w = await get('/api/wallet', { id }), s = w.stats || {}, c = w.cluster;
-  let h = `<div class="card">${crumbs([['Wallets', '/wallets'], [short(w.id, 40)]])}
+  let h = `<div class="card">${crumbs([['Wallets', '/wallets'], [short(w.id, 40)]])}<div style="float:right;position:relative">${reportBtn('wallet', w.id)} ${watchBtn('wallet', w.id)}</div>${''}
     <div class="dh-main">${avatar(w.id, w.id, 54)}<div style="min-width:0"><h1 class="acct">${esc(w.id)} ${tg(w.tag)}</h1>
       <div class="meta">${w.creator ? `<span>${ilink(P.creator(w.id), 'creator of ' + w.creator.launches + ' token' + (w.creator.launches === 1 ? '' : 's'))}</span> ${crChip(w.creator)}` : ''}${w.kind ? `<span class="chip">${esc(w.kind)}</span>` : ''}<span>${w.tx_count ?? '–'} txs</span><span>created ${when(w.created_ts)}</span>${ext(nbAddr(w.id), 'NearBlocks ↗')}</div></div></div>
     ${c ? `<div class="banner ${esc(tagOk(c.tag))}" ${row(P.grp(c.id))}>${tg(c.tag)}<div style="flex:1;min-width:0"><b>Member of ${esc(c.ai?.label || c.id)}</b><div class="muted small">${(c.weak_members || []).includes(w.id) ? 'attached only by co-buys (no money link)' : 'linked by funding / money flow'} · ${c.size} wallets ${tags(c.rule?.tags)}</div></div>${ilink(P.grp(c.id), 'Open group →')}</div>`
@@ -1197,7 +1199,7 @@ async function nftPage(id) {
       ${a.can_add ? `<button onclick="this.disabled=true;nftAdd(${esc(JSON.stringify(id))})">Read its history &amp; analyse</button>` : ''}</div>`;
   }
   const I = a.info, M = a.mint, T = a.team, G = a.minter_groups, K = a.market, H = a.holders, J = a.sync_job;
-  let h = `<div class="card">${crumbs([['NFT Collectibles', '/nfts'], [I.name || short(id, 24)]])}
+  let h = `<div class="card">${crumbs([['NFT Collectibles', '/nfts'], [I.name || short(id, 24)]])}<div style="float:right;position:relative">${reportBtn('collection', id)} ${watchBtn('collection', id)}</div>
     <div class="dh-main">${avatar(id, I.symbol || I.name || id, 54)}<div style="min-width:0"><h1>${esc(I.name || id)} ${I.symbol ? `<span class="muted">${esc(I.symbol)}</span>` : ''} ${nftSrc(I.source)}</h1>
       <div class="meta"><span class="acct">${esc(id)}</span>${I.owner ? `<span>owner ${nb(I.owner)}</span>` : ''}${I.launched_ts ? `<span>launched ${when(I.launched_ts)}</span>` : ''}<span>${n(I.events_n, 0)} NFT events${I.caught_up ? '' : ' · still reading its history'}</span>
         ${ext(`${NB}/nft-token/${encodeURIComponent(id)}`, 'NearBlocks ↗')}${I.source === 'hotcraft' ? ext('https://hotcraft.art/', 'HOT Craft ↗') : ''}
@@ -1230,6 +1232,57 @@ async function nftPage(id) {
     <table><tr><th>Wallet</th><th class="num">NFTs</th><th class="num">Share</th><th></th></tr>${H.top.map((x) => `<tr ${row(P.wal(x.wallet))}><td>${walLink(x.wallet, 26)}</td><td class="num">${x.tokens}</td><td class="num">${pct(x.share, 2)}</td><td>${x.team ? '<span class="v bad">team</span> ' : ''}${x.group ? '<span class="chip">minter group</span>' : ''}</td></tr>`).join('') || empty(4, 'no holders')}</table></div>`;
   return h;
 }
+// ================================================================== ALERTS + WATCHLIST (this browser's watchlist: an anonymous key in localStorage)
+const WKEY = 'sn_watch_key';
+let WATCH = null; // Set of "kind:id" this browser watches
+const post = async (path, body) => { const r = await fetch(path, { method: 'POST', headers: { 'content-type': 'application/json', 'x-tracker': '1' }, body: JSON.stringify(body) }); return r.json(); };
+async function watchKey(create) {
+  let k = null; try { k = localStorage.getItem(WKEY); } catch {}
+  if (!k && create) { const r = await post('/api/watch/key', { kind: 'web' }); if (r.key) { k = r.key; try { localStorage.setItem(WKEY, k); } catch {} } else throw new Error(r.error || 'could not create a watchlist'); }
+  return k;
+}
+async function loadWatch() {
+  const k = await watchKey(false).catch(() => null);
+  if (!k) { WATCH = new Set(); return []; }
+  const w = await get('/api/watchlist', { key: k }).catch(() => ({ items: [] }));
+  WATCH = new Set((w.items || []).map((x) => `${x.kind}:${x.id}`));
+  return w.items || [];
+}
+/** A ☆ Watch / ★ Watching button for any page. */
+const watchBtn = (kind, id) => { const on = WATCH?.has(`${kind}:${id}`); return `<button class="watchbtn ${on ? 'on' : ''}" data-w="${esc(kind)}:${esc(id)}" onclick="toggleWatch(this)" title="${on ? 'Stop alerts about this' : 'Get alerts about this (Alerts page, or Telegram / API with the same ids)'}">${on ? '★ Watching' : '☆ Watch'}</button>`; };
+async function toggleWatch(btn) {
+  const [kind, ...rest] = btn.dataset.w.split(':'), id = rest.join(':');
+  btn.disabled = true;
+  try {
+    const key = await watchKey(true), on = WATCH?.has(`${kind}:${id}`);
+    const r = await post('/api/watch', { key, kind, id, remove: on });
+    if (r.error) { alert(r.error); return; }
+    WATCH = new Set(r.items.map((x) => `${x.kind}:${x.id}`));
+    btn.outerHTML = watchBtn(kind, id);
+  } catch (e) { alert(e.message); } finally { btn.disabled = false; }
+}
+const SEVCLS = { high: 'bad', medium: 'neutral', info: 'unrated' };
+const alertRow = (a) => `<tr ${a.url ? row(a.url.replace(/^https?:\/\/[^/]+/, '')) : ''}><td>${when(a.ts)}<br><span class="muted small">${since(a.ts)}</span></td><td><span class="v ${SEVCLS[a.severity]}">${esc(a.severity)}</span></td><td>${esc(a.label || a.type)}</td>
+  <td class="wrap"><b>${esc(a.title)}</b><div class="muted small">${esc(a.text)}</div></td></tr>`;
+views.alerts = async () => {
+  const S = ST.alerts;
+  const items = await loadWatch();
+  const key = await watchKey(false).catch(() => null);
+  const mine = S.tab === 'mine';
+  const j = mine ? (key ? await get('/api/alerts', { key, limit: 100 }) : { rows: [] }) : await get('/api/alerts', { severity: S.tab === 'high' ? 'high' : '', group: S.group, limit: 50, offset: S.offset });
+  const meta = mine ? await get('/api/alerts', { limit: 1 }) : j;
+  return `<div class="grid2 wide-l"><div class="card"><div class="bar">${seg('alerts', 'tab', [['', 'All'], ['high', 'High only'], ['mine', `My watchlist (${items.length})`]])}
+      ${mine ? '' : sel('alerts', 'group', [['', 'every kind'], ['rug', 'rug in progress'], ['contract', 'contract changes'], ['activity', 'watched / ruggers'], ['nft', 'NFT team / wash']])}<span class="spacer"></span>${mine ? '' : pager('alerts', j.total)}</div>
+    <table><tr><th>When</th><th>Severity</th><th>Kind</th><th>Alert</th></tr>${(j.rows || []).map(alertRow).join('') || empty(4, mine ? (items.length ? 'no alerts for your watchlist yet' : 'your watchlist is empty: add something on the right, or press ☆ Watch on any token, wallet, group, creator or NFT page') : 'no alerts yet')}</table></div>
+  <div><div class="card"><h2>My watchlist <span class="muted">this browser</span></h2>
+    <div class="bar"><input id="watchId" type="search" style="flex:1" placeholder="token, wallet, c_… group, creator or NFT contract"><select id="watchKind"><option value="">auto</option>${['token', 'wallet', 'group', 'creator', 'collection'].map((k) => `<option>${k}</option>`).join('')}</select>
+      <button onclick="(async()=>{const id=$('watchId').value.trim();if(!id)return;const key=await watchKey(true);const r=await post('/api/watch',{key,id,kind:$('watchKind').value});if(r.error)alert(r.error);else render()})()">Watch</button></div>
+    <table><tr><th>Kind</th><th>Id</th><th></th></tr>${items.map((x) => `<tr><td>${esc(x.kind)}</td><td class="acct">${esc(short(x.id, 34))}</td><td>${watchBtn(x.kind, x.id)}</td></tr>`).join('') || empty(3, 'nothing yet')}</table>
+    <p class="muted small" style="margin:8px 0 0">Kept on this browser only (an anonymous key, no account).</p></div>
+  <div class="card"><h2>Everywhere else</h2>
+    <p class="small"><b>Telegram:</b> ${meta.telegram_bot ? `open <a href="https://t.me/${esc(meta.telegram_bot)}" target="_blank" rel="noopener">@${esc(meta.telegram_bot)}</a> and send` : 'send the bot'} <code>/watch &lt;id&gt;</code>; <code>/list</code>, <code>/alerts</code>, <code>/check &lt;token&gt;</code>. High-severity alerts also go to the public channel.</p>
+    <p class="small"><b>API:</b> <code>GET /api/alerts?severity=high&amp;group=rug</code> (everything) · <code>POST /api/watch/key {"kind":"api"}</code> → key · <code>POST /api/watch {"key","id"}</code> · <code>GET /api/alerts?key=…</code> · <code>POST /api/watch/webhook {"key","url"}</code> (https, public hosts only). POSTs need the header <code>x-tracker: 1</code>.</p></div></div></div>`;
+};
 views.creators = async () => {
   const S = ST.creators, j = await get('/api/creators', { q: S.q, filter: S.filter, sort: S.sort, limit: 50, offset: S.offset });
   const sm = j.summary;
@@ -1245,7 +1298,7 @@ views.creators = async () => {
 
 async function creatorPage(id) {
   const c = await get('/api/creator', { id });
-  let h = `<div class="card">${crumbs([['Creators', '/creators'], [short(id, 40)]])}
+  let h = `<div class="card">${crumbs([['Creators', '/creators'], [short(id, 40)]])}<div style="float:right">${watchBtn('creator', id)}</div>${''}
     <div class="dh-main">${avatar(id, id, 54)}<div style="min-width:0"><h1 class="acct">${esc(id)} ${crFlag(c.flag)}</h1>
       <div class="meta">${ext(nbAddr(id), 'NearBlocks ↗')}${c.wallet?.is_early ? ilink(P.wal(id), 'Wallet page →') : ''}${c.wallet?.tag ? tg(c.wallet.tag) : ''}</div></div></div>
     <div class="tiles">${tile('Launches', c.launches)}${tile('Rugged', c.rugged, pct(c.rug_rate) + ' of its launches', c.rugged ? 'r' : 'g')}${tile('Dev-rug blacklist', c.blacklisted ? 'yes' : 'no', c.blacklisted ? since(c.blacklisted.ts) : null, c.blacklisted ? 'r' : 'g')}${tile('Groups', c.groups.length, 'it belongs to or is linked to')}</div>
@@ -1305,10 +1358,58 @@ function closeSearch() { clearTimeout(sTimer); document.querySelectorAll('.sr.op
 document.addEventListener('click', (e) => { if (!e.target.closest('.search')) closeSearch(); });
 document.addEventListener('keydown', (e) => { if (e.key === '/' && !['INPUT', 'SELECT', 'TEXTAREA'].includes(document.activeElement?.tagName)) { e.preventDefault(); $('topQ').focus(); } });
 
+// ================================================================== MEASURED ACCURACY + "wrong verdict" reports
+/** ⚑ button: opens a small form under itself; the report goes to a review queue and, once accepted, becomes ground truth. */
+const reportBtn = (kind, id) => `<button class="watchbtn" data-r="${esc(kind)}:${esc(id)}" onclick="reportForm(this)" title="Tell us this verdict is wrong (reviewed before it counts)">⚑ Wrong verdict?</button>`;
+function reportForm(btn) {
+  if (btn.nextElementSibling?.classList.contains('rform')) { btn.nextElementSibling.remove(); return; }
+  btn.insertAdjacentHTML('afterend', `<div class="rform card" style="position:absolute;right:0;z-index:5;width:300px;text-align:left"><b>What really happened?</b>
+    <div class="bar"><label><input type="radio" name="rv" value="bad" checked> a scam / buyers lost</label><label><input type="radio" name="rv" value="good"> it was fine</label></div>
+    <textarea rows="3" maxlength="500" style="width:100%" placeholder="what you saw (optional): a tx, a report, a link"></textarea>
+    <div class="bar"><button onclick="sendReport(this)">Send</button><span class="muted small"></span></div></div>`);
+}
+async function sendReport(b) {
+  const f = b.closest('.rform'), btn = f.previousElementSibling, [kind, ...rest] = btn.dataset.r.split(':');
+  const r = await post('/api/feedback', { kind, id: rest.join(':'), verdict: f.querySelector('input[name=rv]:checked').value, note: f.querySelector('textarea').value });
+  f.querySelector('.small').textContent = r.error || 'Thanks: queued for review.';
+  if (!r.error) { b.disabled = true; setTimeout(() => f.remove(), 1500); }
+}
+const ratio = (x) => (x == null ? '–' : x.toFixed(2));
+const xret = (x) => (x == null ? "–" : "x" + x.toFixed(3));
+const cm = (c) => `<table class="small"><tr><th></th><th class="num">went bad</th><th class="num">was fine</th></tr>
+  <tr><td>warned / blocked</td><td class="num g">${c.tp}</td><td class="num a">${c.fp}</td></tr><tr><td>let through</td><td class="num r">${c.fn}</td><td class="num">${c.tn}</td></tr></table>`;
+const rets = (s) => (s ? `let through: <b>${xret(s.passed.median)}</b> median 24 h (${s.passed.n}) · blocked: <b>${xret(s.flagged.median)}</b> (${s.flagged.n})` : '');
+const aucTxt = (a) => (a == null ? '–' : `${ratio(a)} <span class="muted small">${a >= 0.6 ? 'useful' : a > 0.4 ? 'no signal' : 'backwards'}</span>`);
+views.accuracy = async () => {
+  const j = await get('/api/accuracy'), A = j.accuracy;
+  if (!A) return `<div class="card"><p class="muted">No accuracy pass yet: the worker computes one every hour (or run <code>node src/cli.js accuracy</code>).</p></div>`;
+  const G = A.gates, AI = A.ai, GR = A.groups, R = A.replay_current_gates;
+  const labels = (j.labels || []).map((x) => `${x.n} ${x.kind} ${x.label}`).join(' · ') || 'none yet';
+  return `<div class="card"><div class="tiles">${tile('Checks judged', A.checks, `+${A.imported_checks} imported from the old scanner`)}${tile('Went bad', pct(A.base_rate), esc(A.truth.label))}
+      ${tile('Gates: caught', pct(G.recall), `of the launches that went bad, but blocks ${pct(G.n ? (G.tp + G.fp) / G.n : null)} of all`, 'a')}${tile('Rule score AUC', ratio(A.rule_score.auc), A.rule_score.auc != null && A.rule_score.auc < 0.4 ? 'backwards: higher score, more losses' : '0.5 = no signal, 1 = perfect', A.rule_score.auc != null && A.rule_score.auc < 0.4 ? 'r' : '')}
+      ${tile('Audit risk AUC', ratio(A.audit_risk.auc), `${A.audit_risk.audited} audited`)}${tile('Hand labels', (j.labels || []).reduce((s, x) => s + x.n, 0), `${j.feedback_pending} reports waiting for review`)}</div>
+    <p class="muted small" style="margin:8px 0 0">Every judgment is scored against what happened after it, never before: ground truth is what a buyer at the moment of the check held 24 h later, unless a person labelled it (${esc(labels)}). Updated ${since(A.ts)}.</p></div>
+  <div class="grid2"><div class="card"><h2>Quality gates <span class="muted">${G.n} own checks</span></h2>${cm(G)}<p class="small">${rets(G.returns)}</p>
+      <p class="small">The current gates replayed on all ${R.n} stored checks: ${R.tn + R.fn} would pass, ${pct(R.bad_rate_passed)} of those went bad. ${rets(R.returns)}</p></div>
+    <div class="card"><h2>AI analyst <span class="muted">${AI.checks} verdicts</span></h2>${cm(AI.warn_vs_outcome)}<p class="small">${rets(AI.returns)} · risk level AUC ${aucTxt(AI.risk_auc)}</p>
+      <p class="small muted">${Object.entries(AI.actions || {}).map(([k, v]) => `${esc(k)} ${v}`).join(' · ')}. ${esc(AI.note)}</p></div></div>
+  <div class="card"><h2>Each gate <span class="muted">how often launches that failed it went bad</span></h2>
+      <table><tr><th>Gate</th><th class="num">Failed</th><th class="num">Bad if failed</th><th class="num">Bad if passed</th><th class="num">Lift</th><th class="num">Fine launches blocked</th></tr>
+      ${A.per_gate.map((g) => `<tr><td><code>${esc(g.gate)}</code></td><td class="num">${g.failed_n}</td><td class="num">${pct(g.bad_rate_failed)}</td><td class="num">${pct(g.bad_rate_passed)}</td><td class="num ${g.lift >= 1.5 ? 'g' : g.lift != null && g.lift < 0.8 ? 'r' : ''}">${ratio(g.lift)}</td><td class="num">${g.good_blocked}</td></tr>`).join('')}</table>
+      <p class="muted small">Lift above 1 = launches failing the gate go bad more often than average (it catches something); below 1 = it mostly blocks fine launches.</p></div>
+  <div class="grid2"><div class="card"><h2>Rule score <span class="muted">bad rate per score band</span></h2>
+      <table><tr><th>Score</th><th class="num">Checks</th><th class="num">Went bad</th></tr>${A.rule_score.calibration.map((b) => `<tr><td>${b.from}–${Math.min(b.to, 100)}</td><td class="num">${b.n}</td><td class="num">${pct(b.bad_rate)}</td></tr>`).join('')}</table></div>
+    <div class="card"><h2>Group verdicts <span class="muted">out of time</span></h2>
+      <p class="small muted">Each early buy scored with the verdict its group had <i>before</i> the buy, against that buy's 24 h result (${GR.entries} buys).</p>
+      <table><tr><th>Verdict before the buy</th><th class="num">Buys</th><th class="num">Went bad</th><th class="num">Median 24 h</th></tr>${GR.per_verdict.map((v) => `<tr><td>${esc(v.verdict)}</td><td class="num">${v.entries}</td><td class="num">${pct(v.bad_rate)}</td><td class="num">${pct(v.median_roi, 1)}</td></tr>`).join('')}</table></div></div>`;
+};
+
 // ================================================================== shell + router (History API: /tokens/<id>, /groups/<id>, no #)
 const SECTIONS = [
   { label: 'Explore', views: [['explore', 'Explore']] },
   { label: 'Tokens & Scanner', views: [['tokens', 'Launches'], ['signals', 'Smart-money signals'], ...(SHOW_SIM ? [['sim', 'Simulated wallet']] : []), ['analysis', 'On-chain analysis'], ['scans', 'Evaluations'], ['audit', 'Contract audit']] },
+  { label: 'Alerts', views: [['alerts', 'Alerts']] },
+  { label: 'Accuracy', views: [['accuracy', 'Accuracy']] },
   { label: 'NFT Collectibles', views: [['nfts', 'Collections']] },
   { label: 'Wallets & Groups', views: [['groups', 'Linked groups'], ['taggroups', 'Tag groups'], ['wallets', 'Wallets'], ['creators', 'Creators'], ['entities', 'Funders & entities']] },
 ];
@@ -1316,6 +1417,8 @@ const TITLES = {
   explore: ['Explore', ''], tokens: ['Tokens & Scanner', "Every launch: who bought it early (by win-rate tag), the scanner's first check and gates, its outcome and whether it was rugged"],
   signals: ['Smart-money signals', 'Recent tokens where winners (win80 / win50 / sniper) or loss wallets were among the early buyers'],
   groups: ['Linked groups', 'Wallets one owner controls, linked by money only: funding, transfers, shared funders and destinations (co-buy partners are marked apart)'],
+  accuracy: ['Measured accuracy', 'How often the gates, rule score, contract audit, AI analyst and group verdicts were right, scored against what happened afterwards'],
+  alerts: ['Alerts', 'Rugs in progress, contract changes, ruggers launching again, NFT team selling and wash trades, and everything on your watchlist'],
   nfts: ['NFT Collectibles', 'NFT collections: who minted (and whether the team minted its own), minter groups linked by money, the secondary market with wash-trade checks, holders'],
   taggroups: ['Tag groups', 'Every early wallet by what it does: win-rate tag and behaviours, standalone or in a linked group'],
   creators: ['Creators', 'Who launched the tokens: launches, rugged launches and the dev-rug blacklist, and which groups they belong to'],
@@ -1368,7 +1471,7 @@ $('topSearch').outerHTML = searchBox('topQ');
 const loadStatus = () => get('/api/monitor').then((m) => setStatus(m.worker, m.now, m.ai)).catch(() => {});
 loadStatus(); setInterval(loadStatus, 60000);
 window.addEventListener('popstate', render);
-loadMemeIds().then(render);
+Promise.all([loadMemeIds(), loadWatch().catch(() => {})]).then(render);
 setInterval(loadMemeIds, 600000);
 // list pages refresh every 30 s; detail pages, open search results and focused inputs are left alone
 setInterval(() => { if (location.pathname.split('/').filter(Boolean).length < 2 && !document.querySelector('.sr.open') && !['INPUT', 'SELECT'].includes(document.activeElement?.tagName)) render(); }, 30000);

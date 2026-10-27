@@ -91,6 +91,14 @@ The **On-chain analysis** page (`/analysis`, `/analysis/<token>`, linked from ev
 
 **AI review.** Every run first reads the token's latest trades (its full ledger, for up to `ANALYSIS_SYNC_MINUTES`, 5; the worker reads whatever is left), rebuilds the analysis with those trades and the transfer trails, then writes or updates the assessment. The trails are part of the evidence the model gets, and a change in them counts as new activity for an update.
 
+## Alerts and watchlists
+
+Detectors run beside the worker loop every minute (`ALERTS_EVERY_SECONDS`) and raise each event once (`alerts`): **rug in progress** (a token flagged rugged, its creator selling, the creator dumping its supply / dev-rug blacklist, a price collapse), **contract changes** (code redeployed or a new full-access key, checked every 30 min for launches of the last 3 days, followed NFT collections and anything watched; state in `contract_state`), **ruggers and watched activity** (a creator that rugged before or is blacklisted launches again, a watched creator launches, a watched wallet or group buys early or sells), and **NFT** (the team or wallets it funded selling, suspected wash trades rising). The very first pass only records the current state, so a deploy does not flood anyone with old events.
+
+Anyone can keep a **watchlist** (`watchlists`) of tokens, wallets, groups, creators and NFT collections: on the dashboard (☆ Watch on any of those pages, kept with an anonymous key in the browser; the **Alerts** page shows the feed and "My watchlist"), through the **Telegram bot** (`/watch`, `/unwatch`, `/list`, `/alerts`, `/check`, `/help`; one watchlist per chat, long polling, no public endpoint), or through the **API** (`POST /api/watch/key {"kind":"api"}` for a key, `POST /api/watch {"key","id"}`, `GET /api/alerts?key=…`, `GET /api/alerts?severity=high&group=rug` for everything; POSTs need the header `x-tracker: 1`).
+
+Delivery: alerts at `ALERTS_PUBLIC_SEVERITY` (high) go to the public Telegram channel (`TELEGRAM_CHANNEL_ID`) and the global webhook (`ALERTS_WEBHOOK_URL`); every alert goes to the Telegram chats and webhooks of the watchlists it concerns. Webhooks must be https on a public host (private, loopback, link-local, CGNAT and metadata addresses are refused, re-checked before every send, no redirects, 5 s timeout). Settings: `TELEGRAM_BOT_TOKEN`, `TELEGRAM_BOT_NAME`, `TELEGRAM_CHANNEL_ID`, `ALERTS_WEBHOOK_URL`, `ALERTS_PUBLIC_SEVERITY`, `PUBLIC_SITE_URL` (links in alerts), `ALERTS_ENABLED`.
+
 ## NFT collectibles
 
 The **NFT Collectibles** section (`/nfts`, `/nfts/<contract>`) does for NFT collections what the token pages do for launches.

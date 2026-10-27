@@ -60,6 +60,17 @@ export const config = {
     syncNowMinutes: num(process.env.SYNC_NOW_MAX_MINUTES, 20), // how long "Sync now" reads a token's history; the worker reads the rest
   },
 
+  // alerts: detectors run beside the worker loop; delivery to Telegram (public channel + each subscriber's chat), webhooks, dashboard, API
+  alerts: {
+    enabled: process.env.ALERTS_ENABLED !== 'false',
+    everyMs: num(process.env.ALERTS_EVERY_SECONDS, 60) * 1000,
+    telegramToken: process.env.TELEGRAM_BOT_TOKEN || '',
+    telegramBot: (process.env.TELEGRAM_BOT_NAME || '').replace(/^@/, ''),     // the bot's @name, shown on the Alerts page
+    telegramChannel: process.env.TELEGRAM_CHANNEL_ID || '',          // public channel / chat for alerts at publicSeverity and above
+    webhookUrl: process.env.ALERTS_WEBHOOK_URL || '',                // global webhook for the same alerts
+    publicSeverity: ['high', 'medium', 'info'].includes(process.env.ALERTS_PUBLIC_SEVERITY) ? process.env.ALERTS_PUBLIC_SEVERITY : 'high',
+    siteUrl: (process.env.PUBLIC_SITE_URL || '').replace(/\/$/, ''),  // links in alerts, e.g. https://safenear.example
+  },
   // NFT collectibles: HOT Craft and near.cooking followed, every collection NearBlocks lists discovered, any collection added by hand
   nft: {
     enabled: process.env.NFT_ENABLED !== 'false',
@@ -107,6 +118,8 @@ export const config = {
     ignoreRunupBelowMcapUsd: num(process.env.IGNORE_RUNUP_BELOW_MCAP_USD, 10000),
     minScore: num(process.env.MIN_RULE_SCORE, 55),
   },
+  // ground truth for the accuracy numbers: a launch is "bad" when a buyer at the check held less than this share of the price 24 h later
+  accuracy: { badBelow: num(process.env.ACCURACY_BAD_BELOW, 0.85), everyMs: num(process.env.ACCURACY_EVERY_MS, 3600e3) },
   // the token analysis page's AI review: it reads the latest trades first, then follows tokens moved out by transfer
   analysis: {
     syncMinutes: num(process.env.ANALYSIS_SYNC_MINUTES, 5),  // how long an AI review reads new trades before writing (the worker reads the rest)

@@ -6,6 +6,7 @@
 import { col } from '../db.js';
 import { chatJSON } from '../ai/nearai.js';
 import { config } from '../config.js';
+import { UNTRUSTED_RULE, evidenceMessage, maxRisk, riskFloor } from '../ai/untrusted.js';
 import { tagOf } from '../evaluate/tags.js';
 import { INFRA, groupBrief } from './token.js';
 
@@ -134,7 +135,14 @@ const clean = (j) => ({
   risk_level: ['low', 'medium', 'high'].includes(j.risk_level) ? j.risk_level : 'medium', confidence: Math.max(0, Math.min(1, Number(j.confidence) || 0)), conclusion: String(j.conclusion || '').slice(0, 1000),
   ...(Array.isArray(j.changes) ? { changes: j.changes.map((x) => String(x).slice(0, 400)).slice(0, 8) } : {}),
 });
-const ask = (system, user) => chatJSON({ system, user, model: config.ai.analysisModel, timeoutMs: config.ai.analysisTimeoutMs, attempts: 2, stream: true });
+/** Ask the model with the evidence cleaned and wrapped as untrusted data; the risk level can only go up from the rule-based flags. */
+async function ask(system, preamble, evidence, flags) {
+  const { user, findings } = evidenceMessage(preamble, evidence);
+  const { json, model } = await chatJSON({ system: system + UNTRUSTED_RULE, user, model: config.ai.analysisModel, timeoutMs: config.ai.analysisTimeoutMs, attempts: 2, stream: true });
+  const floor = maxRisk(riskFloor(flags), findings.length ? 'high' : 'low');
+  const raised = ['low', 'medium', 'high'].indexOf(floor) > ['low', 'medium', 'high'].indexOf(json?.risk_level);
+  return { json: { ...json, risk_level: raised ? floor : json?.risk_level }, model, guard: { floor, raised, ...(findings.length ? { injection: findings } : {}) } };
+}
 
 /**
  * Write (first run) or update (later runs) the assessment of `analysis`, which should be freshly built. With nothing new on chain since the
@@ -145,8 +153,8 @@ export async function assessWithAi(analysis) {
   const prev = doc?.ai?.snapshot ? doc.ai : null;
   if (!prev) {
     const snapshot = aiPacket(analysis);
-    const { json, model } = await ask(SYSTEM, JSON.stringify(snapshot));
-    const ai = { ...clean(json), mode: 'initial', model, ts: Date.now(), data_to_ts: analysis.data_to_ts, for_built_ts: analysis.built_ts, snapshot };
+    const { json, model, guard } = await ask(SYSTEM, 'Evidence packet for this token:', snapshot, analysis.flags);
+    const ai = { ...clean(json), guard, mode: 'initial', model, ts: Date.now(), data_to_ts: analysis.data_to_ts, for_built_ts: analysis.built_ts, snapshot };
     await col('analyses').updateOne({ _id: analysis.token }, { $set: { ai } }, { upsert: true });
     await saveRun(analysis.token, ai);
     return ai;
@@ -158,8 +166,8 @@ export async function assessWithAi(analysis) {
   }
   const now = { age_min: cur.age_min, flows: cur.flows, creator: cur.creator && { balance: cur.creator.balance, balance_share: cur.creator.balance_share, traded: cur.creator.traded }, holders: cur.holders, token_flows: cur.token_flows, flags: cur.flags };
   const packet = { previous: { ts: prev.ts, risk_level: prev.risk_level, confidence: prev.confidence, summary: prev.summary, findings: prev.findings, conclusion: prev.conclusion, changes: prev.changes }, since, now };
-  const { json, model } = await ask(SYSTEM_UPDATE, JSON.stringify(packet));
-  const ai = { ...clean(json), mode: 'update', model, ts: Date.now(), since_ts: prev.ts, since_data_to_ts: prev.data_to_ts, data_to_ts: analysis.data_to_ts, for_built_ts: analysis.built_ts,
+  const { json, model, guard } = await ask(SYSTEM_UPDATE, 'Previous assessment, what changed since, and the current state:', packet, analysis.flags);
+  const ai = { ...clean(json), guard, mode: 'update', model, ts: Date.now(), since_ts: prev.ts, since_data_to_ts: prev.data_to_ts, data_to_ts: analysis.data_to_ts, for_built_ts: analysis.built_ts,
     window: { trades: since.trades.trades, buy_near: since.trades.buy_near, sell_near: since.trades.sell_near }, previous_risk: prev.risk_level, snapshot: cur };
   await col('analyses').updateOne({ _id: analysis.token }, { $set: { ai } });
   await saveRun(analysis.token, ai, since);

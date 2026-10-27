@@ -8,6 +8,7 @@ import { serviceSet, isService } from '../graph/services.js';
 import { isGenericKind } from '../graph/profile.js';
 import { ownersOf } from './decode.js';
 import { SOURCES } from './sync.js';
+import { looksLikeInjection } from '../ai/untrusted.js';
 
 const MIN = 60e3, HOUR = 3600e3, DAY = 86400e3;
 export const CACHE_MS = 15 * MIN;
@@ -84,7 +85,7 @@ export async function buildNftAnalysis(id) {
   const lastOwnerBefore = new Map(); // token -> list of { owner, ts } to spot round trips
   const wash = [];
   for (const e of events) {
-    for (const id2 of e.token_ids || []) { const h = lastOwnerBefore.get(id2) || []; if (e.kind === 'sale') {
+    for (const id2 of e.token_ids || []) { const h = lastOwnerBefore.get(id2) || []; if (e.kind === 'sale' && e.from !== e.to) {
       const reasons = [];
       if (e.from && e.to && tg.has(e.from) && tg.get(e.from) === tg.get(e.to)) reasons.push('same owner (money-linked)');
       const fund = tiesTo(wmap.get(e.to), new Set([e.from])) || tiesTo(wmap.get(e.from), new Set([e.to]));
@@ -123,6 +124,7 @@ export async function buildNftAnalysis(id) {
 
   // ---- risk notes
   const flags = [];
+  if (looksLikeInjection(c.name, c.symbol)) flags.push({ level: 'high', text: 'The collection name or symbol contains instruction-like text aimed at AI reviewers: an attempt to manipulate automated scanners.' });
   const add = (level, text) => flags.push({ level, text });
   if (teamMinted && minted) add(teamMinted / minted >= 0.1 ? 'high' : 'medium', `The team (or wallets it funded) minted ${teamMinted} of ${minted} (${((teamMinted / minted) * 100).toFixed(0)}%)${teamMinters.length > 1 ? ` through ${teamMinters.length} wallets` : ''}.`);
   if (minterGroups.grouped_share >= 0.3) add('medium', `${minterGroups.groups_n} money-linked minter groups minted ${(minterGroups.grouped_share * 100).toFixed(0)}% of the supply.`);

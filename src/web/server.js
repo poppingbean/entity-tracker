@@ -20,17 +20,54 @@ import { getNftAnalysis } from '../nft/analysis.js';
 import { assessNftWithAi } from '../nft/ai.js';
 import { registerCollection, syncCollection, SOURCES } from '../nft/sync.js';
 import { view } from '../near/rpc.js';
+import { TYPES, SEVERITIES } from '../alerts/store.js';
+import { newKey, validKey, resolveTarget, setWatch, getWatchlist, alertsFor, KINDS } from '../alerts/watch.js';
+import { alertPayload, checkWebhookUrl } from '../alerts/deliver.js';
 import { assessWithAi, getRun } from '../analysis/ai.js';
+import { addFeedback, FEEDBACK_KINDS } from '../accuracy/feedback.js';
 
 const page = fs.readFileSync(new URL('./index.html', import.meta.url), 'utf8');
 // Google Search Console ownership file for app.safe-near.org, served as is at /<name>.html (before the password check, so Google can read it).
 const SITE_VERIFY = { '/google65675d2fcb9ab898.html': fs.readFileSync(new URL('./google65675d2fcb9ab898.html', import.meta.url), 'utf8') };
 // pages of the single-page UI; each is served the same HTML and the browser routes with the History API (no # in URLs)
-const UI_VIEWS = new Set(['nfts', 'taggroups', 'analysis', 'creators', 'explore', 'audit', 'monitor', 'sim', 'scans', 'overview', 'signals', 'groups', 'entities', 'wallets', 'tokens', 'logs', 'config']);
+const UI_VIEWS = new Set(['accuracy', 'alerts', 'nfts', 'taggroups', 'analysis', 'creators', 'explore', 'audit', 'monitor', 'sim', 'scans', 'overview', 'signals', 'groups', 'entities', 'wallets', 'tokens', 'logs', 'config']);
 const HIDDEN_PUBLIC = new Set(['/api/logs', '/api/config']);
 const auditHits = new Map(); // ip -> [timestamps]
 const analysisHits = new Map(), aiHits = new Map();
 const aiRunning = new Map(); // token -> { started, error }
+const watchHits = new Map(), keyHits = new Map(), feedbackHits = new Map();
+/** Watchlist changes over POST (JSON body): create a key, add / remove an item, set an API key's webhook. */
+const POSTS = {
+  '/api/watch/key': async (b, ip) => {
+    if (limited(keyHits, ip, 5)) return { error: 'too many keys from this address, try again later' };
+    const kind = b.kind === 'api' ? 'api' : 'web', key = newKey(kind);
+    await col('watchlists').insertOne({ _id: key, kind, items: [], created_ts: Date.now(), last_seen_ts: Date.now() });
+    return { key };
+  },
+  '/api/watch': async (b, ip) => {
+    if (!validKey(b.key) || b.key.startsWith('tg_')) return { error: 'a web_ or api_ key is required (POST /api/watch/key)' };
+    if (limited(watchHits, ip, 60)) return { error: 'too many changes, try again in a few minutes' };
+    const t = await resolveTarget(b.id, KINDS.includes(b.kind) ? b.kind : null);
+    if (!t) return { error: 'not a NEAR account or group id' };
+    const r = await setWatch(b.key, t, !b.remove);
+    return r.ok ? { ok: true, target: t, items: r.items } : { error: r.error };
+  },
+  '/api/watch/webhook': async (b, ip) => {
+    if (!validKey(b.key) || !b.key.startsWith('api_')) return { error: 'webhooks need an api_ key' };
+    if (limited(watchHits, ip, 60)) return { error: 'too many changes, try again in a few minutes' };
+    if (!b.url) { await col('watchlists').updateOne({ _id: b.key }, { $unset: { webhook: '' } }); return { ok: true, webhook: null }; }
+    const chk = await checkWebhookUrl(String(b.url));
+    if (!chk.ok) return { error: chk.error };
+    await col('watchlists').updateOne({ _id: b.key }, { $set: { webhook: String(b.url), kind: 'api' }, $setOnInsert: { items: [], created_ts: Date.now() } }, { upsert: true });
+    return { ok: true, webhook: String(b.url) };
+  },
+  /** "This verdict is wrong": queued for review; an accepted report becomes ground truth for the accuracy numbers. */
+  '/api/feedback': async (b, ip) => {
+    if (limited(feedbackHits, ip, 10)) return { error: 'too many reports, try again later' };
+    try { const f = await addFeedback({ kind: b.kind, id: b.id, verdict: b.verdict, note: b.note, from: b.from }); return { ok: true, id: String(f._id) }; }
+    catch (e) { return { error: e.message }; }
+  },
+};
 const nftJobs = new Map();   // collection -> { started, passes, events, done, error }
 /** Read a hand-added collection's whole history in the background (a pass at a time, up to 40 passes per request). */
 function startNftSync(id) {
@@ -510,6 +547,34 @@ const routes = {
     return { running: true, started };
   },
 
+  // ------------------------------------------------------------ measured accuracy
+  /** The latest accuracy pass (worker, hourly) plus the hand labels and the review queue size. */
+  '/api/accuracy': async () => {
+    const [acc, labels, pending] = await Promise.all([metaGet('accuracy'), col('ground_truth').aggregate([{ $group: { _id: { k: '$kind', l: '$label' }, n: { $sum: 1 } } }]).toArray(), col('feedback').countDocuments({ status: 'pending' })]);
+    return { accuracy: acc, labels: labels.map((x) => ({ kind: x._id.k, label: x._id.l, n: x.n })), feedback_pending: pending, feedback_kinds: FEEDBACK_KINDS };
+  },
+
+  // ------------------------------------------------------------ alerts and watchlists
+  /** Alerts, newest first: all of them (filter by severity, type group, or what they concern), or one watchlist's (key=). */
+  '/api/alerts': async (u) => {
+    const since = Number(u.searchParams.get('since')) || 0, limit = clamp(u.searchParams.get('limit'), 50, 200), key = u.searchParams.get('key');
+    if (key) { if (!validKey(key)) return { error: 'invalid key' }; return { rows: (await alertsFor(key, { since, limit })).map(alertPayload) }; }
+    const f = { ts: { $gt: since } };
+    const sev = u.searchParams.get('severity'); if (SEVERITIES.includes(sev)) f.severity = { $in: SEVERITIES.slice(0, SEVERITIES.indexOf(sev) + 1) };
+    const grp = u.searchParams.get('group'); if (grp) f.type = { $in: Object.keys(TYPES).filter((t) => TYPES[t].group === grp) };
+    const kind = u.searchParams.get('kind'), id = u.searchParams.get('id');
+    if (kind && id && KINDS.includes(kind)) f[`related.${kind === 'group' ? 'groups' : kind + 's'}`] = id;
+    const offset = Math.max(0, Number(u.searchParams.get('offset')) || 0);
+    const [total, rows] = await Promise.all([col('alerts').countDocuments(f), col('alerts').find(f).sort({ ts: -1 }).skip(offset).limit(limit).toArray()]);
+    return { total, types: Object.fromEntries(Object.entries(TYPES).map(([k, v]) => [k, v.label])), telegram_bot: config.alerts.telegramBot || null, rows: rows.map(alertPayload) };
+  },
+  '/api/watchlist': async (u) => {
+    const key = u.searchParams.get('key');
+    if (!validKey(key)) return { error: 'invalid key' };
+    const w = await getWatchlist(key);
+    return { items: w.items, webhook: w.webhook ? w.webhook.replace(/^(https:\/\/[^/]+).*/, '$1/…') : null };
+  },
+
   // ------------------------------------------------------------ NFT collectibles
   '/api/nfts': async (u) => {
     const f = {};
@@ -604,6 +669,15 @@ export function startWeb() {
         const tok = pos && await col('tokens').findOne({ _id: pos.token });
         if (!pos || !tok || !(share > 0 && share <= 1)) { res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ status: 'skipped', reason: 'position and percent (1-100) required' })); return; }
         res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' }).end(JSON.stringify(await simSell(tok, pos, { share, reason: `manual (UI ${percent}%)` })));
+        return;
+      }
+      if (req.method === 'POST' && POSTS[u.pathname]) {
+        const origin = req.headers.origin; // browsers: same origin and our header only; API clients send no Origin
+        if (req.headers['x-tracker'] !== '1' || (origin && new URL(origin).host !== req.headers.host)) { res.writeHead(403, { 'content-type': 'application/json' }).end(JSON.stringify({ error: 'forbidden: send the header x-tracker: 1' })); return; }
+        let body = ''; for await (const d of req) { body += d; if (body.length > 4000) break; }
+        let b = {}; try { b = JSON.parse(body || '{}'); } catch { res.writeHead(400, { 'content-type': 'application/json' }).end(JSON.stringify({ error: 'invalid JSON' })); return; }
+        const out = await POSTS[u.pathname](b, req.socket.remoteAddress || 'ip');
+        res.writeHead(out?.error ? 400 : 200, { 'content-type': 'application/json', 'cache-control': 'no-store' }).end(JSON.stringify(out));
         return;
       }
       if (req.method !== 'GET') { res.writeHead(405).end(); return; }

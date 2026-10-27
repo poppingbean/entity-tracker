@@ -17,6 +17,7 @@ const newId = (member) => `c_${crypto.createHash('sha1').update(member).digest('
 
 /** The verdict shown to the user: the AI's when it is confident, otherwise the rule-based one. */
 export function finalVerdict(rule, ai) {
+  if (rule.verdict === 'bad' && ai?.verdict === 'good') return { verdict: 'bad', source: 'rules' }; // the AI may not clear a group the rules call bad
   if (ai && ai.verdict !== 'unknown' && ai.confidence >= 0.55) return { verdict: ai.verdict, source: 'ai' };
   return { verdict: rule.verdict, source: 'rules' };
 }

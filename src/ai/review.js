@@ -1,5 +1,6 @@
 // Ask NEAR AI to judge a group of early investors from the evidence the tracker collected.
 import { chatJSON } from './nearai.js';
+import { UNTRUSTED_RULE, evidenceMessage } from './untrusted.js';
 
 const r2 = (x, d = 2) => (x == null || Number.isNaN(x) ? null : Math.round(x * 10 ** d) / 10 ** d);
 
@@ -57,8 +58,11 @@ export function normaliseReview(j) {
 
 export async function reviewCluster(cluster, walletDocs, tokenRows) {
   const packet = buildPacket(cluster, walletDocs, tokenRows);
-  const { json, model, usage } = await chatJSON({ system: SYSTEM, user: `Evidence for this group (JSON):\n${JSON.stringify(packet)}` });
+  const { user, findings } = evidenceMessage('Evidence for this group:', packet);
+  const { json, model, usage } = await chatJSON({ system: SYSTEM + UNTRUSTED_RULE, user });
   const review = normaliseReview(json);
   if (!review) throw new Error('NEAR AI answer did not match the expected format');
-  return { ...review, model, usage, ts: Date.now() };
+  // data that tried to instruct the AI: the review cannot call the group good
+  if (findings.length && review.verdict === 'good') { review.verdict = 'neutral'; review.confidence = Math.min(review.confidence, 0.5); }
+  return { ...review, model, usage, ts: Date.now(), ...(findings.length ? { injection: findings } : {}) };
 }

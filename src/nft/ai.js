@@ -4,6 +4,7 @@
 import { col } from '../db.js';
 import { chatJSON } from '../ai/nearai.js';
 import { config } from '../config.js';
+import { UNTRUSTED_RULE, evidenceMessage, maxRisk, riskFloor } from '../ai/untrusted.js';
 import { saveRun } from '../analysis/ai.js';
 
 const COMMON = `Rules: use only the supplied facts and numbers; never invent accounts, amounts or events; shares are fractions (0.05 = 5%); "money-linked" means
@@ -62,7 +63,14 @@ const clean = (j) => ({
   risk_level: ['low', 'medium', 'high'].includes(j.risk_level) ? j.risk_level : 'medium', confidence: Math.max(0, Math.min(1, Number(j.confidence) || 0)), conclusion: String(j.conclusion || '').slice(0, 1000),
   ...(Array.isArray(j.changes) ? { changes: j.changes.map((x) => String(x).slice(0, 400)).slice(0, 8) } : {}),
 });
-const ask = (system, user) => chatJSON({ system, user, model: config.ai.analysisModel, timeoutMs: config.ai.analysisTimeoutMs, attempts: 2, stream: true });
+/** Ask the model with the evidence cleaned and wrapped as untrusted data; the risk level can only go up from the rule-based flags. */
+async function ask(system, preamble, evidence, flags) {
+  const { user, findings } = evidenceMessage(preamble, evidence);
+  const { json, model } = await chatJSON({ system: system + UNTRUSTED_RULE, user, model: config.ai.analysisModel, timeoutMs: config.ai.analysisTimeoutMs, attempts: 2, stream: true });
+  const floor = maxRisk(riskFloor(flags), findings.length ? 'high' : 'low');
+  const raised = ['low', 'medium', 'high'].indexOf(floor) > ['low', 'medium', 'high'].indexOf(json?.risk_level);
+  return { json: { ...json, risk_level: raised ? floor : json?.risk_level }, model, guard: { floor, raised, ...(findings.length ? { injection: findings } : {}) } };
+}
 
 /** Write (first run) or update (later runs) the assessment of a freshly built NFT analysis; no model call when nothing happened. */
 export async function assessNftWithAi(a) {
@@ -70,8 +78,8 @@ export async function assessNftWithAi(a) {
   const prev = doc?.ai?.snapshot ? doc.ai : null;
   const snapshot = nftPacket(a);
   if (!prev) {
-    const { json, model } = await ask(SYSTEM, JSON.stringify(snapshot));
-    const ai = { ...clean(json), mode: 'initial', model, ts: Date.now(), data_to_ts: a.data_to_ts, for_built_ts: a.built_ts, snapshot };
+    const { json, model, guard } = await ask(SYSTEM, 'Evidence packet for this NFT collection:', snapshot, a.flags);
+    const ai = { ...clean(json), guard, mode: 'initial', model, ts: Date.now(), data_to_ts: a.data_to_ts, for_built_ts: a.built_ts, snapshot };
     await col('nft_analyses').updateOne({ _id: a.collection }, { $set: { ai } }, { upsert: true });
     await saveRun(a.collection, ai);
     return ai;
@@ -82,8 +90,8 @@ export async function assessNftWithAi(a) {
     return { ...prev, checked_ts: Date.now(), unchanged: true };
   }
   const now = { info: snapshot.info, mint: { minted: snapshot.mint.minted, raised_near: snapshot.mint.raised_near }, market: { sales: snapshot.market.sales, volume_near: snapshot.market.volume_near, floor_7d: snapshot.market.floor_7d, wash: { sales: snapshot.market.wash.sales, share: snapshot.market.wash.share } }, holders: snapshot.holders, flags: snapshot.flags };
-  const { json, model } = await ask(SYSTEM_UPDATE, JSON.stringify({ previous: { ts: prev.ts, risk_level: prev.risk_level, summary: prev.summary, findings: prev.findings, conclusion: prev.conclusion }, since, now }));
-  const ai = { ...clean(json), mode: 'update', model, ts: Date.now(), since_ts: prev.ts, data_to_ts: a.data_to_ts, for_built_ts: a.built_ts, previous_risk: prev.risk_level,
+  const { json, model, guard } = await ask(SYSTEM_UPDATE, 'Previous assessment, what changed since, and the current state:', { previous: { ts: prev.ts, risk_level: prev.risk_level, summary: prev.summary, findings: prev.findings, conclusion: prev.conclusion }, since, now }, a.flags);
+  const ai = { ...clean(json), guard, mode: 'update', model, ts: Date.now(), since_ts: prev.ts, data_to_ts: a.data_to_ts, for_built_ts: a.built_ts, previous_risk: prev.risk_level,
     window: { trades: since.events, buy_near: since.sales.near, sell_near: since.sales.near }, snapshot };
   await col('nft_analyses').updateOne({ _id: a.collection }, { $set: { ai } });
   await saveRun(a.collection, ai, since);

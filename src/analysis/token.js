@@ -9,6 +9,7 @@ import { creatorIndex, creatorNetwork } from '../evaluate/creators.js';
 import { priceSeries } from '../collect/analyze.js';
 import { tagOf, ruggerGroup, ruggerWallet } from '../evaluate/tags.js';
 import { config } from '../config.js';
+import { looksLikeInjection } from '../ai/untrusted.js';
 
 const MIN = 60e3, DAY = 86400e3;
 export const CACHE_MS = 15 * MIN;
@@ -242,6 +243,7 @@ export async function buildAnalysis(id) {
 
   // ---- risk notes: facts worth flagging, high first
   const flags = [];
+  if (looksLikeInjection(t.name, t.symbol)) flags.push({ level: 'high', text: 'The token name or symbol contains instruction-like text aimed at AI reviewers: an attempt to manipulate automated scanners.' });
   const add = (level, text) => flags.push({ level, text });
   if (t.outcome?.rugged) add('high', 'The tracker counts this token as rugged.');
   if (launch.audit?.confirmed_malicious?.length) add('high', `Contract audit confirmed malicious behaviour: ${launch.audit.confirmed_malicious.join(', ')}.`);
