@@ -310,7 +310,7 @@ const tokLink = (id, lp, k = 26) => (id ? ext(tokUrl(id, lp), short(id, k), id) 
 
 // ---- internal links: tokens, wallets and groups each have their own page
 const P = { creator: (id) => '/creators/' + encodeURIComponent(id), tok: (id) => '/tokens/' + encodeURIComponent(id), wal: (id) => '/wallets/' + encodeURIComponent(id), grp: (id) => '/groups/' + encodeURIComponent(id),
-  ent: (id) => '/entities/' + encodeURIComponent(id), scan: (id) => '/scans/' + encodeURIComponent(id), sim: (id) => '/sim/' + encodeURIComponent(id), audit: (id) => '/audit/' + encodeURIComponent(id), ana: (id) => '/analysis/' + encodeURIComponent(id) };
+  ent: (id) => '/entities/' + encodeURIComponent(id), scan: (id) => '/scans/' + encodeURIComponent(id), sim: (id) => '/sim/' + encodeURIComponent(id), audit: (id) => '/audit/' + encodeURIComponent(id), ana: (id) => '/analysis/' + encodeURIComponent(id), tgp: (id) => '/taggroups/' + encodeURIComponent(id) };
 const row = (path) => `data-href="${esc(path)}" onclick="rowNav(event,this)"`;
 const ilink = (path, html, title) => `<a href="${esc(path)}" onclick="event.stopPropagation();return navA(event,this)"${title ? ` title="${esc(title)}"` : ''}>${html}</a>`;
 const hue = (s) => { let h = 7; for (const c of String(s)) h = (h * 31 + c.charCodeAt(0)) >>> 0; return h % 360; };
@@ -340,7 +340,7 @@ const mixCell = (m, rug) => { const tot = mixTotal(m); if (!tot) return '<span c
 const wavg = (pairs) => { const w = pairs.reduce((s, [, x]) => s + (x || 0), 0); return w ? pairs.reduce((s, [r, x]) => s + r * (x || 0), 0) / w : null; };
 
 // ---- list state, filters, pager
-const ST = { scans: { kind: '', pass: '', bought: '', q: '', offset: 0 }, entities: { type: '', q: '', sort: 'funded', offset: 0 }, groups: { tag: '', q: '', sort: 'size', offset: 0 },
+const ST = { scans: { kind: '', pass: '', bought: '', q: '', offset: 0 }, entities: { type: '', q: '', sort: 'funded', offset: 0 }, groups: { tag: '', q: '', sort: 'size', offset: 0 }, taggroups: { only: '', sort: 'pnl', offset: 0 },
   wallets: { q: '', tag: '', sort: 'tokens', offset: 0 }, creators: { q: '', filter: '', sort: '', offset: 0 }, tokens: { q: '', tab: '', status: '', launchpad: '', offset: 0 }, signals: { hours: 72 }, logs: { level: '' } };
 const setSt = (view, field, value, reset = true) => { ST[view][field] = value; if (reset && 'offset' in ST[view]) ST[view].offset = 0; render(); };
 const sel = (view, field, opts) => `<select onchange="setSt('${view}','${field}',this.value)">${opts.map(([v, l]) => `<option value="${esc(v)}" ${String(ST[view][field]) === String(v) ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select>`;
@@ -673,13 +673,38 @@ function bubbleMap(entries) {
 }
 
 // ================================================================== WALLETS & GROUPS
+// ---- tag groups: early wallets by what they do (win-rate tag, behaviours), standalone or not
+const TGNAME = (id) => ({ cobuy: 'Co-buy swarm', insider: 'Insiders', 'rug-linked': 'Rug-linked' }[id] || id);
+views.taggroups = async () => {
+  const j = await get('/api/tag-groups');
+  const card = (r) => `<a class="card tgcard" href="${esc(P.tgp(r.id))}" onclick="return navA(event,this)" style="display:block;text-decoration:none;color:inherit">
+      <div class="head"><h2>${r.kind === 'tag' ? tg(r.id) : `<span class="chip">${esc(TGNAME(r.id))}</span>`}</h2><span class="muted small">${n(r.wallets, 0)} wallets</span></div>
+      ${r.about ? `<p class="muted small" style="margin:0 0 8px">${esc(r.about)}</p>` : ''}
+      <div class="tiles">${tile('Standalone', n(r.standalone, 0), 'in no linked group')}${tile('In linked groups', n(r.linked, 0))}${tile('NEAR in', n(r.near, 0) + ' N')}${tile('P&L', signed(r.pnl_near, 0) + ' N', r.profit_rate != null ? `avg ${pct(r.profit_rate)} of tokens in profit` : '', roiCls(r.pnl_near))}</div></a>`;
+  return `<div class="card"><p class="muted" style="margin:0">Tag groups sort every early wallet by <b>what it does</b>: its win-rate tag and its behaviours (co-buy swarms, insider buys, rug links). They are not owners: wallets controlled by one owner are in <a href="/groups" onclick="return navA(event,this)">linked groups</a>, which only follow money (funding, transfers, shared funders). A wallet linked to nobody is only here.</p></div>
+    <h3 class="muted" style="margin:6px 2px">By win-rate tag</h3><div class="grid2">${j.rows.filter((r) => r.kind === 'tag').map(card).join('')}</div>
+    <h3 class="muted" style="margin:6px 2px">By behaviour</h3><div class="grid2">${j.rows.filter((r) => r.kind === 'behaviour').map(card).join('')}</div>`;
+};
+async function tagGroupPage(id) {
+  const S = ST.taggroups;
+  const j = await get('/api/tag-group', { id, only: S.only, sort: S.sort, limit: 50, offset: S.offset });
+  const name = j.kind === 'tag' ? id : TGNAME(id);
+  return `<div class="card">${crumbs([['Tag groups', '/taggroups'], [name]])}
+    <div class="dh-main">${avatar(id, name, 54)}<div style="min-width:0"><h1>${j.kind === 'tag' ? tg(id) : esc(name)} <span class="muted">tag group</span></h1>
+      <div class="meta"><span>${n(j.total, 0)} wallets</span><span>${esc(j.about || (id === 'unrated' ? 'too few tokens judged yet' : TAGHELP))}</span></div></div></div></div>
+  <div class="card"><div class="bar">${seg('taggroups', 'only', [['', 'All'], ['standalone', 'Standalone'], ['linked', 'In linked groups']])}${sel('taggroups', 'sort', [['pnl', 'by P&L'], ['near', 'by NEAR in'], ['tokens', 'by tokens'], ['profit', 'by profitable share']])}<span class="spacer"></span>${pager('taggroups', j.total)}</div>
+    <table><tr><th>Wallet</th><th>Tag</th><th>Behaviours</th><th>Linked group</th><th class="num">Tokens</th><th class="num">Profitable</th><th class="num">NEAR in</th><th class="num">P&amp;L N</th><th class="num">Co-buy partners</th></tr>
+    ${j.rows.map((w) => `<tr ${row(P.wal(w.id))}><td>${walLink(w.id, 28)}</td><td>${tg(w.tag)}</td><td>${w.behaviours.map((b) => ilink(P.tgp(b), `<span class="chip">${esc(TGNAME(b))}</span>`)).join(' ') || '<span class="muted">–</span>'}</td>
+      <td>${w.cluster_id ? `${tg(w.cluster_tag)} ${ilink(P.grp(w.cluster_id), `<span class="acct">${esc(short(w.cluster_id, 14))}</span>`)}` : '<span class="v solo">standalone</span>'}</td>
+      <td class="num">${w.stats.tokens_n ?? '–'}</td><td class="num">${pct(w.stats.profit_rate)}</td><td class="num">${n(w.stats.total_buy_near, 1)}</td><td class="num ${roiCls(w.stats.pnl_near)}">${signed(w.stats.pnl_near)}</td><td class="num">${w.cobuy_n || '–'}</td></tr>`).join('') || empty(9, 'no wallets')}</table></div>`;
+}
 views.groups = async () => {
   const S = ST.groups, j = await get('/api/clusters', { tag: S.tag, q: S.q, sort: S.sort, limit: 50, offset: S.offset });
   return `<div class="card"><div class="bar">${seg('groups', 'tag', [['', 'All'], ['win80', 'win80'], ['win50', 'win50'], ['win30', 'win30'], ['sniper', 'sniper'], ['loss', 'loss'], ['unrated', 'Unrated']])}
     ${sel('groups', 'sort', [['winrate', 'by profitable share'], ['size', 'by size'], ['score', 'by score'], ['pnl', 'by P&L'], ['recent', 'most recent entry']])}${qbox('groups', 'wallet / group id / label')}<span class="spacer"></span>${pager('groups', j.total)}</div>
     <table><tr><th>Group</th><th>Tag</th><th>Flags</th><th class="num">Wallets</th><th class="num">Linked wallets</th><th class="num">Tokens</th><th class="num">Profitable</th><th class="num">Rug</th><th class="num">ROI</th><th class="num">P&amp;L N</th><th class="num">Realized</th><th class="num">Unrealized</th><th>Last entry</th></tr>
     ${j.rows.map((c) => `<tr ${row(P.grp(c.id))}><td><span class="ent">${avatar(c.id, c.ai?.label || c.id, 28)}<span><b>${ilink(P.grp(c.id), esc(short(c.ai?.label || c.id, 32)))}</b><small class="acct">${esc(short(c.id, 24))}</small></span></span></td>
-      <td>${tg(c.tag)}</td><td class="wrap">${c.creator_flag === 'blacklisted' || c.creator_flag === 'rugger' ? '<span class="v bad">creator rug</span> ' : ''}${tags(c.rule?.tags)}</td><td class="num">${c.size}</td>
+      <td>${tg(c.tag)}</td><td class="wrap">${c.weak_only ? '<span class="chip" title="linked only by co-buys, no money link">co-buy only</span> ' : ''}${c.creator_flag === 'blacklisted' || c.creator_flag === 'rugger' ? '<span class="v bad">creator rug</span> ' : ''}${tags(c.rule?.tags)}</td><td class="num">${c.size}${c.weak_members?.length && !c.weak_only ? ` <span class="muted small" title="attached only by co-buys">+${c.weak_members.length} co-buy</span>` : ''}</td>
       <td class="num">${c.network_n ?? '–'}</td><td class="num">${c.metrics.tokens_n}</td><td class="num">${pct(c.metrics.profit_rate)}</td><td class="num">${pct(c.metrics.rug_share)}</td>
       <td class="num ${roiCls(c.metrics.roi_weighted)}">${pct(c.metrics.roi_weighted)}</td><td class="num ${roiCls(c.metrics.pnl_near)}">${signed(c.metrics.pnl_near)}</td><td class="num ${roiCls(c.metrics.realized_near)}">${signed(c.metrics.realized_near)}</td><td class="num ${roiCls(c.metrics.unrealized_near)}">${signed(c.metrics.unrealized_near)}</td><td>${since(c.metrics.last_entry_ts)}</td></tr>`).join('') || empty(13, 'no groups yet')}</table></div>`;
 };
@@ -689,7 +714,7 @@ async function groupPage(id) {
   const m = c.metrics || {}, ai = c.ai, label = ai?.label || (c.rule?.tags || [])[0] || c.id;
   let h = `<div class="card">${crumbs([['Groups', '/groups'], [short(label, 40)]])}
     <div class="dh-main">${avatar(c.id, label, 54)}<div style="min-width:0"><h1>${esc(label)} ${tg(c.tag)} ${c.creator_flag === 'blacklisted' || c.creator_flag === 'rugger' ? '<span class="v bad" title="a token creator in this group rugged or is blacklisted">creator rug</span>' : ''} <span class="chip">${pct(m.profit_rate)} of ${m.tokens_n ?? 0} tokens in profit</span></h1>
-      <div class="meta"><span class="acct">${esc(c.id)}</span><span>${c.size} wallets</span>${c.rule ? `<span>rule score ${n(c.rule.score, 0)} (${esc(c.rule.verdict)})</span>` : ''}<span>updated ${since(c.updated_ts)}</span>${tags(c.rule?.tags)}</div></div></div>
+      <div class="meta"><span class="acct">${esc(c.id)}</span><span>${c.weak_only ? `${c.size} wallets linked only by co-buys (no money link)` : `${c.size - (c.weak_members || []).length} wallets linked by money${(c.weak_members || []).length ? ` · ${c.weak_members.length} attached only by co-buys` : ''}`}</span>${c.rule ? `<span>rule score ${n(c.rule.score, 0)} (${esc(c.rule.verdict)})</span>` : ''}<span>updated ${since(c.updated_ts)}</span>${tags(c.rule?.tags)}</div></div></div>
     <div class="tiles">${tile('Judged tokens', m.tokens_n ?? '–', `${m.entries_n ?? '–'} entries`)}${tile('Profitable tokens', pct(m.profit_rate), `${m.profit_tokens_n ?? 0} of ${m.tokens_n ?? 0} · gained 20 %+ in ${pct(m.win_rate)}`, (m.profit_rate ?? 0) >= 0.5 ? 'g' : (m.profit_rate ?? 1) < 0.3 ? 'r' : 'a')}${tile('P&L', signed(m.pnl_near) + ' N', `${n(m.total_buy_near, 1)} N bought`, roiCls(m.pnl_near))}${tile('Realized P&L', signed(m.realized_near) + ' N', 'taken out of the tokens sold', roiCls(m.realized_near))}${tile('Unrealized P&L', signed(m.unrealized_near) + ' N', 'still held, at the latest price', roiCls(m.unrealized_near))}
       ${tile('Weighted ROI', pct(m.roi_weighted), `median token ${pct(m.median_token_roi)}`, roiCls(m.roi_weighted))}${tile('Rugged tokens', pct(m.rug_share), `${m.rug_tokens_n ?? 0} tokens${m.win_rate_in_rugs !== undefined ? ' · win in rugs ' + pct(m.win_rate_in_rugs) : ''}`, (m.rug_share ?? 0) >= 0.4 ? 'r' : '')}
       ${m.creator_linked_share !== undefined ? tile('Creator-linked', pct(m.creator_linked_share), null, (m.creator_linked_share ?? 0) > 0.1 ? 'r' : '') : ''}${tile('Linked wallets', c.network_n ?? 0, 'around the members')}${tile('Token creators', c.creators_n ?? 0, `${c.creators_rugged ?? 0} rugged or blacklisted`, (c.creators_rugged ?? 0) ? 'r' : '')}${m.avg_delay_s !== undefined ? tile('Avg entry delay', n(m.avg_delay_s, 0) + ' s', `first-5 share ${pct(m.first_movers_share)}`) : ''}${m.fresh_share !== undefined ? tile('Fresh / synced', `${pct(m.fresh_share)} / ${pct(m.sync_share)}`, 'wallets < 3 d / synchronised buys') : ''}</div></div>`;
@@ -703,7 +728,7 @@ async function groupPage(id) {
     ${c.creators.map((x) => `<tr ${row(P.creator(x.account))}><td>${nb(x.account)}</td><td>${x.role === 'member' ? '<span class="chip ai">member</span>' : `<span class="chip">linked · ${x.depth} hop${x.depth > 1 ? 's' : ''}</span>`}</td><td>${x.blacklisted ? `<span class="v bad" title="${esc(x.blacklisted.reason || '')}">blacklisted</span>` : x.rugged ? '<span class="v bad">rugger</span>' : '<span class="v unrated">creator</span>'}</td><td class="num">${x.launches}</td><td class="num ${x.rugged ? 'r' : 'muted'}">${x.rugged}</td>
       <td class="wrap">${(x.tokens || []).map((t) => `<a class="gchip" href="${esc(P.tok(t.id))}" onclick="event.stopPropagation();return navA(event,this)"><i style="background:${t.rugged ? 'var(--loss)' : 'var(--unknown)'}"></i><span>${esc(t.symbol || short(t.id, 12))}${t.rugged ? ' · rug' : ''}</span></a>`).join('') || '<span class="muted small">no launches recorded</span>'}${x.blacklisted?.symbol && !(x.tokens || []).length ? esc(x.blacklisted.symbol) : ''}</td></tr>`).join('')}</table></div>`;
   h += `<div class="card"><h2>Member wallets <span class="muted">${c.wallets.length}</span></h2><table><tr><th>Wallet</th><th>Funded by</th><th>Kind</th><th class="num">Age</th><th class="num">Txs</th><th class="num">Tokens</th><th>Tag</th><th class="num">Profitable</th><th class="num">ROI</th><th class="num">P&amp;L N</th><th class="num">Realized</th><th class="num">Unrealized</th></tr>
-    ${c.wallets.map((w) => `<tr ${row(P.wal(w.id))}><td>${walLink(w.id)}</td><td>${acct(w.funder, 20)} <span class="muted">${esc(w.funder_kind || '')}</span></td><td>${esc(w.kind || '')}</td><td class="num">${w.created_ts ? ago(Date.now() - w.created_ts) : '–'}</td><td class="num">${w.tx_count ?? '–'}</td><td class="num">${w.stats?.tokens_n ?? '–'}</td><td>${tg(w.tag)}</td><td class="num">${pct(w.stats?.profit_rate)}</td><td class="num ${roiCls(w.stats?.roi_weighted)}">${pct(w.stats?.roi_weighted)}</td><td class="num ${roiCls(w.stats?.pnl_near)}">${signed(w.stats?.pnl_near)}</td><td class="num ${roiCls(w.stats?.realized_near)}">${signed(w.stats?.realized_near)}</td><td class="num ${roiCls(w.stats?.unrealized_near)}">${signed(w.stats?.unrealized_near)}</td></tr>`).join('')}</table></div>`;
+    ${c.wallets.map((w) => `<tr ${row(P.wal(w.id))}><td>${walLink(w.id)}${(c.weak_members || []).includes(w.id) && !c.weak_only ? ' <span class="chip" title="no money link to the group, only co-buys">co-buy only</span>' : ''}</td><td>${acct(w.funder, 20)} <span class="muted">${esc(w.funder_kind || '')}</span></td><td>${esc(w.kind || '')}</td><td class="num">${w.created_ts ? ago(Date.now() - w.created_ts) : '–'}</td><td class="num">${w.tx_count ?? '–'}</td><td class="num">${w.stats?.tokens_n ?? '–'}</td><td>${tg(w.tag)}</td><td class="num">${pct(w.stats?.profit_rate)}</td><td class="num ${roiCls(w.stats?.roi_weighted)}">${pct(w.stats?.roi_weighted)}</td><td class="num ${roiCls(w.stats?.pnl_near)}">${signed(w.stats?.pnl_near)}</td><td class="num ${roiCls(w.stats?.realized_near)}">${signed(w.stats?.realized_near)}</td><td class="num ${roiCls(w.stats?.unrealized_near)}">${signed(w.stats?.unrealized_near)}</td></tr>`).join('')}</table></div>`;
   h += `<div class="card"><h2>Funding &amp; money-flow graph</h2>${graphBlock(g, 'grp')}<div class="legend"><span><span class="lg-dot" style="background:var(--accent)"></span>member wallet</span><span><span class="lg-dot neutral"></span>funder / anchor</span><span><span class="lg-dot unknown"></span>exchange / relayer / other</span><span class="g">— funded by</span><span class="r">— NEAR sent to</span></div></div>`;
   const netByDepth = [1, 2, 3].map((d) => (c.network || []).filter((x) => x.depth === d));
   h += `<div class="card"><h2>Linked wallets <span class="muted">${c.network_n ?? 0} around the members: funders, destinations and the wallets behind them</span></h2>
@@ -780,15 +805,21 @@ views.wallets = async () => {
       <td class="num ${roiCls(w.stats?.roi_weighted)}">${pct(w.stats?.roi_weighted)}</td><td class="num ${roiCls(w.stats?.pnl_near)}">${signed(w.stats?.pnl_near)}</td><td class="num ${roiCls(w.stats?.realized_near)}">${signed(w.stats?.realized_near)}</td><td class="num ${roiCls(w.stats?.unrealized_near)}">${signed(w.stats?.unrealized_near)}</td><td class="num">${pct(w.stats?.rug_share)}</td></tr>`).join('') || empty(13, 'no wallets')}</table></div>`;
 };
 
+/** Links to a wallet's tag groups: its win-rate tag and its behaviours. */
+const BEH = { cobuy: 'co-buy swarm', insider: 'insider', 'rug-linked': 'rug-linked' };
+const tagGroupChips = (w) => [ilink(P.tgp(tagOk(w.tag)), tg(w.tag), 'tag group: ' + tagOk(w.tag)), ...(w.behaviours || []).map((b) => ilink(P.tgp(b), `<span class="chip">${esc(BEH[b] || b)}</span>`, BEH[b] || b))].join(' ');
 async function walletPage(id) {
   const w = await get('/api/wallet', { id }), s = w.stats || {}, c = w.cluster;
   let h = `<div class="card">${crumbs([['Wallets', '/wallets'], [short(w.id, 40)]])}
     <div class="dh-main">${avatar(w.id, w.id, 54)}<div style="min-width:0"><h1 class="acct">${esc(w.id)} ${tg(w.tag)}</h1>
       <div class="meta">${w.creator ? `<span>${ilink(P.creator(w.id), 'creator of ' + w.creator.launches + ' token' + (w.creator.launches === 1 ? '' : 's'))}</span> ${crChip(w.creator)}` : ''}${w.kind ? `<span class="chip">${esc(w.kind)}</span>` : ''}<span>${w.tx_count ?? '–'} txs</span><span>created ${when(w.created_ts)}</span>${ext(nbAddr(w.id), 'NearBlocks ↗')}</div></div></div>
-    ${c ? `<div class="banner ${esc(tagOk(c.tag))}" ${row(P.grp(c.id))}>${tg(c.tag)}<div style="flex:1;min-width:0"><b>Member of ${esc(c.ai?.label || c.id)}</b><div class="muted small">${c.size} wallets linked by funding / money flow ${tags(c.rule?.tags)}</div></div>${ilink(P.grp(c.id), 'Open group →')}</div>`
-      : '<div class="banner"><span class="v solo">unlinked</span><span class="muted">Not linked to any other early wallet yet.</span></div>'}
+    ${c ? `<div class="banner ${esc(tagOk(c.tag))}" ${row(P.grp(c.id))}>${tg(c.tag)}<div style="flex:1;min-width:0"><b>Member of ${esc(c.ai?.label || c.id)}</b><div class="muted small">${(c.weak_members || []).includes(w.id) ? 'attached only by co-buys (no money link)' : 'linked by funding / money flow'} · ${c.size} wallets ${tags(c.rule?.tags)}</div></div>${ilink(P.grp(c.id), 'Open group →')}</div>`
+      : '<div class="banner"><span class="v solo">standalone</span><span class="muted">Not linked to any other early wallet by money. It is only in its tag groups below.</span></div>'}
+    <div class="meta" style="margin:-4px 0 14px">Tag groups: ${tagGroupChips(w)}</div>
     <div class="tiles">${tile('Tokens bought early', s.tokens_n ?? '–', `${s.entries_n ?? '–'} entries`)}${tile('Profitable tokens', pct(s.profit_rate), 'share of its early tokens that ended in profit', (s.profit_rate ?? 0) >= 0.5 ? 'g' : (s.profit_rate ?? 1) < 0.3 ? 'r' : 'a')}${tile('Weighted ROI', pct(s.roi_weighted), null, roiCls(s.roi_weighted))}
       ${tile('P&L', signed(s.pnl_near) + ' N', `${n(s.total_buy_near, 1)} N bought`, roiCls(s.pnl_near))}${tile('Realized P&L', signed(s.realized_near) + ' N', 'taken out of the tokens sold', roiCls(s.realized_near))}${tile('Unrealized P&L', signed(s.unrealized_near) + ' N', 'still held, at the latest price', roiCls(s.unrealized_near))}${tile('Rugged tokens', pct(s.rug_share), null, (s.rug_share ?? 0) >= 0.4 ? 'r' : '')}${tile('Main funder', w.funder ? esc(short(w.funder, 20)) : '–', esc(w.funder_kind || ''))}</div></div>`;
+  if ((w.cobuy_partners || []).length) h += `<div class="card"><h2>Co-buy partners <span class="muted">bought within seconds of it in several launches · behaviour, not proof of one owner</span></h2><table><tr><th>Wallet</th><th class="num">Launches bought together</th></tr>
+    ${w.cobuy_partners.map((p) => `<tr ${row(P.wal(p.wallet))}><td>${walLink(p.wallet)}</td><td class="num">${p.tokens}</td></tr>`).join('')}</table></div>`;
   h += `<div class="card"><h2>Early entries <span class="muted">${w.entries.length}</span></h2><table><tr><th>Token</th><th>Bought</th><th>Tx</th><th class="num">Rank</th><th class="num">Delay</th><th class="num">NEAR in</th><th class="num">ROI 1h</th><th class="num">ROI 6h</th><th class="num">ROI 24h</th><th class="num">Now</th><th class="num" title="NEAR taken out minus the cost of the tokens sold">Realized N</th><th class="num" title="still held, valued at the latest price, minus its cost">Unrealized N</th><th>Rug</th></tr>
     ${w.entries.map((e) => `<tr ${row(P.tok(e.token))}><td>${tokCell(e.token, e.symbol, e.launchpad, 22)}${e.is_creator ? ' <span class="v bad">creator</span>' : ''}</td><td>${when(e.first_buy_ts)}</td><td>${txl(e.first_buy_hash)}</td><td class="num">#${e.rank}</td><td class="num">${e.delay_s}s</td><td class="num">${n(e.buy_near, 1)}</td>
       ${['60', '360', '1440'].map((k) => `<td class="num ${roiCls(e.roi?.[k])}">${pct(e.roi?.[k])}</td>`).join('')}<td class="num ${roiCls(e.roi_now)}"${!e.now_ts && e.token_done ? ' title="at 24 h: trades after the first day are not read yet"' : ''}>${pct(e.roi_now)}${!e.now_ts && e.token_done ? '<small class="muted"> 24h</small>' : ''}</td><td class="num ${roiCls(e.realized_now)}">${signed(e.realized_now)}</td><td class="num ${roiCls(e.unrealized_now)}">${signed(e.unrealized_now)}</td><td class="${e.rugged ? 'r' : 'muted'}">${e.rugged ? 'RUG' : '–'}</td></tr>`).join('') || empty(13, 'none')}</table></div>`;
@@ -1186,12 +1217,13 @@ document.addEventListener('keydown', (e) => { if (e.key === '/' && !['INPUT', 'S
 const SECTIONS = [
   { label: 'Explore', views: [['explore', 'Explore']] },
   { label: 'Tokens & Scanner', views: [['tokens', 'Launches'], ['signals', 'Smart-money signals'], ...(SHOW_SIM ? [['sim', 'Simulated wallet']] : []), ['analysis', 'On-chain analysis'], ['scans', 'Evaluations'], ['audit', 'Contract audit']] },
-  { label: 'Wallets & Groups', views: [['groups', 'Groups'], ['wallets', 'Wallets'], ['creators', 'Creators'], ['entities', 'Funders & entities']] },
+  { label: 'Wallets & Groups', views: [['groups', 'Linked groups'], ['taggroups', 'Tag groups'], ['wallets', 'Wallets'], ['creators', 'Creators'], ['entities', 'Funders & entities']] },
 ];
 const TITLES = {
   explore: ['Explore', ''], tokens: ['Tokens & Scanner', "Every launch: who bought it early (by win-rate tag), the scanner's first check and gates, its outcome and whether it was rugged"],
   signals: ['Smart-money signals', 'Recent tokens where winners (win80 / win50 / sniper) or loss wallets were among the early buyers'],
-  groups: ['Groups', 'Wallets linked by on-chain funding and money flow, tagged by how often their early buys ended in profit'],
+  groups: ['Linked groups', 'Wallets one owner controls, linked by money only: funding, transfers, shared funders and destinations (co-buy partners are marked apart)'],
+  taggroups: ['Tag groups', 'Every early wallet by what it does: win-rate tag and behaviours, standalone or in a linked group'],
   creators: ['Creators', 'Who launched the tokens: launches, rugged launches and the dev-rug blacklist, and which groups they belong to'],
   wallets: ['Wallets', 'Every early buyer: its group, who funded it and how it did'], entities: ['Funders & entities', 'Exchange wallets, services, funders and destinations around the early investors'],
   sim: ['Simulated wallet', 'Paper trading with real pool quotes: equity, open and closed positions'],
@@ -1199,7 +1231,7 @@ const TITLES = {
   analysis: ['On-chain analysis', 'An investigation of any token: launch, creator, flows, who bought early and the groups behind them, who sold, who holds, risk notes'],
   logs: ['Log', 'Worker activity'], config: ['Settings', 'Read-only view of the configuration in use'],
 };
-const DETAIL = { creators: creatorPage, tokens: tokenPage, wallets: walletPage, groups: groupPage, entities: entityPage, scans: scanPage, sim: simPage, analysis: analysisPage };
+const DETAIL = { taggroups: tagGroupPage, creators: creatorPage, tokens: tokenPage, wallets: walletPage, groups: groupPage, entities: entityPage, scans: scanPage, sim: simPage, analysis: analysisPage };
 function setUrl(path) { if (location.pathname !== path) history.pushState(null, '', path); }
 /** Link / tab click: change the path without reloading the page. */
 function nav(e, path) {

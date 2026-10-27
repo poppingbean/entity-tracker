@@ -14,7 +14,7 @@ import { recomputeToken } from '../collect/rugs.js';
 import { redact } from './redact.js';
 import { creatorIndex, creatorBrief, creatorFlag, creatorNetwork } from '../evaluate/creators.js';
 import { auditNearContract, getCachedAudit, validNearAddress, summarizeAudit } from '../audit/service.js';
-import { TAGS, tagOf, ruggerGroup, ruggerWallet } from '../evaluate/tags.js';
+import { TAGS, tagOf, ruggerGroup, ruggerWallet, BEHAVIOURS, TAG_GROUPS } from '../evaluate/tags.js';
 import { getAnalysis } from '../analysis/token.js';
 import { assessWithAi, getRun } from '../analysis/ai.js';
 
@@ -22,7 +22,7 @@ const page = fs.readFileSync(new URL('./index.html', import.meta.url), 'utf8');
 // Google Search Console ownership file for app.safe-near.org, served as is at /<name>.html (before the password check, so Google can read it).
 const SITE_VERIFY = { '/google65675d2fcb9ab898.html': fs.readFileSync(new URL('./google65675d2fcb9ab898.html', import.meta.url), 'utf8') };
 // pages of the single-page UI; each is served the same HTML and the browser routes with the History API (no # in URLs)
-const UI_VIEWS = new Set(['analysis', 'creators', 'explore', 'audit', 'monitor', 'sim', 'scans', 'overview', 'signals', 'groups', 'entities', 'wallets', 'tokens', 'logs', 'config']);
+const UI_VIEWS = new Set(['taggroups', 'analysis', 'creators', 'explore', 'audit', 'monitor', 'sim', 'scans', 'overview', 'signals', 'groups', 'entities', 'wallets', 'tokens', 'logs', 'config']);
 const HIDDEN_PUBLIC = new Set(['/api/logs', '/api/config']);
 const auditHits = new Map(); // ip -> [timestamps]
 const analysisHits = new Map(), aiHits = new Map();
@@ -138,6 +138,27 @@ const routes = {
     const [total, rows] = await Promise.all([col('clusters').countDocuments(f),
       col('clusters').find(f, { projection: { nodes: 0, links: 0, tokens: 0, members: 0, network: 0, 'ai.reasons': 0, 'ai.red_flags': 0, 'ai.usage': 0 } }).sort(sort).skip(offset).limit(limit).toArray()]);
     return { total, rows: rows.map(strip) };
+  },
+
+  // ------------------------------------------------------------ tag groups: early wallets by what they do (win-rate tag, behaviours)
+  '/api/tag-groups': async () => {
+    const base = { is_early: true, profiled: true };
+    const facet = (match) => [{ $match: match }, { $group: { _id: null, wallets: { $sum: 1 }, linked: { $sum: { $cond: [{ $ifNull: ['$cluster_id', false] }, 1, 0] } },
+      near: { $sum: { $ifNull: ['$stats.total_buy_near', 0] } }, pnl: { $sum: { $ifNull: ['$stats.pnl_near', 0] } }, profit: { $avg: '$stats.profit_rate' } } }];
+    const tagFilter = (t) => (t === 'unrated' ? { tag: { $nin: TAGS.filter((x) => x !== 'unrated') } } : { tag: t });
+    const res = await Promise.all(TAG_GROUPS.map((id) => col('wallets').aggregate(facet({ ...base, ...(BEHAVIOURS[id] ? { behaviours: id } : tagFilter(id)) })).toArray()));
+    return { rows: TAG_GROUPS.map((id, i) => { const r = res[i][0] || {}; return { id, kind: BEHAVIOURS[id] ? 'behaviour' : 'tag', about: BEHAVIOURS[id] || null, wallets: r.wallets || 0, linked: r.linked || 0, standalone: (r.wallets || 0) - (r.linked || 0), near: r.near || 0, pnl_near: r.pnl || 0, profit_rate: r.profit ?? null }; }) };
+  },
+  '/api/tag-group': async (u) => {
+    const id = u.searchParams.get('id');
+    if (!TAG_GROUPS.includes(id)) return { error: 'not found' };
+    const f = { is_early: true, profiled: true, ...(BEHAVIOURS[id] ? { behaviours: id } : id === 'unrated' ? { tag: { $nin: TAGS.filter((x) => x !== 'unrated') } } : { tag: id }) };
+    const only = u.searchParams.get('only'); if (only === 'standalone') f.cluster_id = null; else if (only === 'linked') f.cluster_id = { $ne: null };
+    const sort = { pnl: { 'stats.pnl_near': -1 }, near: { 'stats.total_buy_near': -1 }, tokens: { 'stats.tokens_n': -1 }, profit: { 'stats.profit_rate': -1, 'stats.tokens_n': -1 } }[u.searchParams.get('sort')] || { 'stats.pnl_near': -1 };
+    const limit = clamp(u.searchParams.get('limit'), 50, 200), offset = Math.max(0, Number(u.searchParams.get('offset')) || 0);
+    const [total, rows] = await Promise.all([col('wallets').countDocuments(f), col('wallets').find(f, { projection: { tag: 1, behaviours: 1, cluster_id: 1, cluster_tag: 1, stats: 1, cobuy_partners: 1, created_ts: 1 } }).sort(sort).skip(offset).limit(limit).toArray()]);
+    return { id, kind: BEHAVIOURS[id] ? 'behaviour' : 'tag', about: BEHAVIOURS[id] || null, total,
+      rows: rows.map((w) => ({ id: w._id, tag: tagOf(w.tag), behaviours: w.behaviours || [], cluster_id: w.cluster_id || null, cluster_tag: w.cluster_id ? tagOf(w.cluster_tag) : null, cobuy_n: (w.cobuy_partners || []).length, stats: w.stats || {} })) };
   },
 
   '/api/cluster': async (u) => {
@@ -332,7 +353,7 @@ const routes = {
     const entries = await col('entries').find({ wallet: id }).sort({ first_buy_ts: -1 }).limit(100).toArray();
     const toks = await col('tokens').find({ _id: { $in: entries.map((e) => e.token) } }, { projection: { symbol: 1, launchpad: 1, status: 1, 'outcome.rugged': 1, 'outcome.peak_multiple': 1, 'ledger.synced_to_ts': 1, creator: 1 } }).toArray();
     const tmap = new Map(toks.map((t) => [t._id, t]));
-    const cluster = w.cluster_id ? await col('clusters').findOne({ _id: w.cluster_id }, { projection: { size: 1, tag: 1, verdict: 1, score: 1, 'ai.label': 1, 'rule.tags': 1 } }) : null;
+    const cluster = w.cluster_id ? await col('clusters').findOne({ _id: w.cluster_id }, { projection: { size: 1, tag: 1, verdict: 1, score: 1, 'ai.label': 1, 'rule.tags': 1, weak_members: 1, weak_only: 1 } }) : null;
     const fundEdges = await col('edges').find({ type: 'fund', to: id }, { projection: { from: 1, hash: 1 } }).toArray();
     const hashOf = new Map(fundEdges.map((x) => [x.from, x.hash]));
     for (const f of w.funders || []) f.hash = f.hash || hashOf.get(f.account) || null;
