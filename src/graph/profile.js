@@ -127,7 +127,8 @@ export async function profileWallet(account) {
 
 /** Profile wallets that have not been profiled yet, a few at a time. */
 export async function profilePending(limit = 40) {
-  const todo = await col('wallets').find({ profiled: false, is_early: true }).limit(limit).toArray();
+  // early token buyers first, then NFT minters and traders
+  const todo = await col('wallets').find({ profiled: false, $or: [{ is_early: true }, { nft_participant: true }] }).sort({ is_early: -1 }).limit(limit).toArray();
   let done = 0, idx = 0;
   const worker = async () => {
     while (idx < todo.length) {

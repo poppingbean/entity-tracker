@@ -8,6 +8,7 @@ import { followDue, ledgerBacklog } from './collect/ledger.js';
 import { profilePending } from './graph/profile.js';
 import { expandNetworks } from './graph/expand.js';
 import { flagRugs, refreshStaleOutcomes } from './collect/rugs.js';
+import { nftTick } from './nft/sync.js';
 import { evaluateGroups, reviewPending } from './evaluate/run.js';
 import { profileCreators } from './evaluate/creators.js';
 import { checkAi, aiEnabled, aiStatus } from './ai/nearai.js';
@@ -15,7 +16,7 @@ import { scanTick, followUpTick, blacklistCreator } from './scanner/pipeline.js'
 import { managePositions } from './sim/portfolio.js';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-export const runtime = { startedTs: Date.now(), cycles: 0, lastCycleTs: null, stopping: false, lastEvalTs: 0, lastPositionCheck: 0, lastRugCheck: 0, lastCreatorCheck: 0, reviewing: null, reviewed: 0 };
+export const runtime = { startedTs: Date.now(), cycles: 0, lastCycleTs: null, stopping: false, lastEvalTs: 0, lastPositionCheck: 0, lastRugCheck: 0, lastCreatorCheck: 0, reviewing: null, reviewed: 0, nft: null, nftLast: null };
 
 /** One pass of the pipeline. Returns what it did, so callers (the CLI) can loop until idle. */
 export async function cycle({ evaluate = true } = {}) {
@@ -44,6 +45,8 @@ export async function cycle({ evaluate = true } = {}) {
     runtime.reviewing = reviewPending(3).then((n) => { runtime.reviewed += n; return n; }).catch((e) => { warn(`group reviews failed: ${e.message}`); return 0; }).finally(() => { runtime.reviewing = null; });
   }
   reviewed = runtime.reviewed;
+  // NFT collections (discovery + history sync) beside the loop too, one pass at a time
+  if (!runtime.nft) runtime.nft = nftTick().then((r) => { runtime.nftLast = r; }).catch((e) => warn(`NFT pass failed: ${e.message}`)).finally(() => { runtime.nft = null; });
   return { found, creators, processed, ledgered, scanned, followed, profiled, expanded, groups, reviewed };
 }
 

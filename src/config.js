@@ -60,6 +60,14 @@ export const config = {
     syncNowMinutes: num(process.env.SYNC_NOW_MAX_MINUTES, 20), // how long "Sync now" reads a token's history; the worker reads the rest
   },
 
+  // NFT collectibles: HOT Craft and near.cooking followed, every collection NearBlocks lists discovered, any collection added by hand
+  nft: {
+    enabled: process.env.NFT_ENABLED !== 'false',
+    syncPerTick: num(process.env.NFT_SYNC_PER_TICK, 3),               // collections synced per worker pass
+    nearblocksUrl: process.env.NEARBLOCKS_API_URL || 'https://api.nearblocks.io',
+    nearblocksKey: process.env.NEARBLOCKS_API_KEY || '',
+    nearblocksEveryMs: num(process.env.NFT_NEARBLOCKS_EVERY_SECONDS, 30) * 1000, // one page of the collection list per this many seconds (public API rate limit)
+  },
   graph: {
     fundingDepth: num(process.env.FUNDING_DEPTH, 3),
     flowLookbackTxs: num(process.env.FLOW_LOOKBACK_TXS, 60),
