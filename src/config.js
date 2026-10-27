@@ -60,6 +60,17 @@ export const config = {
     syncNowMinutes: num(process.env.SYNC_NOW_MAX_MINUTES, 20), // how long "Sync now" reads a token's history; the worker reads the rest
   },
 
+  // alerts: detectors run beside the worker loop; delivery to Telegram (public channel + each subscriber's chat), webhooks, dashboard, API
+  alerts: {
+    enabled: process.env.ALERTS_ENABLED !== 'false',
+    everyMs: num(process.env.ALERTS_EVERY_SECONDS, 60) * 1000,
+    telegramToken: process.env.TELEGRAM_BOT_TOKEN || '',
+    telegramBot: (process.env.TELEGRAM_BOT_NAME || '').replace(/^@/, ''),     // the bot's @name, shown on the Alerts page
+    telegramChannel: process.env.TELEGRAM_CHANNEL_ID || '',          // public channel / chat for alerts at publicSeverity and above
+    webhookUrl: process.env.ALERTS_WEBHOOK_URL || '',                // global webhook for the same alerts
+    publicSeverity: ['high', 'medium', 'info'].includes(process.env.ALERTS_PUBLIC_SEVERITY) ? process.env.ALERTS_PUBLIC_SEVERITY : 'high',
+    siteUrl: (process.env.PUBLIC_SITE_URL || '').replace(/\/$/, ''),  // links in alerts, e.g. https://safenear.example
+  },
   // NFT collectibles: HOT Craft and near.cooking followed, every collection NearBlocks lists discovered, any collection added by hand
   nft: {
     enabled: process.env.NFT_ENABLED !== 'false',
