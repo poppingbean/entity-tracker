@@ -18,6 +18,7 @@ export const TYPES = {
   token_big_sell: { label: 'Large sell', group: 'activity' },
   token_creator_sell: { label: 'Creator selling', group: 'rug' },
   token_price_drop: { label: 'Fast price drop', group: 'rug' },
+  token_transfer: { label: 'Large transfer', group: 'activity' },
   nft_team_sell: { label: 'NFT team selling', group: 'nft' },
   nft_wash: { label: 'NFT wash trades', group: 'nft' },
 };

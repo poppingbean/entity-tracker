@@ -20,7 +20,8 @@ import { getNftAnalysis } from '../nft/analysis.js';
 import { assessNftWithAi } from '../nft/ai.js';
 import { registerCollection, syncCollection, SOURCES } from '../nft/sync.js';
 import { view } from '../near/rpc.js';
-import { nearUsdPrice, decimals, units } from '../near/quotes.js';
+import { nearUsdPrice } from '../near/quotes.js';
+import { tokenSupply, lastPrice } from '../collect/supply.js';
 import { TYPES, SEVERITIES } from '../alerts/store.js';
 import { newKey, validKey, resolveTarget, findWatched, setWatch, getWatchlist, alertsFor, KINDS } from '../alerts/watch.js';
 import { alertPayload, checkWebhookUrl } from '../alerts/deliver.js';
@@ -75,24 +76,12 @@ const POSTS = {
 async function marketCapNow(ids) {
   const out = new Map();
   if (!ids.length) return out;
-  const [usd, toks, scans] = await Promise.all([
-    nearUsdPrice().catch(() => null),
-    col('tokens').find({ _id: { $in: ids } }, { projection: { supply: 1 } }).toArray(),
-    col('scans').find({ token: { $in: ids }, 'features.market.totalSupply': { $gt: 0 } }, { projection: { token: 1, 'features.market.totalSupply': 1 } }).toArray(),
-  ]);
-  const supply = new Map(toks.filter((t) => t.supply > 0).map((t) => [t._id, t.supply]));
-  for (const s of scans) if (!supply.has(s.token)) supply.set(s.token, s.features.market.totalSupply);
+  const usd = await nearUsdPrice().catch(() => null);
   await Promise.all(ids.map(async (id) => {
-    let sup = supply.get(id);
-    if (!sup) try { // read once, then kept on the token
-      sup = units(String(await view(id, 'ft_total_supply')), await decimals(id));
-      if (sup > 0) await col('tokens').updateOne({ _id: id }, { $set: { supply: sup } });
-    } catch { sup = null; }
-    // the last trade big enough to price the token (dust trades round badly)
-    const t = await col('trades').find({ token: id, near: { $gte: 0.02 }, tokens: { $gt: 0 } }, { projection: { near: 1, tokens: 1, ts: 1 } }).sort({ ts: -1 }).limit(1).next();
-    if (!t || !(sup > 0)) return;
-    const near = (t.near / t.tokens) * sup;
-    out.set(id, { near: Math.round(near), usd: usd ? Math.round(near * usd) : null, last_ts: t.ts });
+    const [sup, p] = await Promise.all([tokenSupply(id), lastPrice(id)]);
+    if (!p || !(sup > 0)) return;
+    const near = p.price * sup;
+    out.set(id, { near: Math.round(near), usd: usd ? Math.round(near * usd) : null, last_ts: p.ts });
   }));
   return out;
 }

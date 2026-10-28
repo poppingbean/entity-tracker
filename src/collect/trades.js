@@ -9,7 +9,7 @@ import { cfgFor } from './cfg.js';
 const GAYPAD = 'gaypad.j1-racing.near';
 const AGGREGATORS = /^(aggregatedex\.near|dex\.intear\.near|router\.aurabot\.near|cosmosnock\.near)$/;
 // Accounts that hold tokens for the venue itself and say nothing about an investor.
-export const INFRA = /^(dclv2\.ref-labs\.near|v2\.ref-finance\.near|aggregatedex\.near|dex\.intear\.near|nearlytrade\.near|lock2\.nearlytrade\.near|meme-cooking\.near|launchpad\.justhoot\.near|gaypad\.j1-racing\.near|liquidity\.qlyphs\.near|tkn\.near|v2-launchpad\.justhoot\.near|v2-pool-creator\.justhoot\.near|token-locker\.ref-labs\.near|intents\.near|wrap\.near)$/;
+export const INFRA = /^(dclv2\.ref-labs\.near|v2\.ref-finance\.near|aggregatedex\.near|dex\.intear\.near|nearlytrade\.near|lock2\.nearlytrade\.near|meme-cooking\.near|launchpad\.justhoot\.near|gaypad\.j1-racing\.near|liquidity\.qlyphs\.near|tkn\.near|v2-launchpad\.justhoot\.near|v2-pool-creator\.justhoot\.near|token-locker\.ref-labs\.near|intents\.near|wrap\.near|veax\.near|wallet\.intear\.near|dex-aggregator\.intear\.near|router\.banana-gun\.near|swap2\.sickyak1747\.near|nearkitfee\.near)$/;
 
 /** Buys and sells of `token` in a list of decoded transactions, with NEAR values. */
 export async function tradesFromTxs(token, pool, txs) {
@@ -54,9 +54,15 @@ export async function tradesFromTxs(token, pool, txs) {
     }
     // token hand-offs between wallets (not through a venue): a classic way to move a position to a fresh wallet
     let ti = 0;
-    for (const e of tx.events.filter((x) => x.executor === token && x.event === 'ft_transfer')) for (const d of e.data || []) {
-      if (!d.old_owner_id || !d.new_owner_id || INFRA.test(d.old_owner_id) || INFRA.test(d.new_owner_id) || d.old_owner_id === token || d.new_owner_id === token) continue;
-      transfers.push({ _id: `${tx.hash}|t${ti++}`, token, ts: tx.ts, hash: tx.hash, from: d.old_owner_id, to: d.new_owner_id, tokens: units(d.amount || '0', dec) });
+    const moves = tx.events.filter((x) => x.executor === token && x.event === 'ft_transfer').flatMap((e) => (e.data || []).map((d) => ({ from: d.old_owner_id, to: d.new_owner_id, amount: d.amount })));
+    // legacy tokens (tkn.near and other early NEP-141 contracts) log "Transfer <amount> from <a> to <b>" instead of an ft_transfer event
+    if (!moves.length) for (const l of (tx.logs || []).filter((x) => x.executor === token)) {
+      const m = l.text.match(/^Transfer (\d+) from (\S+) to (\S+)$/);
+      if (m) moves.push({ amount: m[1], from: m[2], to: m[3] });
+    }
+    for (const d of moves) {
+      if (!d.from || !d.to || INFRA.test(d.from) || INFRA.test(d.to) || d.from === token || d.to === token) continue;
+      transfers.push({ _id: `${tx.hash}|t${ti++}`, token, ts: tx.ts, hash: tx.hash, from: d.from, to: d.to, tokens: units(d.amount || '0', dec) });
     }
   }
   return { trades: out, transfers };

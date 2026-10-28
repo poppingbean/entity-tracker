@@ -2,13 +2,17 @@
 //   rug in progress   a token flagged rugged, its creator selling, its creator dumping its supply (dev-rug blacklist), a price collapse
 //   contract changes  code hash or full-access keys of recent launches, NFT collections and anything watched
 //   watched activity  a watched wallet / group buying early or selling, a watched creator launching, a rugger launching again
-//   watched tokens    trades re-read every few minutes: large sells, the creator selling, a fast price drop (and the rug checks at any age)
+//   watched tokens    trades re-read every few minutes: large sells, large wallet-to-wallet transfers, the creator selling, a fast price drop
+//                     (and the rug checks at any age)
 //   NFT               the team (or wallets it funded) selling, suspected wash trades rising
 import { col, metaGet, metaSet } from '../db.js';
 import { config } from '../config.js';
 import { warn } from '../log.js';
 import { followToken } from '../collect/ledger.js';
 import { priceSeries } from '../collect/analyze.js';
+import { tokenSupply, lastPrice } from '../collect/supply.js';
+import { INFRA } from '../collect/trades.js';
+import { builtinLabel } from '../labels.js';
 import { viewAccount, viewAccessKeyList } from '../audit/rpc.js';
 import { creatorIndex } from '../evaluate/creators.js';
 import { getNftAnalysis } from '../nft/analysis.js';
@@ -135,6 +139,28 @@ export function tokenSignals(t, trades, { bigSellNear = 25, priceDrop = 0.3, now
   return out;
 }
 
+/**
+ * Large wallet-to-wallet moves of a watched token (not sales: venues are left out when transfers are stored), oldest first. Pure.
+ * Large = worth at least minNear at the last price, or at least minShare of the supply. The creator moving tokens is high; a move to an
+ * exchange is said so (a deposit before selling there).
+ */
+export function transferSignals(t, transfers, { price = null, supply = null, minNear = 250, minShare = 0.01 } = {}) {
+  const out = [], name = t.symbol || t._id, fmt = (x) => Math.round(x).toLocaleString('en-US');
+  for (const x of transfers) {
+    if (INFRA.test(x.from) || INFRA.test(x.to)) continue; // swaps through a router or app, fees: not a hand-off (older stored rows)
+    const near = price != null ? x.tokens * price : null, share = supply ? x.tokens / supply : null;
+    if (!((near != null && near >= minNear) || (share != null && share >= minShare))) continue;
+    const fromCreator = !!t.creator && x.from === t.creator, ex = builtinLabel(x.to);
+    const toEx = ex?.type === 'exchange' ? ` to ${ex.label}` : '';
+    const what = [near != null ? `~${fmt(near)} NEAR` : null, share != null ? `${(share * 100).toFixed(share < 0.1 ? 2 : 1)}% of supply` : null].filter(Boolean).join(', ');
+    out.push({ key: `token_transfer|${t._id}|${x._id}`, type: 'token_transfer', severity: fromCreator ? 'high' : 'medium',
+      title: `${name}: ${fromCreator ? 'the creator moved' : 'large transfer of'} ${fmt(x.tokens)} tokens${toEx}`,
+      text: `${x.from} sent ${fmt(x.tokens)} ${name} (${what}) to ${x.to}${ex ? ` (${ex.label})` : ''} without selling: a move to another wallet${toEx ? ' or an exchange deposit' : ''}, often before a sale.`,
+      data: { from: x.from, to: x.to, tokens: x.tokens, near, share, hash: x.hash, from_creator: fromCreator || undefined } });
+  }
+  return out;
+}
+
 /** Watched tokens: re-read their trades every few minutes (a few per pass), then raise tokenSignals on the last 6 hours (each event once). */
 async function watchedTokens(watched, limit = 4) {
   if (!watched.token.size) return;
@@ -149,6 +175,12 @@ async function watchedTokens(watched, limit = 4) {
     for (const s of tokenSignals(t, trades, { bigSellNear: A.bigSellNear, priceDrop: A.priceDrop, now }))
       await raise(s.key, { type: s.type, severity: s.severity, title: s.title, text: s.text, data: s.data, url: tokUrl(t._id),
         related: { tokens: [t._id], creators: [t.creator], wallets: s.data.trader ? [s.data.trader] : [] } });
+    const moves = await col('transfers').find({ token: t._id, ts: { $gt: now - 6 * HOUR } }, { projection: { from: 1, to: 1, tokens: 1, ts: 1, hash: 1 } }).sort({ ts: 1 }).toArray();
+    if (!moves.length) continue;
+    const [supply, last] = await Promise.all([tokenSupply(t._id), lastPrice(t._id)]);
+    for (const s of transferSignals(t, moves, { price: last?.price ?? null, supply, minNear: A.bigTransferNear, minShare: A.bigTransferShare }))
+      await raise(s.key, { type: s.type, severity: s.severity, title: s.title, text: s.text, data: s.data, url: tokUrl(t._id),
+        related: { tokens: [t._id], creators: [t.creator], wallets: [s.data.from, s.data.to] } });
   }
 }
 
