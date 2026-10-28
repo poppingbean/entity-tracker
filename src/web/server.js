@@ -20,6 +20,7 @@ import { getNftAnalysis } from '../nft/analysis.js';
 import { assessNftWithAi } from '../nft/ai.js';
 import { registerCollection, syncCollection, SOURCES } from '../nft/sync.js';
 import { view } from '../near/rpc.js';
+import { nearUsdPrice, decimals, units } from '../near/quotes.js';
 import { TYPES, SEVERITIES } from '../alerts/store.js';
 import { newKey, validKey, resolveTarget, findWatched, setWatch, getWatchlist, alertsFor, KINDS } from '../alerts/watch.js';
 import { alertPayload, checkWebhookUrl } from '../alerts/deliver.js';
@@ -69,6 +70,32 @@ const POSTS = {
     catch (e) { return { error: e.message }; }
   },
 };
+/** Market cap now of some tokens: the last trade's price x total supply (from the first check, else read once and kept on the token) x NEAR in USD.
+ *  Returns Map(id -> { near, usd, last_ts }). */
+async function marketCapNow(ids) {
+  const out = new Map();
+  if (!ids.length) return out;
+  const [usd, toks, scans] = await Promise.all([
+    nearUsdPrice().catch(() => null),
+    col('tokens').find({ _id: { $in: ids } }, { projection: { supply: 1 } }).toArray(),
+    col('scans').find({ token: { $in: ids }, 'features.market.totalSupply': { $gt: 0 } }, { projection: { token: 1, 'features.market.totalSupply': 1 } }).toArray(),
+  ]);
+  const supply = new Map(toks.filter((t) => t.supply > 0).map((t) => [t._id, t.supply]));
+  for (const s of scans) if (!supply.has(s.token)) supply.set(s.token, s.features.market.totalSupply);
+  await Promise.all(ids.map(async (id) => {
+    let sup = supply.get(id);
+    if (!sup) try { // read once, then kept on the token
+      sup = units(String(await view(id, 'ft_total_supply')), await decimals(id));
+      if (sup > 0) await col('tokens').updateOne({ _id: id }, { $set: { supply: sup } });
+    } catch { sup = null; }
+    // the last trade big enough to price the token (dust trades round badly)
+    const t = await col('trades').find({ token: id, near: { $gte: 0.02 }, tokens: { $gt: 0 } }, { projection: { near: 1, tokens: 1, ts: 1 } }).sort({ ts: -1 }).limit(1).next();
+    if (!t || !(sup > 0)) return;
+    const near = (t.near / t.tokens) * sup;
+    out.set(id, { near: Math.round(near), usd: usd ? Math.round(near * usd) : null, last_ts: t.ts });
+  }));
+  return out;
+}
 const nftJobs = new Map();   // collection -> { started, passes, events, done, error }
 /** Read a hand-added collection's whole history in the background (a pass at a time, up to 40 passes per request). */
 function startNftSync(id) {
@@ -590,8 +617,10 @@ const routes = {
       want('creator') ? col('tokens').aggregate([{ $match: { creator: rx(q) } }, { $group: { _id: '$creator', n: { $sum: 1 } } }, { $sort: { n: -1 } }, { $limit: 4 }]).toArray() : [],
       want('wallet') ? col('wallets').find({ _id: rx(q) }, { projection: { tag: 1 } }).limit(4).toArray() : [],
     ]);
+    const mcaps = await marketCapNow(tokens.map((t) => t._id));
     return { rows: [
-      ...tokens.sort((a, b) => (String(b.symbol).toLowerCase() === q.toLowerCase()) - (String(a.symbol).toLowerCase() === q.toLowerCase())).map((t) => ({ kind: 'token', id: t._id, label: t.symbol || t._id, sub: `${t.launchpad || ''} · live ${t.live_ts ? new Date(t.live_ts).toISOString().slice(0, 10) : '?'}` })),
+      ...tokens.sort((a, b) => (String(b.symbol).toLowerCase() === q.toLowerCase()) - (String(a.symbol).toLowerCase() === q.toLowerCase())).map((t) => ({ kind: 'token', id: t._id, label: t.symbol || t._id,
+        sub: `${t.launchpad || ''} · live ${t.live_ts ? new Date(t.live_ts).toISOString().slice(0, 10) : '?'}`, mcap: mcaps.get(t._id) || null })),
       ...groups.map((g) => ({ kind: 'group', id: g._id, label: g.ai?.label || g._id, sub: `${g.size} wallets · ${g.tag || ''}` })),
       ...cols.map((c) => ({ kind: 'collection', id: c._id, label: c.name || c._id, sub: 'NFT collection' })),
       ...creators.map((c) => ({ kind: 'creator', id: c._id, label: c._id, sub: `${c.n} launches` })),
