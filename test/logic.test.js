@@ -606,6 +606,16 @@ test('alerts: large transfers of a watched token (by value or share of supply); 
   assert.equal(transferSignals(t, [mv(5, { tokens: 20000 })], { price: null, supply: 1e6 }).length, 1, 'without a price, the share of supply still counts');
   assert.equal(transferSignals(t, [mv(6, { tokens: 20000 })], { price: null, supply: null }).length, 0);
 });
+test('alerts: a NearBlocks link for the transaction an alert is about, in Telegram and the API payload', async () => {
+  const { txUrl, alertMessage, alertPayload } = await import('../src/alerts/deliver.js');
+  const h = '32C2Mr33ikKjdsGkkMN9H1CyzmrRNh727427a5KvGZeW';
+  const a = { _id: 'k', severity: 'medium', title: 'X: 30 NEAR sell', text: 'a.near sold', data: { hash: h } };
+  assert.equal(txUrl(a), `https://nearblocks.io/txns/${h}`);
+  assert.match(alertMessage(a), new RegExp(`<a href="https://nearblocks.io/txns/${h}">Transaction on NearBlocks</a>`));
+  assert.equal(alertPayload(a).tx_url, `https://nearblocks.io/txns/${h}`);
+  assert.equal(txUrl({ data: {} }), null, 'alerts about a state have no transaction');
+  assert.equal(txUrl({ data: { hash: 'javascript:alert(1)' } }), null, 'only a real tx hash becomes a link');
+});
 test('alerts: an old watched token only alerts when a rug flag turns on, not for its long-standing state', async () => {
   const { flagChanges } = await import('../src/alerts/detect.js');
   assert.deepEqual(flagChanges(null, { rugged: true, collapsed: true }), [], 'first reading is the baseline');

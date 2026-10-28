@@ -1309,7 +1309,7 @@ const WATCH_ON = {
   collection: 'the team selling, wash trades, contract changes',
 };
 const alertRow = (a) => `<tr ${a.url ? row(a.url.replace(/^https?:\/\/[^/]+/, '')) : ''}><td>${when(a.ts)}<br><span class="muted small">${since(a.ts)}</span></td><td><span class="v ${SEVCLS[a.severity]}">${esc(a.severity)}</span></td><td>${esc(a.label || a.type)}</td>
-  <td class="wrap"><b>${esc(a.title)}</b><div class="muted small">${esc(a.text)}</div></td></tr>`;
+  <td class="wrap"><b>${esc(a.title)}</b><div class="muted small">${esc(a.text)}${a.tx_url ? ` <a href="${esc(a.tx_url)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">Transaction on NearBlocks ↗</a>` : ''}</div></td></tr>`;
 views.alerts = async () => {
   const S = ST.alerts;
   const items = await loadWatch();

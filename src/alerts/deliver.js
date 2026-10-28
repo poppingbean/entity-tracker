@@ -47,8 +47,13 @@ export async function postWebhook(url, payload) {
 const tg = (method, body) => fetch(`https://api.telegram.org/bot${config.alerts.telegramToken}/${method}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body), signal: AbortSignal.timeout(10000) }).then((r) => r.json());
 const escHtml = (s) => String(s ?? '').replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
 const ICON = { high: '🔴', medium: '🟠', info: '🔵' };
-/** One alert as a Telegram message (HTML), with a link to the dashboard page when the site URL is configured. */
-export const alertMessage = (a) => `${ICON[a.severity] || ''} <b>${escHtml(a.title)}</b>\n${escHtml(a.text)}${a.url && config.alerts.siteUrl ? `\n<a href="${escHtml(config.alerts.siteUrl + a.url)}">Open on Safe Near</a>` : ''}`;
+/** The transaction an alert is about, on NearBlocks (null for alerts about a state, e.g. a rug flag or a code change). */
+export const txUrl = (a) => (/^[1-9A-HJ-NP-Za-km-z]{43,44}$/.test(a?.data?.hash || '') ? `https://nearblocks.io/txns/${a.data.hash}` : null);
+/** One alert as a Telegram message (HTML), with links to the dashboard page (when the site URL is configured) and the transaction. */
+export const alertMessage = (a) => {
+  const links = [a.url && config.alerts.siteUrl ? `<a href="${escHtml(config.alerts.siteUrl + a.url)}">Open on Safe Near</a>` : null, txUrl(a) ? `<a href="${escHtml(txUrl(a))}">Transaction on NearBlocks</a>` : null].filter(Boolean);
+  return `${ICON[a.severity] || ''} <b>${escHtml(a.title)}</b>\n${escHtml(a.text)}${links.length ? '\n' + links.join(' · ') : ''}`;
+};
 export async function sendTelegram(chatId, text) {
   if (!config.alerts.telegramToken) return;
   const r = await tg('sendMessage', { chat_id: chatId, text, parse_mode: 'HTML', disable_web_page_preview: true });
@@ -56,7 +61,7 @@ export async function sendTelegram(chatId, text) {
 }
 
 /** The public payload (also what the API returns). */
-export const alertPayload = (a) => ({ id: a._id, ts: a.ts, type: a.type, label: TYPES[a.type]?.label, severity: a.severity, title: a.title, text: a.text, url: a.url && config.alerts.siteUrl ? config.alerts.siteUrl + a.url : a.url, related: a.related });
+export const alertPayload = (a) => ({ id: a._id, ts: a.ts, type: a.type, label: TYPES[a.type]?.label, severity: a.severity, title: a.title, text: a.text, url: a.url && config.alerts.siteUrl ? config.alerts.siteUrl + a.url : a.url, tx_url: txUrl(a), related: a.related });
 
 const atLeast = (sev, min) => SEVERITIES.indexOf(sev) <= SEVERITIES.indexOf(min);
 /** Deliver alerts not sent yet (oldest first, a batch at a time). */
