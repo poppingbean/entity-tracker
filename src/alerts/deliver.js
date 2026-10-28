@@ -49,10 +49,16 @@ const escHtml = (s) => String(s ?? '').replace(/[&<>]/g, (c) => ({ '&': '&amp;',
 const ICON = { high: '🔴', medium: '🟠', info: '🔵' };
 /** The transaction an alert is about, on NearBlocks (null for alerts about a state, e.g. a rug flag or a code change). */
 export const txUrl = (a) => (/^[1-9A-HJ-NP-Za-km-z]{43,44}$/.test(a?.data?.hash || '') ? `https://nearblocks.io/txns/${a.data.hash}` : null);
-/** One alert as a Telegram message (HTML), with links to the dashboard page (when the site URL is configured) and the transaction. */
+/** When the alert's event happened on chain (or when it was raised, for alerts about a state). */
+export const eventTs = (a) => a?.data?.event_ts ?? a?.ts ?? null;
+/** Too old to announce: the event happened more than maxAgeMinutes ago (a backlog, downtime). It stays on the dashboard and in the API. */
+export const isStale = (a, now = Date.now(), maxAgeMinutes = config.alerts.maxAgeMinutes) => eventTs(a) != null && now - eventTs(a) > maxAgeMinutes * 60e3;
+const utc = (ts) => new Date(ts).toISOString().slice(11, 16) + ' UTC';
+/** One alert as a Telegram message (HTML), with its time, and links to the dashboard page (when the site URL is configured) and the transaction. */
 export const alertMessage = (a) => {
+  const at = a.data?.event_ts ? `\n🕒 ${utc(a.data.event_ts)}` : '';
   const links = [a.url && config.alerts.siteUrl ? `<a href="${escHtml(config.alerts.siteUrl + a.url)}">Open on Safe Near</a>` : null, txUrl(a) ? `<a href="${escHtml(txUrl(a))}">Transaction on NearBlocks</a>` : null].filter(Boolean);
-  return `${ICON[a.severity] || ''} <b>${escHtml(a.title)}</b>\n${escHtml(a.text)}${links.length ? '\n' + links.join(' · ') : ''}`;
+  return `${ICON[a.severity] || ''} <b>${escHtml(a.title)}</b>\n${escHtml(a.text)}${at}${links.length ? '\n' + links.join(' · ') : ''}`;
 };
 export async function sendTelegram(chatId, text) {
   if (!config.alerts.telegramToken) return;
@@ -61,7 +67,7 @@ export async function sendTelegram(chatId, text) {
 }
 
 /** The public payload (also what the API returns). */
-export const alertPayload = (a) => ({ id: a._id, ts: a.ts, type: a.type, label: TYPES[a.type]?.label, severity: a.severity, title: a.title, text: a.text, url: a.url && config.alerts.siteUrl ? config.alerts.siteUrl + a.url : a.url, tx_url: txUrl(a), related: a.related });
+export const alertPayload = (a) => ({ id: a._id, ts: a.ts, type: a.type, label: TYPES[a.type]?.label, severity: a.severity, title: a.title, text: a.text, url: a.url && config.alerts.siteUrl ? config.alerts.siteUrl + a.url : a.url, tx_url: txUrl(a), event_ts: a.data?.event_ts ?? null, related: a.related });
 
 const atLeast = (sev, min) => SEVERITIES.indexOf(sev) <= SEVERITIES.indexOf(min);
 /** Deliver alerts not sent yet (oldest first, a batch at a time). */
@@ -69,6 +75,7 @@ export async function deliverPending(limit = 30) {
   const todo = await col('alerts').find({ delivered: false }).sort({ ts: 1 }).limit(limit).toArray();
   let sent = 0;
   for (const a of todo) {
+    if (isStale(a)) { await col('alerts').updateOne({ _id: a._id }, { $set: { delivered: true, delivery: { skipped: 'stale' }, delivered_ts: Date.now() } }); continue; }
     const out = { channel: 0, webhook: 0, chats: 0, hooks: 0, errors: [] };
     const tryIt = async (k, fn) => { try { await fn(); out[k]++; } catch (e) { out.errors.push(`${k}: ${e.message}`.slice(0, 160)); } };
     if (atLeast(a.severity, config.alerts.publicSeverity)) {
