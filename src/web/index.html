@@ -1262,6 +1262,34 @@ async function toggleWatch(btn) {
   } catch (e) { alert(e.message); } finally { btn.disabled = false; }
 }
 const SEVCLS = { high: 'bad', medium: 'neutral', info: 'unrated' };
+// the watch picker: suggestions come from what the tracker has (GET /api/watch/pick), so only existing tokens etc. can be picked
+let pickTimer = null, pickSeq = 0;
+function pickSuggest() {
+  clearTimeout(pickTimer);
+  pickTimer = setTimeout(async () => {
+    const q = $('watchId').value.trim(), kind = $('watchKind').value, my = ++pickSeq, box = $('watchPick');
+    if (q.length < 2) { box.innerHTML = 'Only what the tracker has can be watched: type at least 2 characters and pick from the list.'; return; }
+    const j = await get('/api/watch/pick', { q, kind }).catch(() => ({ rows: [] }));
+    if (my !== pickSeq) return; // a newer keystroke already asked
+    box.innerHTML = j.rows.length ? `<table>${j.rows.map((x) => `<tr><td>${esc(x.kind)}</td><td class="wrap"><b>${esc(short(x.label, 30))}</b>${x.label !== x.id ? ` <span class="acct">${esc(short(x.id, 34))}</span>` : ''}<div class="muted small">${esc(x.sub || '')}</div></td>
+      <td>${WATCH?.has(`${x.kind}:${x.id}`) ? '<span class="muted">watching</span>' : `<button data-k="${esc(x.kind)}" data-i="${esc(x.id)}" onclick="pickWatch(this)">＋ Watch</button>`}</td></tr>`).join('')}</table>`
+      : `Nothing in the system matches <b>${esc(q)}</b>${kind ? ` (${esc(kind)})` : ''}. Only tokens the tracker follows can be watched.`;
+  }, 250);
+}
+async function pickWatch(b) {
+  b.disabled = true;
+  const key = await watchKey(true), r = await post('/api/watch', { key, kind: b.dataset.k, id: b.dataset.i });
+  if (r.error) { alert(r.error); b.disabled = false; } else render();
+}
+// what each kind of watched item raises (keep in step with src/alerts/detect.js)
+const WATCH_ON = {
+  token: 'rug, creator selling, sells of 25+ NEAR, a 30% drop within an hour, contract code or full-access key changes',
+  untracked: 'not a launch the tracker follows: only contract code or full-access key changes',
+  wallet: 'early buys, sells of 2+ NEAR, a new launch by it',
+  group: 'early buys and sells by any of its wallets',
+  creator: 'a new launch, its tokens rugged or sold by it',
+  collection: 'the team selling, wash trades, contract changes',
+};
 const alertRow = (a) => `<tr ${a.url ? row(a.url.replace(/^https?:\/\/[^/]+/, '')) : ''}><td>${when(a.ts)}<br><span class="muted small">${since(a.ts)}</span></td><td><span class="v ${SEVCLS[a.severity]}">${esc(a.severity)}</span></td><td>${esc(a.label || a.type)}</td>
   <td class="wrap"><b>${esc(a.title)}</b><div class="muted small">${esc(a.text)}</div></td></tr>`;
 views.alerts = async () => {
@@ -1273,11 +1301,11 @@ views.alerts = async () => {
   const meta = mine ? await get('/api/alerts', { limit: 1 }) : j;
   return `<div class="grid2 wide-l"><div class="card"><div class="bar">${seg('alerts', 'tab', [['', 'All'], ['high', 'High only'], ['mine', `My watchlist (${items.length})`]])}
       ${mine ? '' : sel('alerts', 'group', [['', 'every kind'], ['rug', 'rug in progress'], ['contract', 'contract changes'], ['activity', 'watched / ruggers'], ['nft', 'NFT team / wash']])}<span class="spacer"></span>${mine ? '' : pager('alerts', j.total)}</div>
-    <table><tr><th>When</th><th>Severity</th><th>Kind</th><th>Alert</th></tr>${(j.rows || []).map(alertRow).join('') || empty(4, mine ? (items.length ? 'no alerts for your watchlist yet' : 'your watchlist is empty: add something on the right, or press ☆ Watch on any token, wallet, group, creator or NFT page') : 'no alerts yet')}</table></div>
+    <table><tr><th>When</th><th>Severity</th><th>Kind</th><th>Alert</th></tr>${(j.rows || []).map(alertRow).join('') || empty(4, mine ? (items.length ? '<span style="white-space:normal;display:block">no alerts for your watchlist yet. Alerts are events, not prices: they appear when something on the list happens (see "Alerts on"). Trades of watched tokens are re-read every 10 minutes.</span>' : 'your watchlist is empty: add something on the right, or press ☆ Watch on any token, wallet, group, creator or NFT page') : 'no alerts yet')}</table></div>
   <div><div class="card"><h2>My watchlist <span class="muted">this browser</span></h2>
-    <div class="bar"><input id="watchId" type="search" style="flex:1" placeholder="token, wallet, c_… group, creator or NFT contract"><select id="watchKind"><option value="">auto</option>${['token', 'wallet', 'group', 'creator', 'collection'].map((k) => `<option>${k}</option>`).join('')}</select>
-      <button onclick="(async()=>{const id=$('watchId').value.trim();if(!id)return;const key=await watchKey(true);const r=await post('/api/watch',{key,id,kind:$('watchKind').value});if(r.error)alert(r.error);else render()})()">Watch</button></div>
-    <table><tr><th>Kind</th><th>Id</th><th></th></tr>${items.map((x) => `<tr><td>${esc(x.kind)}</td><td class="acct">${esc(short(x.id, 34))}</td><td>${watchBtn(x.kind, x.id)}</td></tr>`).join('') || empty(3, 'nothing yet')}</table>
+    <div class="bar"><input id="watchId" type="search" autocomplete="off" style="flex:1" placeholder="search a token symbol or contract, group, wallet, creator, NFT collection" oninput="pickSuggest()"><select id="watchKind" onchange="pickSuggest()"><option value="">anything</option>${['token', 'group', 'wallet', 'creator', 'collection'].map((k) => `<option>${k}</option>`).join('')}</select></div>
+    <div id="watchPick" class="muted small" style="margin-bottom:8px">Only what the tracker has can be watched: type at least 2 characters and pick from the list.</div>
+    <table><tr><th>Kind</th><th>Id</th><th>Alerts on</th><th></th></tr>${items.map((x) => `<tr><td>${esc(x.kind)}</td><td class="acct">${x.symbol ? `<b>${esc(x.symbol)}</b> ` : ''}${esc(short(x.id, 34))}</td><td class="small wrap ${x.tracked === false ? 'a' : 'muted'}" style="white-space:normal;min-width:180px">${esc(WATCH_ON[x.tracked === false ? 'untracked' : x.kind] || '')}</td><td>${watchBtn(x.kind, x.id)}</td></tr>`).join('') || empty(4, 'nothing yet')}</table>
     <p class="muted small" style="margin:8px 0 0">Kept on this browser only (an anonymous key, no account).</p></div>
   <div class="card"><h2>Everywhere else</h2>
     <p class="small"><b>Telegram:</b> ${meta.telegram_bot ? `open <a href="https://t.me/${esc(meta.telegram_bot)}" target="_blank" rel="noopener">@${esc(meta.telegram_bot)}</a> and send` : 'send the bot'} <code>/watch &lt;id&gt;</code>; <code>/list</code>, <code>/alerts</code>, <code>/check &lt;token&gt;</code>. High-severity alerts also go to the public channel.</p>

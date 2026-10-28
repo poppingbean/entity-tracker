@@ -586,3 +586,18 @@ test('accuracy: ground truth label, confusion matrix, AUC, calibration, gate lif
   const R = returnSplit([{ flagged: true, ret: 0.5 }, { flagged: false, ret: 1.2 }, { flagged: false, ret: 0.8 }, { flagged: false, ret: null }]);
   assert.deepEqual([R.passed.n, R.passed.mean, R.flagged.median], [2, 1, 0.5]);
 });
+test('alerts: watched token signals (creator selling, large sells, fast drop), each with its own key', async () => {
+  const { tokenSignals } = await import('../src/alerts/detect.js');
+  const H = 3600e3, now = 10 * H, t = { _id: 'x.near', symbol: 'X', creator: 'dev.near' };
+  const tr = (i, o) => ({ _id: `h${i}|0`, ts: now - H + i * 60e3, near: 1, tokens: 1, buy: true, trader: 'a.near', ...o });
+  const s = tokenSignals(t, [tr(0, {}), tr(1, { buy: false, trader: 'dev.near', near: 3, tokens: 3 }), tr(2, { buy: false, near: 30, tokens: 30 }), tr(3, { buy: false, near: 2, tokens: 4 })], { now });
+  assert.deepEqual(s.map((x) => x.type), ['token_creator_sell', 'token_big_sell', 'token_price_drop']);
+  assert.equal(new Set(s.map((x) => x.key)).size, 3);
+  assert.equal(tokenSignals(t, [tr(0, {}), tr(1, { near: 1.1, tokens: 1 })], { now }).length, 0, 'quiet trading raises nothing');
+});
+test('alerts: an old watched token only alerts when a rug flag turns on, not for its long-standing state', async () => {
+  const { flagChanges } = await import('../src/alerts/detect.js');
+  assert.deepEqual(flagChanges(null, { rugged: true, collapsed: true }), [], 'first reading is the baseline');
+  assert.deepEqual(flagChanges({ rugged: true, collapsed: false, creator_sold: false }, { rugged: true, collapsed: true, creator_sold: false }), ['collapsed']);
+  assert.deepEqual(flagChanges({ rugged: true }, { rugged: false }), []);
+});

@@ -21,7 +21,7 @@ import { assessNftWithAi } from '../nft/ai.js';
 import { registerCollection, syncCollection, SOURCES } from '../nft/sync.js';
 import { view } from '../near/rpc.js';
 import { TYPES, SEVERITIES } from '../alerts/store.js';
-import { newKey, validKey, resolveTarget, setWatch, getWatchlist, alertsFor, KINDS } from '../alerts/watch.js';
+import { newKey, validKey, resolveTarget, findWatched, setWatch, getWatchlist, alertsFor, KINDS } from '../alerts/watch.js';
 import { alertPayload, checkWebhookUrl } from '../alerts/deliver.js';
 import { assessWithAi, getRun } from '../analysis/ai.js';
 import { addFeedback, FEEDBACK_KINDS } from '../accuracy/feedback.js';
@@ -47,8 +47,9 @@ const POSTS = {
   '/api/watch': async (b, ip) => {
     if (!validKey(b.key) || b.key.startsWith('tg_')) return { error: 'a web_ or api_ key is required (POST /api/watch/key)' };
     if (limited(watchHits, ip, 60)) return { error: 'too many changes, try again in a few minutes' };
-    const t = await resolveTarget(b.id, KINDS.includes(b.kind) ? b.kind : null);
-    if (!t) return { error: 'not a NEAR account or group id' };
+    const hint = KINDS.includes(b.kind) ? b.kind : null;
+    const t = (b.remove && await findWatched(b.key, b.id, hint)) || await resolveTarget(b.id, hint);
+    if (!t) return { error: 'not in the system: pick a token, group, wallet, creator or NFT collection from the list (only tokens the tracker follows can be watched)' };
     const r = await setWatch(b.key, t, !b.remove);
     return r.ok ? { ok: true, target: t, items: r.items } : { error: r.error };
   },
@@ -572,7 +573,30 @@ const routes = {
     const key = u.searchParams.get('key');
     if (!validKey(key)) return { error: 'invalid key' };
     const w = await getWatchlist(key);
-    return { items: w.items, webhook: w.webhook ? w.webhook.replace(/^(https:\/\/[^/]+).*/, '$1/…') : null };
+    // what each item is monitored for: a token the tracker doesn't follow only gets the contract checks
+    const toks = new Map((await col('tokens').find({ _id: { $in: w.items.filter((x) => x.kind === 'token').map((x) => x.id) } }, { projection: { symbol: 1 } }).toArray()).map((t) => [t._id, t]));
+    const items = w.items.map((x) => x.kind !== 'token' ? x : toks.has(x.id) ? { ...x, symbol: toks.get(x.id).symbol, tracked: true } : { ...x, tracked: false });
+    return { items, webhook: w.webhook ? w.webhook.replace(/^(https:\/\/[^/]+).*/, '$1/…') : null };
+  },
+  /** What can be watched, matching q: only things the tracker has (tokens it follows, its groups, wallets, creators, NFT collections). */
+  '/api/watch/pick': async (u) => {
+    const q = (u.searchParams.get('q') || '').trim().replace(/^\$/, '').slice(0, 64), kind = u.searchParams.get('kind');
+    if (q.length < 2) return { rows: [] };
+    const want = (k) => !KINDS.includes(kind) || kind === k;
+    const [tokens, groups, cols, creators, wallets] = await Promise.all([
+      want('token') ? col('tokens').find({ $or: [{ symbol: rx(q) }, { _id: rx(q) }] }, { projection: { symbol: 1, launchpad: 1, live_ts: 1 } }).sort({ live_ts: -1 }).limit(8).toArray() : [],
+      want('group') ? col('clusters').find({ $or: [{ _id: rx(q) }, { 'ai.label': rx(q) }] }, { projection: { size: 1, tag: 1, 'ai.label': 1 } }).sort({ size: -1 }).limit(4).toArray() : [],
+      want('collection') ? col('nft_collections').find({ $or: [{ _id: rx(q) }, { name: rx(q) }] }, { projection: { name: 1 } }).limit(4).toArray() : [],
+      want('creator') ? col('tokens').aggregate([{ $match: { creator: rx(q) } }, { $group: { _id: '$creator', n: { $sum: 1 } } }, { $sort: { n: -1 } }, { $limit: 4 }]).toArray() : [],
+      want('wallet') ? col('wallets').find({ _id: rx(q) }, { projection: { tag: 1 } }).limit(4).toArray() : [],
+    ]);
+    return { rows: [
+      ...tokens.sort((a, b) => (String(b.symbol).toLowerCase() === q.toLowerCase()) - (String(a.symbol).toLowerCase() === q.toLowerCase())).map((t) => ({ kind: 'token', id: t._id, label: t.symbol || t._id, sub: `${t.launchpad || ''} · live ${t.live_ts ? new Date(t.live_ts).toISOString().slice(0, 10) : '?'}` })),
+      ...groups.map((g) => ({ kind: 'group', id: g._id, label: g.ai?.label || g._id, sub: `${g.size} wallets · ${g.tag || ''}` })),
+      ...cols.map((c) => ({ kind: 'collection', id: c._id, label: c.name || c._id, sub: 'NFT collection' })),
+      ...creators.map((c) => ({ kind: 'creator', id: c._id, label: c._id, sub: `${c.n} launches` })),
+      ...wallets.map((w) => ({ kind: 'wallet', id: w._id, label: w._id, sub: w.tag || 'wallet' })),
+    ] };
   },
 
   // ------------------------------------------------------------ NFT collectibles
