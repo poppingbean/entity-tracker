@@ -24,6 +24,8 @@ const RECENT_LAUNCH = 3 * DAY;      // rug / contract watch covers launches this
 const CONTRACT_EVERY = 30 * MIN;    // code hash / access keys re-read this often per contract
 const sym = (t) => t.symbol || t._id;
 const tokUrl = (id) => `/tokens/${encodeURIComponent(id)}`;
+/** The token's creator as a person: some launchpads record their own contract as the creator (nearlytrade.near buys back every hour). */
+const realCreator = (t) => (t.creator && !INFRA.test(t.creator) ? t.creator : null);
 /** Activity alerts are about on-chain events of the last few minutes only: an event read late (a slow pass, a backlog, downtime) is not news. */
 const freshFrom = (now = Date.now()) => now - config.alerts.maxAgeMinutes * MIN;
 
@@ -109,7 +111,7 @@ async function contractChanges(watched, limit = 25) {
   }
 }
 
-/** Watched wallets / groups: early buys and sells since the last pass. */
+/** Watched wallets / groups: buys (early buys in a new launch said so) and sells of the last few minutes. */
 async function watchedActivity(since, watched) {
   if (!watched.wallet.size && !watched.group.size) return;
   const groupMembers = watched.group.size ? await col('wallets').find({ cluster_id: { $in: [...watched.group] } }, { projection: { cluster_id: 1 } }).toArray() : [];
@@ -119,8 +121,13 @@ async function watchedActivity(since, watched) {
   const entries = await col('entries').find({ wallet: { $in: wallets }, first_buy_ts: { $gt: from } }, { projection: { token: 1, wallet: 1, rank: 1, buy_near: 1, symbol: 1, delay_s: 1, first_buy_hash: 1, first_buy_ts: 1 } }).toArray();
   for (const e of entries) await raise(`watched_buy|${e.token}|${e.wallet}`, { type: 'watched_buy', severity: 'info', title: `${e.wallet} bought ${e.symbol || e.token} early`, url: tokUrl(e.token),
     related: { tokens: [e.token], wallets: [e.wallet], groups: [groupOf.get(e.wallet)] }, text: `Early buyer #${e.rank}, ${e.delay_s}s after launch, ${(e.buy_near ?? 0).toFixed(1)} NEAR${groupOf.get(e.wallet) ? ` (group ${groupOf.get(e.wallet)})` : ''}.`, data: { hash: e.first_buy_hash, event_ts: e.first_buy_ts } });
-  const sells = await col('trades').aggregate([{ $match: { trader: { $in: wallets }, buy: false, ts: { $gt: from } } }, { $sort: { ts: 1 } }, { $group: { _id: { t: '$token', w: '$trader' }, near: { $sum: '$near' }, last: { $max: '$ts' }, hash: { $last: '$hash' } } }, { $match: { near: { $gte: 2 } } }]).toArray();
-  for (const s of sells) await raise(`watched_sell|${s._id.t}|${s._id.w}|${Math.floor(s.last / HOUR)}`, { type: 'watched_sell', severity: 'info', title: `${s._id.w} sold ${s._id.t}`, url: tokUrl(s._id.t),
+  const early = new Set(entries.map((e) => `${e.token}|${e.wallet}`));
+  const side = (buy) => col('trades').aggregate([{ $match: { trader: { $in: wallets }, buy, ts: { $gt: from } } }, { $sort: { ts: 1 } }, { $group: { _id: { t: '$token', w: '$trader' }, near: { $sum: '$near' }, n: { $sum: 1 }, last: { $max: '$ts' }, hash: { $last: '$hash' } } }, { $match: { near: { $gte: 2 } } }]).toArray();
+  const [buys, sells] = await Promise.all([side(true), side(false)]);
+  const syms = new Map((await col('tokens').find({ _id: { $in: [...new Set([...buys, ...sells].map((x) => x._id.t))] } }, { projection: { symbol: 1 } }).toArray()).map((t) => [t._id, t.symbol || t._id]));
+  for (const b of buys.filter((x) => !early.has(`${x._id.t}|${x._id.w}`))) await raise(`watched_buy|${b._id.t}|${b._id.w}|${Math.floor(b.last / HOUR)}`, { type: 'watched_buy', severity: 'info', title: `${b._id.w} bought ${syms.get(b._id.t)}`, url: tokUrl(b._id.t),
+    related: { tokens: [b._id.t], wallets: [b._id.w], groups: [groupOf.get(b._id.w)] }, text: `Bought for ${b.near.toFixed(1)} NEAR (${b.n} buy${b.n > 1 ? 's' : ''}) in the last ${config.alerts.maxAgeMinutes} minutes${groupOf.get(b._id.w) ? ` (group ${groupOf.get(b._id.w)})` : ''}.`, data: { near: b.near, hash: b.hash, event_ts: b.last } });
+  for (const s of sells) await raise(`watched_sell|${s._id.t}|${s._id.w}|${Math.floor(s.last / HOUR)}`, { type: 'watched_sell', severity: 'info', title: `${s._id.w} sold ${syms.get(s._id.t)}`, url: tokUrl(s._id.t),
     related: { tokens: [s._id.t], wallets: [s._id.w], groups: [groupOf.get(s._id.w)] }, text: `Sold for ${s.near.toFixed(1)} NEAR in the last ${config.alerts.maxAgeMinutes} minutes.`, data: { hash: s.hash, event_ts: s.last } });
 }
 
@@ -128,11 +135,18 @@ async function watchedActivity(since, watched) {
  * Signals in a watched token's recent trades (oldest first). Pure: returns [{ key, type, severity, title, text, data }]. Only trades after
  * `since` raise anything (older trades still set the hour's high for the price-drop check).
  */
-export function tokenSignals(t, trades, { bigSellNear = 25, priceDrop = 0.3, since = -Infinity } = {}) {
-  const out = [], name = t.symbol || t._id;
+export function tokenSignals(t, trades, { bigSellNear = 25, bigBuyNear = 25, priceDrop = 0.3, since = -Infinity } = {}) {
+  const out = [], name = t.symbol || t._id, creator = realCreator(t);
   for (const x of trades) {
-    if (x.buy || !(x.near > 0) || !(x.ts > since)) continue;
-    if (t.creator && x.trader === t.creator) out.push({ key: `token_creator_sell|${t._id}|${x._id}`, type: 'token_creator_sell', severity: 'high', title: `${name}: the creator is selling`,
+    if (!(x.near > 0) || !(x.ts > since)) continue;
+    if (x.buy) {
+      if (creator && x.trader === creator) out.push({ key: `token_creator_buy|${t._id}|${x._id}`, type: 'token_creator_buy', severity: 'medium', title: `${name}: the creator is buying`,
+        text: `The creator ${x.trader} bought ${x.near.toFixed(1)} NEAR of ${name} (a creator buying its own token can be setting up a pump or a later exit).`, data: { near: x.near, hash: x.hash, event_ts: x.ts } });
+      else if (x.near >= bigBuyNear) out.push({ key: `token_big_buy|${t._id}|${x._id}`, type: 'token_big_buy', severity: 'info', title: `${name}: ${x.near.toFixed(0)} NEAR buy`,
+        text: `${x.trader} bought ${x.near.toFixed(1)} NEAR of ${name}.`, data: { near: x.near, trader: x.trader, hash: x.hash, event_ts: x.ts } });
+      continue;
+    }
+    if (creator && x.trader === creator) out.push({ key: `token_creator_sell|${t._id}|${x._id}`, type: 'token_creator_sell', severity: 'high', title: `${name}: the creator is selling`,
       text: `The creator ${x.trader} sold ${x.near.toFixed(1)} NEAR of ${name}.`, data: { near: x.near, hash: x.hash, event_ts: x.ts } });
     else if (x.near >= bigSellNear) out.push({ key: `token_big_sell|${t._id}|${x._id}`, type: 'token_big_sell', severity: 'medium', title: `${name}: ${x.near.toFixed(0)} NEAR sell`,
       text: `${x.trader} sold ${x.near.toFixed(1)} NEAR of ${name}.`, data: { near: x.near, trader: x.trader, hash: x.hash, event_ts: x.ts } });
@@ -160,7 +174,7 @@ export function transferSignals(t, transfers, { price = null, supply = null, min
     if (INFRA.test(x.from) || INFRA.test(x.to)) continue; // swaps through a router or app, fees: not a hand-off (older stored rows)
     const near = price != null ? x.tokens * price : null, share = supply ? x.tokens / supply : null;
     if (!((near != null && near >= minNear) || (share != null && share >= minShare))) continue;
-    const fromCreator = !!t.creator && x.from === t.creator, ex = builtinLabel(x.to);
+    const fromCreator = !!realCreator(t) && x.from === t.creator, ex = builtinLabel(x.to);
     const toEx = ex?.type === 'exchange' ? ` to ${ex.label}` : '';
     const what = [near != null ? `~${fmt(near)} NEAR` : null, share != null ? `${(share * 100).toFixed(share < 0.1 ? 2 : 1)}% of supply` : null].filter(Boolean).join(', ');
     out.push({ key: `token_transfer|${t._id}|${x._id}`, type: 'token_transfer', severity: fromCreator ? 'high' : 'medium',
@@ -182,7 +196,7 @@ async function watchedTokens(watched, limit = 8) {
   for (const t of due) await followToken(await col('tokens').findOne({ _id: t._id })).catch((e) => warn(`watched token ${t._id}: ${e.message}`));
   for (const t of toks) {
     const trades = await col('trades').find({ token: t._id, ts: { $gt: now - 6 * HOUR } }, { projection: { trader: 1, buy: 1, near: 1, tokens: 1, ts: 1, hash: 1 } }).sort({ ts: 1 }).toArray();
-    for (const s of tokenSignals(t, trades, { bigSellNear: A.bigSellNear, priceDrop: A.priceDrop, since: freshFrom(now) }))
+    for (const s of tokenSignals(t, trades, { bigSellNear: A.bigSellNear, bigBuyNear: A.bigBuyNear, priceDrop: A.priceDrop, since: freshFrom(now) }))
       await raise(s.key, { type: s.type, severity: s.severity, title: s.title, text: s.text, data: s.data, url: tokUrl(t._id),
         related: { tokens: [t._id], creators: [t.creator], wallets: s.data.trader ? [s.data.trader] : [] } });
     const moves = await col('transfers').find({ token: t._id, ts: { $gt: freshFrom(now) } }, { projection: { from: 1, to: 1, tokens: 1, ts: 1, hash: 1 } }).sort({ ts: 1 }).toArray();

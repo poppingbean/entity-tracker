@@ -628,6 +628,14 @@ test('alerts: only events of the last minutes are announced; an old event is nev
   assert.equal(isStale({ ts: now - 3 * 3600e3 }, now, 10), true, 'a state alert waiting 3 hours in a backlog');
   assert.match(alertMessage({ severity: 'medium', title: 'T', text: 'x', data: { event_ts: Date.UTC(2026, 9, 28, 6, 41) } }), /🕒 06:41 UTC/);
 });
+test('alerts: the buy side of a watched token: large buys and the creator buying', async () => {
+  const { tokenSignals } = await import('../src/alerts/detect.js');
+  const t = { _id: 'x.near', symbol: 'X', creator: 'dev.near' };
+  const tr = (i, o) => ({ _id: `b${i}|0`, ts: i * 60e3, near: 1, tokens: 1, buy: true, trader: 'a.near', ...o });
+  const s = tokenSignals(t, [tr(1, { near: 30, tokens: 30 }), tr(2, { trader: 'dev.near', near: 2, tokens: 2 }), tr(3, { near: 5, tokens: 5 })], { bigBuyNear: 25 });
+  assert.deepEqual(s.map((x) => [x.type, x.severity]), [['token_big_buy', 'info'], ['token_creator_buy', 'medium']]);
+  assert.equal(tokenSignals({ ...t, creator: 'nearlytrade.near' }, [tr(4, { trader: 'nearlytrade.near', near: 2, tokens: 2 })]).length, 0, 'a launchpad recorded as creator is not a creator buying');
+});
 test('alerts: an old watched token only alerts when a rug flag turns on, not for its long-standing state', async () => {
   const { flagChanges } = await import('../src/alerts/detect.js');
   assert.deepEqual(flagChanges(null, { rugged: true, collapsed: true }), [], 'first reading is the baseline');
