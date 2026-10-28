@@ -76,6 +76,7 @@ export const config = {
     watchSyncMinutes: num(process.env.ALERTS_WATCH_SYNC_MINUTES, 3),  // short enough that an event is read well inside maxAgeMinutes
     maxAgeMinutes: num(process.env.ALERTS_MAX_AGE_MINUTES, 10),        // activity alerts only for on-chain events this recent; older ones are never announced
     bigSellNear: num(process.env.ALERTS_BIG_SELL_NEAR, 25),
+    bigBuyNear: num(process.env.ALERTS_BIG_BUY_NEAR, 25),            // a buy of a watched token this large is an alert too
     priceDrop: num(process.env.ALERTS_PRICE_DROP, 0.3),
     bigTransferNear: num(process.env.ALERTS_BIG_TRANSFER_NEAR, 250),      // a wallet-to-wallet move of a watched token worth this much ...
     bigTransferShare: num(process.env.ALERTS_BIG_TRANSFER_SHARE, 0.01),  // ... or this share of the supply is an alert
