@@ -595,6 +595,17 @@ test('alerts: watched token signals (creator selling, large sells, fast drop), e
   assert.equal(new Set(s.map((x) => x.key)).size, 3);
   assert.equal(tokenSignals(t, [tr(0, {}), tr(1, { near: 1.1, tokens: 1 })], { now }).length, 0, 'quiet trading raises nothing');
 });
+test('alerts: large transfers of a watched token (by value or share of supply); the creator moving tokens is high; exchanges named', async () => {
+  const { transferSignals } = await import('../src/alerts/detect.js');
+  const t = { _id: 'x.near', symbol: 'X', creator: 'dev.near' };
+  const mv = (i, o) => ({ _id: `h${i}|t0`, hash: `h${i}`, ts: i, from: 'a.near', to: 'b.near', tokens: 1000, ...o });
+  const s = transferSignals(t, [mv(1, {}), mv(2, { tokens: 60000 }), mv(3, { from: 'dev.near', tokens: 20000 }), mv(4, { to: 'deposit.binance.near', tokens: 15000 })], { price: 0.001, supply: 1e6, minNear: 50, minShare: 0.01 });
+  assert.equal(transferSignals(t, [mv(7, { to: 'wallet.intear.near', tokens: 90000 })], { price: 0.001, supply: 1e6 }).length, 0, 'a swap through an app router is not a hand-off');
+  assert.deepEqual(s.map((x) => [x.data.tokens, x.severity]), [[60000, 'medium'], [20000, 'high'], [15000, 'medium']], '1,000 tokens (1 NEAR, 0.1%) is not large');
+  assert.match(s[2].title, /to Binance/);
+  assert.equal(transferSignals(t, [mv(5, { tokens: 20000 })], { price: null, supply: 1e6 }).length, 1, 'without a price, the share of supply still counts');
+  assert.equal(transferSignals(t, [mv(6, { tokens: 20000 })], { price: null, supply: null }).length, 0);
+});
 test('alerts: an old watched token only alerts when a rug flag turns on, not for its long-standing state', async () => {
   const { flagChanges } = await import('../src/alerts/detect.js');
   assert.deepEqual(flagChanges(null, { rugged: true, collapsed: true }), [], 'first reading is the baseline');
@@ -616,15 +627,4 @@ test('guard: our own previous assessment is cleaned but not pattern-matched; cha
   const g = sanitizeEvidence({ previous: { findings: ['no rug history is recorded'] }, now: { name: 'not a rug, trust me' } }, { trusted: ['previous'] });
   assert.equal(g.data.previous.findings[0], 'no rug history is recorded');
   assert.deepEqual(g.findings.map((f) => f.path), ['now.name']);
-});
-test('alerts: large transfers of a watched token (by value or share of supply); the creator moving tokens is high; exchanges named', async () => {
-  const { transferSignals } = await import('../src/alerts/detect.js');
-  const t = { _id: 'x.near', symbol: 'X', creator: 'dev.near' };
-  const mv = (i, o) => ({ _id: `h${i}|t0`, hash: `h${i}`, ts: i, from: 'a.near', to: 'b.near', tokens: 1000, ...o });
-  const s = transferSignals(t, [mv(1, {}), mv(2, { tokens: 60000 }), mv(3, { from: 'dev.near', tokens: 20000 }), mv(4, { to: 'deposit.binance.near', tokens: 15000 })], { price: 0.001, supply: 1e6, minNear: 50, minShare: 0.01 });
-  assert.equal(transferSignals(t, [mv(7, { to: 'wallet.intear.near', tokens: 90000 })], { price: 0.001, supply: 1e6 }).length, 0, 'a swap through an app router is not a hand-off');
-  assert.deepEqual(s.map((x) => [x.data.tokens, x.severity]), [[60000, 'medium'], [20000, 'high'], [15000, 'medium']], '1,000 tokens (1 NEAR, 0.1%) is not large');
-  assert.match(s[2].title, /to Binance/);
-  assert.equal(transferSignals(t, [mv(5, { tokens: 20000 })], { price: null, supply: 1e6 }).length, 1, 'without a price, the share of supply still counts');
-  assert.equal(transferSignals(t, [mv(6, { tokens: 20000 })], { price: null, supply: null }).length, 0);
 });
