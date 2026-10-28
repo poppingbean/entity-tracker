@@ -3,14 +3,41 @@
 
 const MIN = 60e3;
 /** Version of the rug rules in buildOutcome: bump it when they change, and the worker re-applies them to every stored outcome from an older version. */
-export const RUG_RULES_V = 7; // 7: rug rules judge every stored trade (all time), not only the first 24 h
+export const RUG_RULES_V = 8; // 7: rug rules judge every stored trade (all time), not only the first 24 h; 8: a crash must be fast, creator sales count in the first days, launch-price rules need the launch
+
+/** Did the price fall to (1 - depth) of the peak within `days` after the peak? A rug is a fast fall; a token bleeding down over months is not one. */
+export function fastFall(series, peak, peakTs, depth, days) {
+  if (!peak) return false;
+  const floor = peak * (1 - depth), until = peakTs + days * 1440 * MIN;
+  return series.some((p) => p.ts > peakTs && p.ts <= until && p.price <= floor);
+}
 const median = (a) => { if (!a.length) return null; const s = [...a].sort((x, y) => x - y); const m = s.length >> 1; return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; };
 export { median };
 
-/** Price series (NEAR per token) from trades, ignoring dust that would distort it. */
+/** Price series (NEAR per token) from trades, ignoring dust and isolated bad prints that would distort it. */
 export function priceSeries(trades, minNear = 0.02) {
   minNear = minNear ?? 0.02;
-  return trades.filter((t) => t.near >= minNear && t.tokens > 0).map((t) => ({ ts: t.ts, price: t.near / t.tokens })).sort((a, b) => a.ts - b.ts);
+  return dropSpikes(trades.filter((t) => t.near >= minNear && t.tokens > 0).map((t) => ({ ts: t.ts, price: t.near / t.tokens })).sort((a, b) => a.ts - b.ts));
+}
+
+/**
+ * Drop isolated prints: a price more than `factor` x away from the median of the trades on BOTH sides of it (up to `k` each side) while
+ * those agree with each other. A routed or mis-decoded trade can show one absurd price (BLACKDRAGON: one sell at 7.4x every trade around it
+ * became a "54,979x" all-time high and a fake crash). A real pump or dump keeps trading at the new level, so it stays.
+ */
+export function dropSpikes(series, { k = 5, factor = 3 } = {}) {
+  if (series.length < 5) return series;
+  const out = [];
+  for (let i = 0; i < series.length; i++) {
+    const before = series.slice(Math.max(0, i - k), i).map((p) => p.price), after = series.slice(i + 1, i + 1 + k).map((p) => p.price);
+    if (before.length < 2 || after.length < 2) { out.push(series[i]); continue; } // the edges (launch, latest trade) can't be judged
+    const mb = median(before), ma = median(after), p = series[i].price;
+    const agree = Math.max(mb, ma) / Math.min(mb, ma) < factor; // the neighbours are on one level (not a real move happening right here)
+    const off = (m) => p / m > factor || m / p > factor;
+    if (agree && off(mb) && off(ma)) continue;
+    out.push(series[i]);
+  }
+  return out;
 }
 /** Last traded price at or before `ts` (null when nothing traded yet). */
 export function priceAt(series, ts) {
@@ -59,15 +86,19 @@ export function buildOutcome(token, trades, now, cfg) {
   const exitSold = sum(creatorSells.filter((t) => t.ts <= live + 60 * MIN), (t) => t.near);
   const creatorExit = firstSell && devBuy >= 1 ? { share: exitSold / devBuy, minutes: Math.max(0, Math.round((firstSell.ts - live) / MIN)), sold_near: exitSold, dev_buy_near: devBuy } : null;
   const rugKinds = [];
-  if (settled && drawdownA != null && drawdownA >= cfg.rugDrawdown) rugKinds.push('price_crash');
-  else if (settled && drawdownA != null && drawdownA >= (cfg.softRugDrawdown ?? 0.7) && creatorSellNear >= 1) rugKinds.push('creator_dump');
+  const crashDays = cfg.crashDays ?? 7;
+  // the launch is in the stored trades (older tokens are often read from part-way through their life): only then is the first stored price the launch price
+  const launchCovered = !!allT.length && allT[0].ts - live <= 60 * MIN;
+  if (settled && drawdownA != null && drawdownA >= cfg.rugDrawdown && fastFall(seriesAll, peakA, peakATs, cfg.rugDrawdown, crashDays)) rugKinds.push('price_crash');
+  else if (settled && drawdownA != null && drawdownA >= (cfg.softRugDrawdown ?? 0.7) && creatorSellNear >= 1 && fastFall(seriesAll, peakA, peakATs, cfg.softRugDrawdown ?? 0.7, crashDays)) rugKinds.push('creator_dump');
   // round trip: it pumped (peak at least roundTripPeak x the launch price) and is back near where it started (at most roundTripBack x): everyone who bought after launch is flat or under
-  const first0 = firstA;
+  const first0 = launchCovered ? firstA : null;
   if (settled && first0 && peakA && lastA != null && peakA / first0 >= (cfg.roundTripPeak ?? 3) && lastA / first0 <= (cfg.roundTripBack ?? 1.25) && !rugKinds.length) rugKinds.push('round_trip');
   // creator exit: the creator took (all of) their dev buy out within the hour and the token is not much above its launch price (at most creatorExitBack x), so holders are flat or under
   if (creatorExit && creatorExit.share >= (cfg.creatorExitShare ?? 0.8) && first0 && lastA != null && lastA / first0 <= (cfg.creatorExitBack ?? 1.5) && !rugKinds.length) rugKinds.push('creator_exit');
-  // the creator sold at all: a dump, whatever the price did (the kinds above say more when they apply)
-  if (creatorSellsAll.length && creatorSellNear > (cfg.creatorSellRugNear ?? 0) && !rugKinds.length) rugKinds.push('creator_sold');
+  // the creator sold in its first days: a dump, whatever the price did (the kinds above say more when they apply)
+  const earlyCreatorSellNear = sum(creatorSellsAll.filter((t) => t.ts <= live + (cfg.creatorSellRugDays ?? 30) * 1440 * MIN), (t) => t.near);
+  if (earlyCreatorSellNear > 0 && earlyCreatorSellNear > (cfg.creatorSellRugNear ?? 0) && !rugKinds.length) rugKinds.push('creator_sold');
   if (token.rug?.flagged && token.rug.source !== 'ledger') rugKinds.push('flagged'); // dev-rug blacklist (old "ledger" flags are covered by the all-time creator sales above)
   return {
     first_price: first, peak_price: peak, peak_ts: peakTs, last_price: last,
@@ -100,7 +131,8 @@ export function buildLedger(token, trades, cfg) {
   return {
     last_price: last, last_multiple: first && last != null ? last / first : null, last_trade_ts: all.at(-1)?.ts ?? null,
     ath_price: ath, ath_multiple: first && ath ? ath / first : null, ath_ts: athTs, ath_after_cp: athTs != null && athTs > horizon,
-    drawdown, collapsed: drawdown != null && drawdown >= cfg.rugDrawdown, // fell like a rug at some point after launch (24 h verdicts may not show it)
+    // fell like a rug at some point after launch (24 h verdicts may not show it): deep and fast, not a long decline from an old high
+    drawdown, collapsed: drawdown != null && drawdown >= cfg.rugDrawdown && fastFall(series, ath, athTs, cfg.rugDrawdown, cfg.crashDays ?? 7),
     ...side(all), after_cp: side(after),
     creator_sell_near_after_cp: sum(creatorAfter, (t) => t.near), creator_first_sell_after_cp_ts: creatorAfter[0]?.ts ?? null, // the creator selling after day 1
   };

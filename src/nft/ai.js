@@ -65,7 +65,7 @@ const clean = (j) => ({
 });
 /** Ask the model with the evidence cleaned and wrapped as untrusted data; the risk level can only go up from the rule-based flags. */
 async function ask(system, preamble, evidence, flags) {
-  const { user, findings } = evidenceMessage(preamble, evidence);
+  const { user, findings } = evidenceMessage(preamble, evidence, { trusted: ['previous'] });
   const { json, model } = await chatJSON({ system: system + UNTRUSTED_RULE, user, model: config.ai.analysisModel, timeoutMs: config.ai.analysisTimeoutMs, attempts: 2, stream: true });
   const floor = maxRisk(riskFloor(flags), findings.length ? 'high' : 'low');
   const raised = ['low', 'medium', 'high'].indexOf(floor) > ['low', 'medium', 'high'].indexOf(json?.risk_level);
