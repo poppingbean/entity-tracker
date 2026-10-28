@@ -86,6 +86,7 @@
   .head { display:flex; justify-content:space-between; align-items:baseline; gap:12px; flex-wrap:wrap; } .head h2 { margin-bottom:14px; }
   .grid2 { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:16px; } .grid2 > .card { margin-bottom:16px; }
   .grid2.wide-l { grid-template-columns:minmax(0,5fr) minmax(0,7fr); }
+  .grid2.main-l { grid-template-columns:minmax(0,2fr) minmax(300px,1fr); } /* a main column and a narrow side panel (Alerts + watchlist) */
   .crumbs { font-size:12.5px; color:var(--muted); margin-bottom:12px; } .crumbs a { color:var(--muted); } .crumbs a:hover { color:var(--accent); }
 
   /* ---------- hero ---------- */
@@ -227,7 +228,7 @@
     #nav { order:4; flex:1 1 100%; overflow-x:auto; }
     .status { margin-left:auto; }
     #subnav, .pagehead, main, footer { padding-left:16px; padding-right:16px; }
-    .grid2, .grid2.wide-l { grid-template-columns:minmax(0,1fr); }
+    .grid2, .grid2.wide-l, .grid2.main-l { grid-template-columns:minmax(0,1fr); }
     .hero { padding:22px 18px; } .hero h1 { font-size:22px; }
     input[type=search] { min-width:0; width:100%; }
     .dh-main h1 { font-size:20px; }
@@ -1317,7 +1318,7 @@ views.alerts = async () => {
   const mine = S.tab === 'mine';
   const j = mine ? (key ? await get('/api/alerts', { key, limit: 100 }) : { rows: [] }) : await get('/api/alerts', { severity: S.tab === 'high' ? 'high' : '', group: S.group, limit: 50, offset: S.offset });
   const meta = mine ? await get('/api/alerts', { limit: 1 }) : j;
-  return `<div class="grid2 wide-l"><div class="card"><div class="bar">${seg('alerts', 'tab', [['', 'All'], ['high', 'High only'], ['mine', `My watchlist (${items.length})`]])}
+  return `<div class="grid2 main-l"><div class="card"><div class="bar">${seg('alerts', 'tab', [['', 'All'], ['high', 'High only'], ['mine', `My watchlist (${items.length})`]])}
       ${mine ? '' : sel('alerts', 'group', [['', 'every kind'], ['rug', 'rug in progress'], ['contract', 'contract changes'], ['activity', 'watched / ruggers'], ['nft', 'NFT team / wash']])}<span class="spacer"></span>${mine ? '' : pager('alerts', j.total)}</div>
     <table><tr><th>When</th><th>Severity</th><th>Kind</th><th>Alert</th></tr>${(j.rows || []).map(alertRow).join('') || empty(4, mine ? (items.length ? '<span style="white-space:normal;display:block">no alerts for your watchlist yet. Alerts are events, not prices: they appear when something on the list happens (see "Alerts on"). Trades of watched tokens are re-read every 10 minutes.</span>' : 'your watchlist is empty: add something on the right, or press ☆ Watch on any token, wallet, group, creator or NFT page') : 'no alerts yet')}</table></div>
   <div><div class="card"><h2>My watchlist <span class="muted">this browser</span></h2>
