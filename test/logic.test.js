@@ -617,3 +617,29 @@ test('guard: our own previous assessment is cleaned but not pattern-matched; cha
   assert.equal(g.data.previous.findings[0], 'no rug history is recorded');
   assert.deepEqual(g.findings.map((f) => f.path), ['now.name']);
 });
+test('analyst: account roles and known actors are given only for accounts in the packet', async () => {
+  const { accountRole, actorsIn } = await import('../src/analysis/prompt.js');
+  assert.match(accountRole('bob.user.intear.near'), /wallet-app user/);
+  assert.match(accountRole('reward-distribute.justhoot.near'), /fee bot/);
+  assert.match(accountRole('lock_abc.nearlytrade.near'), /launchpad/);
+  assert.equal(accountRole('alice.near'), null);
+  const x = actorsIn({ holders: { rows: [{ account: 'threeis.near' }, { account: 'd45a2ac2…' }, { account: 'someone.user.intear.near' }] }, creator: { account: '451913e6…' } });
+  assert.deepEqual(x.known_actors.map((k) => k.account).sort(), ['451913e6…', 'd45a2ac2…', 'threeis.near']);
+  assert.ok(x.known_actors.find((k) => k.account === '451913e6…').not_a_link, 'an exchange wallet is marked as not a link');
+  assert.deepEqual(x.account_roles.map((r) => r.account), ['someone.user.intear.near']);
+  assert.equal(actorsIn({ a: 'nobody.near' }).known_actors.length, 0);
+});
+test('entries: with a 3% transfer fee, a wallet that sold everything it held is 100% sold (not 94.09%)', () => {
+  const live = 1e12, cfg = { windowMinutes: 15, minNear: 0.1, maxBuyers: 50, minutes: [60, 360, 1440], priceMinNear: 0.02 };
+  const tok = { _id: 'x.near', live_ts: live, creator: 'dev.near', tax: { transferFeePips: 30000 } };
+  const trades = [
+    { ts: live + 60e3, trader: 'a.near', buy: true, near: 10, tokens: 1000 },            // the pool sends 1000, a.near holds 970
+    { ts: live + 120e3, trader: 'b.near', buy: true, near: 10, tokens: 1000 },
+    { ts: live + 3600e3, trader: 'a.near', buy: false, near: 9, tokens: 970 * 0.97 },    // a.near sends all 970, the pool gets 940.9
+  ];
+  const e = buildEntries(tok, trades, live + 2 * 86400e3, cfg);
+  assert.equal(+e.find((x) => x.wallet === 'a.near').sold_share_now.toFixed(6), 1);
+  assert.equal(e.find((x) => x.wallet === 'b.near').sold_share_now, 0);
+  const noFee = buildEntries({ ...tok, tax: null }, trades.map((t) => (t.buy ? t : { ...t, tokens: 1000 })), live + 2 * 86400e3, cfg);
+  assert.equal(noFee.find((x) => x.wallet === 'a.near').sold_share_now, 1, 'without a fee nothing changes');
+});

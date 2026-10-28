@@ -165,7 +165,8 @@ export async function buildAnalysis(id) {
   let peak = null; for (const p of series) if (!peak || p.price > peak.price) peak = p;
   const last = series.at(-1) ?? null;
   const flows = {
-    first_price: first, peak_multiple: first && peak ? r(peak.price / first) : null, peak_min: peak ? r((peak.ts - live) / MIN, 0) : null,
+    first_price: first, peak_multiple: first && peak ? r(peak.price / first) : null, peak_min: peak ? r((peak.ts - live) / MIN, 0) : null, peak_ts: peak?.ts ?? null,
+    ...(() => { const after = peak ? series.filter((p) => p.ts >= peak.ts) : []; let lo = null; for (const p of after) if (!lo || p.price < lo.price) lo = p; return { low_multiple: first && lo ? r(lo.price / first, 4) : null, low_ts: lo?.ts ?? null }; })(),
     now_multiple: first && last ? r(last.price / first) : null, last_trade_ts: last?.ts ?? null, drawdown_from_peak: peak && last ? r(1 - last.price / peak.price, 3) : null,
     windows: WINDOWS.map((m) => windowFlows(trades, live, m, supply)),
     // the last minutes of the stored data: what is happening now (the windows above are the first minutes after launch)

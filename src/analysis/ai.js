@@ -9,36 +9,8 @@ import { config } from '../config.js';
 import { UNTRUSTED_RULE, evidenceMessage, maxRisk, riskFloor } from '../ai/untrusted.js';
 import { tagOf } from '../evaluate/tags.js';
 import { INFRA, groupBrief } from './token.js';
-
-const COMMON = `Tags: win80 / win50 / win30 = profitable in 80 / 50 / 30 %+ of the tokens they bought early, sniper = net profit from a few big wins, loss = lost money overall, unrated = too few tokens.
-Flows: launch_windows = the first 15 / 60 / 1440 minutes after launch; recent_windows = the last 15 / 60 / 1440 minutes before data_to_ts (is it trading now?).
-A rug flag about a price crash means a fast fall from a peak; an old token far below an old all-time high is a long decline, not a rug.
-Rules: use only the supplied facts and numbers; never invent accounts, amounts or events; shares are fractions (0.05 = 5%); say "linked" for tracker groups and shared funders,
-"proven common control" only when a wallet funded another directly; keep account names exactly as given (shorten 64-hex ids to their first 8 characters + "…").`;
-
-const SYSTEM = `You are an on-chain analyst writing a short investigation of a NEAR Protocol meme token (launchpads: nearly.trade, justhoot, meme.cooking).
-You get one JSON evidence packet built by a tracker: launch mechanics and contract audit, the creator (age, funders, earlier launches, trades in this token, current balance),
-price and flows after launch, the early buyers (entry rank, delay, NEAR in, share of supply, wallet age, win-rate tag, group), the linked GROUPS among early buyers
-(wallets the tracker links by funding chains, money flow and synchronised buys; their tag and lifetime record), funders shared by several early buyers,
-repeat actors seen early in other launches, the biggest sellers, the largest holders (balances checked live), TOKEN_FLOWS and rule-based risk flags.
-TOKEN_FLOWS follows tokens that left the creator and the early buyers by plain transfer (not a sale), hop by hop: each account reached has its hop, the account it
-received from, the tokens received, and its outcome (sold = it sold on the pool, sold_near counts all its sales of this token; passed on; kept; exchange). Use it to say
-where the dev's and insiders' tokens really ended up: a creator or early buyer that "never sold" but passed tokens to wallets that then sold is a hidden dump.
-${COMMON}
-Reply with ONE JSON object and nothing else, with exactly these keys:
-{"summary":"3-5 sentences: what happened at launch, who bought, who is in control now","findings":["4-7 short findings, most important first"],
-"risk_level":"low"|"medium"|"high","confidence":number 0..1,"conclusion":"2-3 sentences: overall assessment and what to watch"}`;
-
-const SYSTEM_UPDATE = `You are an on-chain analyst keeping an investigation of a NEAR Protocol meme token up to date.
-You get: "previous" = your last assessment and when it was written; "since" = what changed on chain between that assessment and now (trades in the window, the biggest
-buyers and sellers in it with their tag and group, price, the creator, early buyers and linked groups that sold, holders that entered, left or moved, risk flags added or
-removed); "now" = a compact view of the current state, with TOKEN_FLOWS (tokens that left the creator and early buyers by transfer, followed hop by hop: who received
-them and whether they sold on the pool, passed them on, kept them or sent them to an exchange). Update the assessment: keep what still holds, revise what the new activity changes, and do not retell the launch.
-${COMMON}
-Reply with ONE JSON object and nothing else, with exactly these keys:
-{"changes":["2-6 short points on what happened since the previous assessment, most important first"],"summary":"3-5 sentences: the current picture",
-"findings":["4-7 short findings as they stand now, most important first"],"risk_level":"low"|"medium"|"high","confidence":number 0..1,
-"conclusion":"2-3 sentences: overall assessment now, whether the risk moved and why, and what to watch"}`;
+import { SYSTEM_INITIAL as SYSTEM, SYSTEM_UPDATE, actorsIn } from './prompt.js';
+import { nearUsdPrice } from '../near/quotes.js';
 
 const r = (x, d = 2) => (x == null || !Number.isFinite(x) ? null : Math.round(x * 10 ** d) / 10 ** d);
 const short = (s) => (typeof s === 'string' && /^[0-9a-f]{64}$/.test(s) ? s.slice(0, 8) + '…' : s);
@@ -146,11 +118,35 @@ const clean = (j) => ({
   summary: String(j.summary || '').slice(0, 1500), findings: (Array.isArray(j.findings) ? j.findings : []).map((x) => String(x).slice(0, 400)).slice(0, 8),
   risk_level: ['low', 'medium', 'high'].includes(j.risk_level) ? j.risk_level : 'medium', confidence: Math.max(0, Math.min(1, Number(j.confidence) || 0)), conclusion: String(j.conclusion || '').slice(0, 1000),
   ...(Array.isArray(j.changes) ? { changes: j.changes.map((x) => String(x).slice(0, 400)).slice(0, 8) } : {}),
+  ...(j.headline ? { headline: String(j.headline).slice(0, 120) } : {}),
+  ...(j.report && typeof j.report === 'object' ? { report: cleanReport(j.report) } : {}),
+  ...(j.telegram_post ? { telegram_post: String(j.telegram_post).slice(0, 3500) } : {}),
 });
+const REPORT_KEYS = ['launch_safety', 'creator', 'price_flows', 'early_buyers', 'holders', 'repeat_actors', 'risk_notes'];
+function cleanReport(x) {
+  const out = {};
+  for (const k of REPORT_KEYS) if (x[k]) out[k] = String(x[k]).slice(0, 1500);
+  if (Array.isArray(x.clusters)) out.clusters = x.clusters.slice(0, 8).map((c) => ({ name: String(c?.name || '').slice(0, 80), wallets: (Array.isArray(c?.wallets) ? c.wallets : []).map((w) => String(w).slice(0, 80)).slice(0, 20),
+    evidence: String(c?.evidence || '').slice(0, 600), strength: c?.strength === 'proof' ? 'proof' : 'pattern', ...(c?.supply_share != null ? { supply_share: String(c.supply_share).slice(0, 120) } : {}) }));
+  return out;
+}
+/** Price path and market cap at the data time (FDV = last price x supply, in NEAR and USD), and the data time in UTC: what the post's price line needs. */
+async function marketOf(analysis) {
+  const f = analysis.flows || {}, supply = analysis.launch?.supply, usd = await nearUsdPrice().catch(() => null);
+  const price = (m) => (f.first_price != null && m != null ? f.first_price * m : null);
+  const fdv = (p) => (p != null && supply ? r(p * supply, 0) : null);
+  const iso = (ts) => (ts ? new Date(ts).toISOString().slice(0, 16).replace('T', ' ') + ' UTC' : null);
+  const last = price(f.now_multiple);
+  return { data_time_utc: iso(analysis.data_to_ts), near_usd: usd ? r(usd, 3) : null,
+    price_path: { first: f.first_price, high: price(f.peak_multiple), high_utc: iso(f.peak_ts), low_after_high: price(f.low_multiple), low_utc: iso(f.low_ts), last, change_from_first: f.now_multiple != null ? r(f.now_multiple - 1, 4) : null },
+    fdv_near: fdv(last), fdv_usd: fdv(last) != null && usd ? r(fdv(last) * usd, 0) : null };
+}
+
 /** Ask the model with the evidence cleaned and wrapped as untrusted data; the risk level can only go up from the rule-based flags. */
 async function ask(system, preamble, evidence, flags) {
+  evidence = { ...evidence, ...actorsIn(evidence) };
   const { user, findings } = evidenceMessage(preamble, evidence, { trusted: ['previous'] });
-  const { json, model } = await chatJSON({ system: system + UNTRUSTED_RULE, user, model: config.ai.analysisModel, timeoutMs: config.ai.analysisTimeoutMs, attempts: 2, stream: true });
+  const { json, model } = await chatJSON({ system: system + UNTRUSTED_RULE, user, model: config.ai.analysisModel, maxTokens: config.ai.analysisMaxTokens, timeoutMs: config.ai.analysisTimeoutMs, attempts: 2, stream: true });
   const floor = maxRisk(riskFloor(flags), findings.length ? 'high' : 'low');
   const raised = ['low', 'medium', 'high'].indexOf(floor) > ['low', 'medium', 'high'].indexOf(json?.risk_level);
   return { json: { ...json, risk_level: raised ? floor : json?.risk_level }, model, guard: { floor, raised, ...(findings.length ? { injection: findings } : {}) } };
@@ -165,7 +161,7 @@ export async function assessWithAi(analysis) {
   const prev = doc?.ai?.snapshot ? doc.ai : null;
   if (!prev) {
     const snapshot = aiPacket(analysis);
-    const { json, model, guard } = await ask(SYSTEM, 'Evidence packet for this token:', snapshot, analysis.flags);
+    const { json, model, guard } = await ask(SYSTEM, 'Evidence packet for this token:', { ...snapshot, market: await marketOf(analysis) }, analysis.flags);
     const ai = { ...clean(json), guard, mode: 'initial', model, ts: Date.now(), data_to_ts: analysis.data_to_ts, for_built_ts: analysis.built_ts, snapshot };
     await col('analyses').updateOne({ _id: analysis.token }, { $set: { ai } }, { upsert: true });
     await saveRun(analysis.token, ai);
@@ -176,7 +172,7 @@ export async function assessWithAi(analysis) {
     await col('analyses').updateOne({ _id: analysis.token }, { $set: { 'ai.checked_ts': Date.now(), 'ai.checked_to_ts': analysis.data_to_ts } });
     return { ...prev, checked_ts: Date.now(), unchanged: true };
   }
-  const now = { age_min: cur.age_min, flows: cur.flows, creator: cur.creator && { balance: cur.creator.balance, balance_share: cur.creator.balance_share, traded: cur.creator.traded }, holders: cur.holders, token_flows: cur.token_flows, flags: cur.flags };
+  const now = { age_min: cur.age_min, data_to_ts: cur.data_to_ts, market: await marketOf(analysis), launch: cur.launch, flows: cur.flows, early: cur.early, groups: cur.groups, repeat: cur.repeat, sellers: cur.sellers, creator: cur.creator && { balance: cur.creator.balance, balance_share: cur.creator.balance_share, traded: cur.creator.traded }, holders: cur.holders, token_flows: cur.token_flows, flags: cur.flags };
   const packet = { previous: { ts: prev.ts, risk_level: prev.risk_level, confidence: prev.confidence, summary: prev.summary, findings: prev.findings, conclusion: prev.conclusion, changes: prev.changes }, since, now };
   const { json, model, guard } = await ask(SYSTEM_UPDATE, 'Previous assessment, what changed since, and the current state:', packet, analysis.flags);
   const ai = { ...clean(json), guard, mode: 'update', model, ts: Date.now(), since_ts: prev.ts, since_data_to_ts: prev.data_to_ts, data_to_ts: analysis.data_to_ts, for_built_ts: analysis.built_ts,
@@ -184,6 +180,13 @@ export async function assessWithAi(analysis) {
   await col('analyses').updateOne({ _id: analysis.token }, { $set: { ai } });
   await saveRun(analysis.token, ai, since);
   return ai;
+}
+
+/** A first-run assessment written and returned without saving anything (to try the prompt on a token without publishing a run). */
+export async function previewAssessment(analysis) {
+  const evidence = { ...aiPacket(analysis), market: await marketOf(analysis) };
+  const { json, model, guard } = await ask(SYSTEM, 'Evidence packet for this token:', evidence, analysis.flags);
+  return { ...clean(json), guard, model, evidence: { market: evidence.market, ...actorsIn(evidence) } };
 }
 
 // ---- every run, kept for good
