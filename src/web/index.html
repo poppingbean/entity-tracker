@@ -1097,13 +1097,30 @@ function anaAiBody(a) {
   let h = `<div class="card"><div class="head"><h2>AI analyst ${risk(ai.risk_level)}${ai.previous_risk && ai.previous_risk !== ai.risk_level ? ` <span class="muted small">was ${esc(ai.previous_risk)}</span>` : ''}
       <span class="muted small">${ai.mode === 'update' ? 'update' : 'first assessment'} · ${when(ai.ts)} · confidence ${n(ai.confidence, 2)} · ${esc(ai.model || '')}</span></h2>${btn}</div>${status}`;
   if (ai.changes?.length) h += `<h3>Since the previous assessment <span class="muted small">${when(ai.since_ts)}${ai.window ? ` · ${ai.window.trades} trades · ${n(ai.window.buy_near, 1)} N in / ${n(ai.window.sell_near, 1)} N out` : ''}</span></h3>${ul(ai.changes)}`;
-  h += `${ai.changes?.length ? '<h3>Current assessment</h3>' : ''}<p>${esc(ai.summary)}</p>${ul(ai.findings)}<p><b>Conclusion.</b> ${esc(ai.conclusion)}</p>`;
+  h += `${ai.changes?.length ? '<h3>Current assessment</h3>' : ''}${ai.headline ? `<p><b>${esc(ai.headline)}</b></p>` : ''}<p>${esc(ai.summary)}</p>${ul(ai.findings)}<p><b>Conclusion.</b> ${esc(ai.conclusion)}</p>`;
+  h += aiReport(ai.report) + aiPost(ai.telegram_post);
   const hist = a.ai_history || [];
   if (hist.length) h += `<details><summary class="muted small">Earlier runs (${hist.length}), kept with the figures they were written from</summary>${hist.map((x) => `<div style="margin:8px 0;padding-top:6px;border-top:1px solid var(--line)">
       <div class="small">${when(x.ts)} · ${x.mode === 'update' ? 'update' : 'first assessment'} · ${risk(x.risk_level)} <span class="muted">${esc(x.model || '')}</span></div>
-      ${x.changes?.length ? `<div class="small muted">Changes then:</div>${ul(x.changes)}` : ''}<p class="small">${esc(x.summary)}</p>${ul(x.findings)}<p class="small"><b>Conclusion.</b> ${esc(x.conclusion || '')}</p>
+      ${x.changes?.length ? `<div class="small muted">Changes then:</div>${ul(x.changes)}` : ''}${x.headline ? `<p class="small"><b>${esc(x.headline)}</b></p>` : ''}<p class="small">${esc(x.summary)}</p>${ul(x.findings)}${aiPost(x.telegram_post)}<p class="small"><b>Conclusion.</b> ${esc(x.conclusion || '')}</p>
       <button onclick="anaRun(${esc(JSON.stringify(x.id))},this)">Show figures</button><div></div></div>`).join('')}</details>`;
   return h + '<p class="small muted">Written by the AI analyst from the figures on this page; check the tables before relying on it.</p></div>';
+}
+/** The analyst's full report (TrustFlow Research sections), with each cluster's evidence and whether it is proof or a pattern. */
+const REPORT_SECTIONS = [['launch_safety', 'Launch and contract safety'], ['creator', 'Creator'], ['price_flows', 'Price and flows'], ['early_buyers', 'Early buyers and snipers'], ['holders', 'Holders'], ['repeat_actors', 'Repeat actors'], ['risk_notes', 'Risk notes']];
+function aiReport(R) {
+  if (!R) return '';
+  const sec = (k, title) => (R[k] ? `<h4>${title}</h4><p class="small">${esc(R[k])}</p>` : '');
+  const cl = R.clusters?.length ? `<h4>Clusters</h4><table class="small"><tr><th>Cluster</th><th>Wallets</th><th>Evidence</th><th>Strength</th></tr>${R.clusters.map((c) => `<tr><td>${esc(c.name)}${c.supply_share ? `<div class="muted">${esc(c.supply_share)}</div>` : ''}</td>
+    <td class="wrap acct">${c.wallets.map(esc).join(', ')}</td><td class="wrap">${esc(c.evidence)}</td><td><span class="v ${c.strength === 'proof' ? 'bad' : 'neutral'}">${c.strength === 'proof' ? 'proof' : 'pattern, not proof'}</span></td></tr>`).join('')}</table>` : '';
+  return `<details><summary><b>Full report</b> <span class="muted small">launch and safety, creator, price, early buyers, clusters with their evidence, holders, repeat actors, risks</span></summary>
+    ${REPORT_SECTIONS.slice(0, 4).map(([k, t]) => sec(k, t)).join('')}${cl}${REPORT_SECTIONS.slice(4).map(([k, t]) => sec(k, t)).join('')}</details>`;
+}
+/** The Telegram post draft, ready to copy. */
+function aiPost(post) {
+  if (!post) return '';
+  return `<details><summary><b>Telegram post</b> <span class="muted small">draft in house style</span></summary>
+    <pre class="small" style="white-space:pre-wrap;user-select:all">${esc(post)}</pre><button onclick="navigator.clipboard.writeText(this.previousElementSibling.textContent).then(()=>{this.textContent='Copied'})">Copy</button></details>`;
 }
 /** The figures an earlier run was written from (and, for an update, what changed in its window), shown under it. */
 async function anaRun(id, btn) {

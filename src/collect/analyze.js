@@ -145,6 +145,7 @@ export function buildLedger(token, trades, cfg) {
  */
 export function buildEntries(token, trades, now, cfg) {
   const live = token.live_ts, winEnd = live + cfg.windowMinutes * MIN;
+  const keep = 1 - Math.min(0.5, Math.max(0, (token.tax?.transferFeePips || 0) / 1e6)); // share left after the token's transfer fee
   const series = priceSeries(trades.filter((t) => t.ts >= live), cfg.priceMinNear);
   const byWallet = new Map();
   for (const t of trades) { if (t.ts < live) continue; (byWallet.get(t.trader) || byWallet.set(t.trader, []).get(t.trader)).push(t); }
@@ -163,12 +164,15 @@ export function buildEntries(token, trades, now, cfg) {
   return kept.map((c, i) => {
     const buyTokens = c.wb.reduce((s, t) => s + t.tokens, 0);
     const allSells = c.ts.filter((t) => !t.buy);
+    // a transfer fee (justhoot: 3%) is taken on every move: the buyer holds `keep` of what the pool sent, and a sale of s held tokens reaches
+    // the pool as s x keep (the amount the trade records). Without this, a wallet that sold everything shows 94.09% sold (0.97 x 0.97)
+    const held = buyTokens * keep;
     const valueAt = (T, price) => {
       const sold = allSells.filter((t) => t.ts <= T);
-      const soldTokens = sold.reduce((s, t) => s + t.tokens, 0), soldNear = sold.reduce((s, t) => s + t.near, 0);
-      const eff = Math.min(soldTokens, buyTokens), takenOut = soldTokens > 0 ? soldNear * (eff / soldTokens) : 0;
-      const remaining = buyTokens - eff;
-      return { value: takenOut + (price != null ? remaining * price : 0), soldShare: buyTokens ? eff / buyTokens : 0, takenOut };
+      const soldHeld = sold.reduce((s, t) => s + t.tokens, 0) / keep, soldNear = sold.reduce((s, t) => s + t.near, 0);
+      const eff = Math.min(soldHeld, held), takenOut = soldHeld > 0 ? soldNear * (eff / soldHeld) : 0;
+      const remaining = held - eff;
+      return { value: takenOut + (price != null ? remaining * keep * price : 0), soldShare: held ? eff / held : 0, takenOut };
     };
     const roi = {}, soldShare = {}, takenOut = {};
     for (const m of cfg.minutes) {
