@@ -22,7 +22,7 @@ async function ensureIndexes() {
   await Promise.all([
     ix('tokens', { live_ts: -1 }), ix('tokens', { status: 1, live_ts: 1 }), ix('tokens', { status: 1, ledger_next_ts: 1 }), ix('tokens', { launchpad: 1 }), ix('tokens', { symbol: 1 }),
     ix('nft_events', { collection: 1, ts: 1 }), ix('nft_events', { to: 1 }), ix('nft_events', { from: 1 }), ix('nft_collections', { next_sync_ts: 1 }), ix('nft_collections', { source: 1 }),
-    ix('alerts', { ts: -1 }), ix('alerts', { delivered: 1, ts: 1 }), ix('alerts', { 'related.tokens': 1 }), ix('alerts', { 'related.wallets': 1 }), ix('alerts', { 'related.groups': 1 }), ix('alerts', { 'related.creators': 1 }), ix('alerts', { 'related.collections': 1 }), ix('watchlists', { 'items.kind': 1, 'items.id': 1 }),
+    ix('alerts', { ts: -1 }), ix('alerts', { delivered: 1, ts: 1 }), ix('alerts', { 'related.tokens': 1 }), ix('alerts', { 'related.wallets': 1 }), ix('alerts', { 'related.groups': 1 }), ix('alerts', { 'related.creators': 1 }), ix('alerts', { 'related.collections': 1 }), ix('watchlists', { 'items.kind': 1, 'items.id': 1 }), ix('transfers', { token: 1, ts: 1 }),
     ix('trades', { token: 1, ts: 1 }), ix('trades', { ts: -1 }), ix('analysis_runs', { token: 1, ts: -1 }), ix('trades', { trader: 1 }),
     ix('entries', { token: 1, rank: 1 }), ix('entries', { wallet: 1 }), ix('entries', { first_buy_ts: -1 }),
     ix('wallets', { cluster_id: 1 }), ix('wallets', { funder: 1 }), ix('wallets', { is_creator: 1 }), ix('wallets', { 'funders.account': 1 }), ix('wallets', { 'chain.account': 1 }), ix('wallets', { 'flow_out.to': 1 }), ix('wallets', { profiled: 1 }), ix('wallets', { score: -1 }),

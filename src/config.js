@@ -76,6 +76,8 @@ export const config = {
     watchSyncMinutes: num(process.env.ALERTS_WATCH_SYNC_MINUTES, 10),
     bigSellNear: num(process.env.ALERTS_BIG_SELL_NEAR, 25),
     priceDrop: num(process.env.ALERTS_PRICE_DROP, 0.3),
+    bigTransferNear: num(process.env.ALERTS_BIG_TRANSFER_NEAR, 250),      // a wallet-to-wallet move of a watched token worth this much ...
+    bigTransferShare: num(process.env.ALERTS_BIG_TRANSFER_SHARE, 0.01),  // ... or this share of the supply is an alert
     siteUrl: (process.env.PUBLIC_SITE_URL || '').replace(/\/$/, ''),  // links in alerts, e.g. https://safenear.example
   },
   // NFT collectibles: HOT Craft and near.cooking followed, every collection NearBlocks lists discovered, any collection added by hand
