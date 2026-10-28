@@ -11,6 +11,8 @@ import { tagOf } from '../evaluate/tags.js';
 import { INFRA, groupBrief } from './token.js';
 
 const COMMON = `Tags: win80 / win50 / win30 = profitable in 80 / 50 / 30 %+ of the tokens they bought early, sniper = net profit from a few big wins, loss = lost money overall, unrated = too few tokens.
+Flows: launch_windows = the first 15 / 60 / 1440 minutes after launch; recent_windows = the last 15 / 60 / 1440 minutes before data_to_ts (is it trading now?).
+A rug flag about a price crash means a fast fall from a peak; an old token far below an old all-time high is a long decline, not a rug.
 Rules: use only the supplied facts and numbers; never invent accounts, amounts or events; shares are fractions (0.05 = 5%); say "linked" for tracker groups and shared funders,
 "proven common control" only when a wallet funded another directly; keep account names exactly as given (shorten 64-hex ids to their first 8 characters + "…").`;
 
@@ -47,8 +49,8 @@ export function aiPacket(a) {
   return {
     token: a.token, symbol: a.symbol, age_min: a.age_min, data_to_ts: a.data_to_ts, launch: a.launch,
     creator: a.creator && { ...a.creator, account: short(a.creator.account), funders: (a.creator.funders || []).map((f) => ({ ...f, account: short(f.account) })) },
-    flows: a.flows,
-    early: { wallets: a.early.wallets, near_in: a.early.near_in, first: a.early.rows.slice(0, 12).map((e) => ({ wallet: short(e.wallet), rank: e.rank, delay_s: e.delay_s, buy_near: e.buy_near, supply_share: e.supply_share, roi_now: e.roi_now, sold_share_now: e.sold_share_now, wallet_age_days: e.wallet_age_days, tag: e.tag, group: e.group?.id || null, notes: e.notes })) },
+    flows: flowsForAi(a.flows),
+    early: { ...(a.flows?.history && !a.flows.history.launch_covered ? { note: 'the launch is not in the stored trades: no early-buyer data (absence of insiders is not shown either)' } : {}), wallets: a.early.wallets, near_in: a.early.near_in, first: a.early.rows.slice(0, 12).map((e) => ({ wallet: short(e.wallet), rank: e.rank, delay_s: e.delay_s, buy_near: e.buy_near, supply_share: e.supply_share, roi_now: e.roi_now, sold_share_now: e.sold_share_now, wallet_age_days: e.wallet_age_days, tag: e.tag, group: e.group?.id || null, notes: e.notes })) },
     groups: a.groups.slice(0, 6).map((x) => ({ ...g(x), size: x.size, members_here: x.members.length, near_in: x.near_in, early_near_share: x.early_near_share, supply_share: x.supply_share, realized_now: x.realized_now, unrealized_now: x.unrealized_now, lifetime: x.lifetime })),
     shared_funders: a.shared_funders.slice(0, 6).map((x) => ({ funder: short(x.funder), kind: x.kind, wallets: x.wallets.map(short), strength: x.strength, same_group: x.same_group })),
     repeat: a.repeat.slice(0, 8).map((x) => ({ ...x, wallet: short(x.wallet), group: x.group?.id || null })),
@@ -57,6 +59,16 @@ export function aiPacket(a) {
     token_flows: flowsBrief(a.token_flows),
     flags: a.flags,
   };
+}
+
+/** Price and flows for the model, labelled so they can't be misread: launch windows (first minutes after launch) vs recent windows (last minutes
+ *  before data_to_ts), and what the multiples are measured from. */
+function flowsForAi(f) {
+  if (!f) return f;
+  const { windows, recent_windows, history, ...rest } = f;
+  const covered = history ? history.launch_covered : true;
+  return { ...rest, multiples_from: covered ? 'the launch price' : 'the first stored trade (earlier history is not stored)', history,
+    launch_windows: covered ? windows : 'not stored', recent_windows };
 }
 
 /** The transfer trails, trimmed for the model: the largest trails and the accounts that matter most in each (sold, exchange, then by tokens). */
@@ -137,7 +149,7 @@ const clean = (j) => ({
 });
 /** Ask the model with the evidence cleaned and wrapped as untrusted data; the risk level can only go up from the rule-based flags. */
 async function ask(system, preamble, evidence, flags) {
-  const { user, findings } = evidenceMessage(preamble, evidence);
+  const { user, findings } = evidenceMessage(preamble, evidence, { trusted: ['previous'] });
   const { json, model } = await chatJSON({ system: system + UNTRUSTED_RULE, user, model: config.ai.analysisModel, timeoutMs: config.ai.analysisTimeoutMs, attempts: 2, stream: true });
   const floor = maxRisk(riskFloor(flags), findings.length ? 'high' : 'low');
   const raised = ['low', 'medium', 'high'].indexOf(floor) > ['low', 'medium', 'high'].indexOf(json?.risk_level);

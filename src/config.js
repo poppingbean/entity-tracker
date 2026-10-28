@@ -43,7 +43,9 @@ export const config = {
     creatorExitShare: num(process.env.CREATOR_EXIT_SHARE, 0.8),  // creator sold this share of their dev buy within the first hour ...
     creatorExitBack: num(process.env.CREATOR_EXIT_BACK, 1.5),    // ... and the price is at or below this multiple of the launch price = rug (creator exit)
     softRugDrawdown: num(process.env.SOFT_RUG_DRAWDOWN, 0.7),    // a fall this deep counts as a rug when the creator also sold at least 1 NEAR
-    creatorSellRugNear: num(process.env.CREATOR_SELL_RUG_NEAR, 0), // any creator sale above this many NEAR makes the token a rug (creator sold)
+    creatorSellRugNear: num(process.env.CREATOR_SELL_RUG_NEAR, 0), // any creator sale above this many NEAR makes the token a rug (creator sold) ...
+    creatorSellRugDays: num(process.env.CREATOR_SELL_RUG_DAYS, 30),  // ... within this many days of launch (a creator selling a little two years on is not a rug)
+    crashDays: num(process.env.RUG_CRASH_DAYS, 7),                   // a crash is a rug only when the price got that low within this many days of its peak (not a long decline)
     winRoi: num(process.env.WIN_ROI, 0.2),
   },
 

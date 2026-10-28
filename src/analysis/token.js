@@ -39,9 +39,9 @@ function byTrader(trades) {
   return m;
 }
 
-/** Flows inside the first `min` minutes after launch. */
-function windowFlows(trades, live, min, supply) {
-  const w = trades.filter((t) => t.ts >= live && t.ts <= live + min * MIN);
+/** Flows inside the first `min` minutes after launch, or (recent) the last `min` minutes up to `from`. */
+function windowFlows(trades, from, min, supply, recent = false) {
+  const w = recent ? trades.filter((t) => t.ts > from - min * MIN && t.ts <= from) : trades.filter((t) => t.ts >= from && t.ts <= from + min * MIN);
   const buys = w.filter((t) => t.buy), sells = w.filter((t) => !t.buy);
   const sum = (a, f) => a.reduce((s, x) => s + f(x), 0);
   const netTokens = sum(buys, (t) => t.tokens) - sum(sells, (t) => t.tokens);
@@ -119,6 +119,7 @@ export async function buildAnalysis(id) {
     getCachedAudit(id), supplyOf(id),
   ]);
   const traders = byTrader(trades);
+  const dataTo = t.ledger?.synced_to_ts ?? trades.at(-1)?.ts ?? Date.now();
   const creator = t.creator || null;
   const walletIds = [...new Set([...entries.map((e) => e.wallet), ...traders.keys(), ...(creator ? [creator] : [])])];
   const wallets = await col('wallets').find({ _id: { $in: walletIds } }, { projection: { cluster_id: 1, tag: 1, kind: 1, creator: 1, created_ts: 1, tx_count: 1, funders: { $slice: 3 }, 'chain.account': 1, stats: 1 } }).toArray();
@@ -167,6 +168,10 @@ export async function buildAnalysis(id) {
     first_price: first, peak_multiple: first && peak ? r(peak.price / first) : null, peak_min: peak ? r((peak.ts - live) / MIN, 0) : null,
     now_multiple: first && last ? r(last.price / first) : null, last_trade_ts: last?.ts ?? null, drawdown_from_peak: peak && last ? r(1 - last.price / peak.price, 3) : null,
     windows: WINDOWS.map((m) => windowFlows(trades, live, m, supply)),
+    // the last minutes of the stored data: what is happening now (the windows above are the first minutes after launch)
+    recent_windows: WINDOWS.map((m) => windowFlows(trades, dataTo, m, supply, true)),
+    // older tokens are often read from part-way through their life: then the launch, the early buyers and the multiples' base are not the real launch
+    history: { first_trade_ts: trades[0]?.ts ?? null, launch_covered: !!trades.length && trades[0].ts - live <= 60 * MIN },
     via_intents: (() => { const x = traders.get('intents.near'); return x ? { buy_near: r(x.buy_near), sell_near: r(x.sell_near) } : null; })(),
     total: { trades: trades.length, buy_near: r(trades.filter((x) => x.buy).reduce((s, x) => s + x.near, 0)), sell_near: r(trades.filter((x) => !x.buy).reduce((s, x) => s + x.near, 0)), traders: traders.size },
   };
