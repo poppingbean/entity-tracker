@@ -69,6 +69,10 @@ export const config = {
     telegramChannel: process.env.TELEGRAM_CHANNEL_ID || '',          // public channel / chat for alerts at publicSeverity and above
     webhookUrl: process.env.ALERTS_WEBHOOK_URL || '',                // global webhook for the same alerts
     publicSeverity: ['high', 'medium', 'info'].includes(process.env.ALERTS_PUBLIC_SEVERITY) ? process.env.ALERTS_PUBLIC_SEVERITY : 'high',
+    // watched tokens: trades re-read this often, and what counts as a large sell / a fast drop
+    watchSyncMinutes: num(process.env.ALERTS_WATCH_SYNC_MINUTES, 10),
+    bigSellNear: num(process.env.ALERTS_BIG_SELL_NEAR, 25),
+    priceDrop: num(process.env.ALERTS_PRICE_DROP, 0.3),
     siteUrl: (process.env.PUBLIC_SITE_URL || '').replace(/\/$/, ''),  // links in alerts, e.g. https://safenear.example
   },
   // NFT collectibles: HOT Craft and near.cooking followed, every collection NearBlocks lists discovered, any collection added by hand

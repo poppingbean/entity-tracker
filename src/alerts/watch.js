@@ -13,20 +13,43 @@ const ACCOUNT = /^(?=.{2,64}$)[a-z0-9_-]+(\.[a-z0-9_-]+)*$/;
 export const newKey = (kind) => `${kind}_${crypto.randomBytes(16).toString('hex')}`;
 export const validKey = (k) => typeof k === 'string' && /^(web|api)_[0-9a-f]{32}$|^tg_-?\d{1,20}$/.test(k);
 
-/** What an id is: a group id, a tracked token / NFT collection, a token creator, else a wallet. Returns { kind, id } or null. */
+/** A tracked token by its symbol ($THREE, three): the most recent launch with it. */
+async function tokenBySymbol(sym) {
+  const s = sym.replace(/^\$/, '');
+  if (!/^[a-z0-9_-]{1,20}$/i.test(s)) return null;
+  return col('tokens').findOne({ symbol: new RegExp(`^${s}$`, 'i') }, { projection: { _id: 1 }, sort: { live_ts: -1 } });
+}
+
+/** What an id is, among the things the tracker knows: a group, a tracked token (by contract or symbol), an NFT collection, a token creator,
+ *  a wallet it has seen. Only tokens the tracker follows can be watched (nothing would ever be read about any other). Returns { kind, id } or null. */
 export async function resolveTarget(raw, hint = null) {
   const id = String(raw || '').trim().toLowerCase();
-  if (/^c_[0-9a-f]{8}$/.test(id)) return (await col('clusters').findOne({ _id: id }, { projection: { _id: 1 } })) ? { kind: 'group', id } : null;
+  if (!KINDS.includes(hint)) hint = null;
+  if (/^c_[0-9a-f]{8}$/.test(id)) return (!hint || hint === 'group') && (await col('clusters').findOne({ _id: id }, { projection: { _id: 1 } })) ? { kind: 'group', id } : null;
+  const has = async (c, f) => !!(await col(c).findOne(f, { projection: { _id: 1 } }));
+  if (!hint || hint === 'token') {
+    if (await has('tokens', { _id: id })) return { kind: 'token', id };
+    // a bare word is a symbol, not an account: accounts here have a dot, or are 64-hex implicit accounts
+    const t = !id.includes('.') && !/^[0-9a-f]{64}$/.test(id) ? await tokenBySymbol(id) : null;
+    if (t) return { kind: 'token', id: t._id };
+    if (hint === 'token') return null;
+  }
   if (!ACCOUNT.test(id)) return null;
-  if (hint && KINDS.includes(hint)) return { kind: hint, id };
-  if (await col('tokens').findOne({ _id: id }, { projection: { _id: 1 } })) return { kind: 'token', id };
-  if (await col('nft_collections').findOne({ _id: id }, { projection: { _id: 1 } })) return { kind: 'collection', id };
-  if (await col('tokens').findOne({ creator: id }, { projection: { _id: 1 } })) return { kind: 'creator', id };
-  return { kind: 'wallet', id };
+  if (hint === 'wallet') return id.includes('.') || /^[0-9a-f]{64}$/.test(id) ? { kind: 'wallet', id } : null; // any real account, on purpose: its trades are read as soon as it touches a tracked token
+  if ((!hint || hint === 'collection') && await has('nft_collections', { _id: id })) return { kind: 'collection', id };
+  if ((!hint || hint === 'creator') && await has('tokens', { creator: id })) return { kind: 'creator', id };
+  if (!hint && await has('wallets', { _id: id })) return { kind: 'wallet', id };
+  return null;
 }
 
 export async function getWatchlist(owner) {
   return (await col('watchlists').findOne({ _id: owner })) || { _id: owner, items: [] };
+}
+
+/** The item on a watchlist with this exact id (any kind): what an unwatch removes. */
+export async function findWatched(owner, raw, hint = null) {
+  const id = String(raw || '').trim().toLowerCase();
+  return (await getWatchlist(owner)).items.find((x) => x.id === id && (!hint || x.kind === hint)) || null;
 }
 
 /** Add (or remove) one item. Returns { ok, error?, items }. */

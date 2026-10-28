@@ -3,7 +3,7 @@
 import { config } from '../config.js';
 import { metaGet, metaSet } from '../db.js';
 import { warn } from '../log.js';
-import { resolveTarget, setWatch, getWatchlist, alertsFor, KINDS, MAX_ITEMS } from './watch.js';
+import { resolveTarget, findWatched, setWatch, getWatchlist, alertsFor, KINDS, MAX_ITEMS } from './watch.js';
 import { sendTelegram, alertMessage } from './deliver.js';
 import { getAnalysis } from '../analysis/token.js';
 import { getNftAnalysis } from '../nft/analysis.js';
@@ -37,8 +37,9 @@ async function handle(msg) {
   }
   if (cmd === '/watch' || cmd === '/unwatch') {
     if (!arg) return sendTelegram(chat, `Usage: ${cmd} &lt;id&gt;`);
-    const t = await resolveTarget(arg, KINDS.includes(hint) ? hint : null);
-    if (!t) return sendTelegram(chat, `<code>${esc(arg.slice(0, 64))}</code> is not a NEAR account or group id.`);
+    const h = KINDS.includes(hint) ? hint : null;
+    const t = (cmd === '/unwatch' && await findWatched(owner, arg, h)) || await resolveTarget(arg, h);
+    if (!t) return sendTelegram(chat, `<code>${esc(arg.slice(0, 64))}</code> is not in the system. Watch a token the tracker follows (contract or symbol), a wallet, a creator, an NFT collection or a c_… group id.`);
     const r = await setWatch(owner, t, cmd === '/watch');
     return sendTelegram(chat, r.ok ? `${cmd === '/watch' ? 'Watching' : 'Stopped watching'} ${t.kind} <code>${esc(t.id)}</code>.` : esc(r.error));
   }

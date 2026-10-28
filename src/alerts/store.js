@@ -15,6 +15,9 @@ export const TYPES = {
   watched_buy: { label: 'Watched wallet bought early', group: 'activity' },
   watched_sell: { label: 'Watched wallet sold', group: 'activity' },
   watched_launch: { label: 'Watched creator launched', group: 'activity' },
+  token_big_sell: { label: 'Large sell', group: 'activity' },
+  token_creator_sell: { label: 'Creator selling', group: 'rug' },
+  token_price_drop: { label: 'Fast price drop', group: 'rug' },
   nft_team_sell: { label: 'NFT team selling', group: 'nft' },
   nft_wash: { label: 'NFT wash trades', group: 'nft' },
 };
