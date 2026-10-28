@@ -1272,6 +1272,7 @@ function pickSuggest() {
     const j = await get('/api/watch/pick', { q, kind }).catch(() => ({ rows: [] }));
     if (my !== pickSeq) return; // a newer keystroke already asked
     box.innerHTML = j.rows.length ? `<table>${j.rows.map((x) => `<tr><td>${esc(x.kind)}</td><td class="wrap"><b>${esc(short(x.label, 30))}</b>${x.label !== x.id ? ` <span class="acct">${esc(short(x.id, 34))}</span>` : ''}<div class="muted small">${esc(x.sub || '')}</div></td>
+      <td class="num small">${x.kind !== 'token' ? '' : x.mcap ? `<b>${x.mcap.usd != null ? '$' + n(x.mcap.usd, 0) : n(x.mcap.near, 0) + ' N'}</b><div class="muted" title="market cap at the last trade">mcap · ${since(x.mcap.last_ts)}</div>` : '<span class="muted">no trades</span>'}</td>
       <td>${WATCH?.has(`${x.kind}:${x.id}`) ? '<span class="muted">watching</span>' : `<button data-k="${esc(x.kind)}" data-i="${esc(x.id)}" onclick="pickWatch(this)">＋ Watch</button>`}</td></tr>`).join('')}</table>`
       : `Nothing in the system matches <b>${esc(q)}</b>${kind ? ` (${esc(kind)})` : ''}. Only tokens the tracker follows can be watched.`;
   }, 250);
