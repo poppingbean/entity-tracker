@@ -19,6 +19,7 @@ export const config = {
     analysisModel: process.env.NEAR_AI_ANALYSIS_MODEL || 'anthropic/claude-sonnet-5-5',
     analysisTimeoutMs: num(process.env.NEAR_AI_ANALYSIS_TIMEOUT_SECONDS, 600) * 1000,
     maxTokens: num(process.env.NEAR_AI_MAX_TOKENS, 4000),
+    analysisMaxTokens: num(process.env.ANALYSIS_MAX_TOKENS, 12000), // the token analyst writes a full report and a post
   },
 
   rpcUrls: list(process.env.NEAR_RPC_URLS, ['https://rpc.mainnet.fastnear.com', 'https://free.rpc.fastnear.com', 'https://near.lava.build']),
