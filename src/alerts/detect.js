@@ -24,6 +24,8 @@ const RECENT_LAUNCH = 3 * DAY;      // rug / contract watch covers launches this
 const CONTRACT_EVERY = 30 * MIN;    // code hash / access keys re-read this often per contract
 const sym = (t) => t.symbol || t._id;
 const tokUrl = (id) => `/tokens/${encodeURIComponent(id)}`;
+/** Activity alerts are about on-chain events of the last few minutes only: an event read late (a slow pass, a backlog, downtime) is not news. */
+const freshFrom = (now = Date.now()) => now - config.alerts.maxAgeMinutes * MIN;
 
 /** Rug flags that turned on between two readings of a token (an old token's long-standing state is not news). */
 export function flagChanges(prev, cur) {
@@ -47,24 +49,26 @@ async function rugInProgress(since, watched) {
   for (const t of toks) {
     const rel = { tokens: [t._id], creators: [t.creator], wallets: [t.creator] };
     const want = (k) => !t.only || t.only.has(k), sfx = t.keySuffix || '';
-    if (t.outcome?.rugged && want('rugged')) await raise(`rug|${t._id}${sfx}`, { type: 'rug', severity: 'high', title: `${sym(t)} rugged`, url: tokUrl(t._id), related: rel,
-      text: `${sym(t)} (${t._id}) is now counted as rugged: peak x${(t.outcome.peak_multiple ?? 0).toFixed(1)}, now x${(t.outcome.last_multiple ?? 0).toFixed(2)}.`, data: { peak: t.outcome.peak_multiple, now: t.outcome.last_multiple } });
-    const creatorSell = t.outcome?.creator_sold && want('creator_sold') ? await col('trades').findOne({ token: t._id, trader: t.creator, buy: false }, { sort: { ts: -1 }, projection: { hash: 1 } }) : null;
-    if (t.outcome?.creator_sold && want('creator_sold')) await raise(`creator_sold|${t._id}${sfx}`, { type: 'creator_sold', severity: 'medium', title: `${sym(t)}: the creator sold`, url: tokUrl(t._id), related: rel,
-      text: `The creator ${t.creator} sold ${(t.outcome.creator_sell_near ?? 0).toFixed(1)} NEAR of ${sym(t)}.`, data: { sold_near: t.outcome.creator_sell_near, hash: creatorSell?.hash } });
-    if (t.ledger?.collapsed && want('collapsed')) await raise(`collapse|${t._id}${sfx}`, { type: 'collapse', severity: 'high', title: `${sym(t)} collapsed`, url: tokUrl(t._id), related: rel,
-      text: `${sym(t)} is ${((t.ledger.drawdown ?? 0) * 100).toFixed(0)}% below its all-time high (x${(t.ledger.ath_multiple ?? 0).toFixed(1)}).`, data: { drawdown: t.ledger.drawdown } });
+    // a rug or collapse shows in the latest trades: when those are older than the window, it happened long ago (read late): not announced
+    const lastTradeTs = t.ledger?.last_trade_ts ?? t.outcome?.rug_basis?.last_trade_ts ?? null, recent = lastTradeTs != null && lastTradeTs >= freshFrom(now);
+    if (t.outcome?.rugged && want('rugged') && recent) await raise(`rug|${t._id}${sfx}`, { type: 'rug', severity: 'high', title: `${sym(t)} rugged`, url: tokUrl(t._id), related: rel,
+      text: `${sym(t)} (${t._id}) is now counted as rugged: peak x${(t.outcome.peak_multiple ?? 0).toFixed(1)}, now x${(t.outcome.last_multiple ?? 0).toFixed(2)}.`, data: { peak: t.outcome.peak_multiple, now: t.outcome.last_multiple, event_ts: lastTradeTs } });
+    const creatorSell = t.outcome?.creator_sold && want('creator_sold') ? await col('trades').findOne({ token: t._id, trader: t.creator, buy: false }, { sort: { ts: -1 }, projection: { hash: 1, ts: 1 } }) : null;
+    if (creatorSell && creatorSell.ts >= freshFrom(now)) await raise(`creator_sold|${t._id}${sfx}`, { type: 'creator_sold', severity: 'medium', title: `${sym(t)}: the creator sold`, url: tokUrl(t._id), related: rel,
+      text: `The creator ${t.creator} sold ${(t.outcome.creator_sell_near ?? 0).toFixed(1)} NEAR of ${sym(t)}.`, data: { sold_near: t.outcome.creator_sell_near, hash: creatorSell.hash, event_ts: creatorSell.ts } });
+    if (t.ledger?.collapsed && want('collapsed') && recent) await raise(`collapse|${t._id}${sfx}`, { type: 'collapse', severity: 'high', title: `${sym(t)} collapsed`, url: tokUrl(t._id), related: rel,
+      text: `${sym(t)} is ${((t.ledger.drawdown ?? 0) * 100).toFixed(0)}% below its all-time high (x${(t.ledger.ath_multiple ?? 0).toFixed(1)}).`, data: { drawdown: t.ledger.drawdown, event_ts: lastTradeTs } });
   }
   // the dev-rug check: a creator emptied its balance while a position was held
-  for (const b of await col('blacklist').find({ ts: { $gt: since - HOUR } }).toArray()) {
+  for (const b of await col('blacklist').find({ ts: { $gt: Math.max(since - HOUR, freshFrom(now)) } }).toArray()) {
     await raise(`creator_blacklisted|${b._id}|${b.token || ''}`, { type: 'creator_blacklisted', severity: 'high', title: `${b.symbol || b.token || b._id}: the creator dumped its supply`,
-      url: b.token ? tokUrl(b.token) : `/creators/${encodeURIComponent(b._id)}`, related: { tokens: [b.token], creators: [b._id], wallets: [b._id] }, text: `${b._id} is on the dev-rug blacklist: ${b.reason || 'its balance fell while a position was held'}.` });
+      url: b.token ? tokUrl(b.token) : `/creators/${encodeURIComponent(b._id)}`, related: { tokens: [b.token], creators: [b._id], wallets: [b._id] }, text: `${b._id} is on the dev-rug blacklist: ${b.reason || 'its balance fell while a position was held'}.`, data: { event_ts: b.ts } });
   }
 }
 
 /** New launches by creators that rugged before / are blacklisted (everyone), or that someone watches. */
 async function launches(since, watched) {
-  const fresh = await col('tokens').find({ created_ts: { $gt: since - 10 * MIN }, creator: { $ne: null } }, { projection: { symbol: 1, creator: 1, launchpad: 1, live_ts: 1, live_tx: 1, 'outcome.rugged': 1 } }).toArray();
+  const fresh = await col('tokens').find({ created_ts: { $gt: since - 10 * MIN }, live_ts: { $gte: freshFrom() }, creator: { $ne: null } }, { projection: { symbol: 1, creator: 1, launchpad: 1, live_ts: 1, live_tx: 1, 'outcome.rugged': 1 } }).toArray();
   if (!fresh.length) return;
   const idx = await creatorIndex([...new Set(fresh.map((t) => t.creator))]);
   for (const t of fresh) {
@@ -72,9 +76,9 @@ async function launches(since, watched) {
     const c = idx.get(t.creator), earlierRugs = Math.max(0, (c?.rugged || 0) - (t.outcome?.rugged ? 1 : 0)), earlierLaunches = Math.max(0, (c?.launches || 1) - 1);
     const rel = { tokens: [t._id], creators: [t.creator], wallets: [t.creator] };
     if (c?.blacklisted || earlierRugs > 0) await raise(`rugger_launch|${t._id}`, { type: 'rugger_launch', severity: 'high', title: `${sym(t)}: launched by a creator that rugged before`, url: tokUrl(t._id), related: rel,
-      text: `${t.creator} launched ${sym(t)} on ${t.launchpad}. Before it: ${earlierLaunches} launches, ${earlierRugs} rugged${c?.blacklisted ? ', and it is on the dev-rug blacklist' : ''}.`, data: { hash: t.live_tx } });
+      text: `${t.creator} launched ${sym(t)} on ${t.launchpad}. Before it: ${earlierLaunches} launches, ${earlierRugs} rugged${c?.blacklisted ? ', and it is on the dev-rug blacklist' : ''}.`, data: { hash: t.live_tx, event_ts: t.live_ts } });
     if (watched.creator.has(t.creator) || watched.wallet.has(t.creator)) await raise(`watched_launch|${t._id}`, { type: 'watched_launch', severity: 'info', title: `${t.creator} launched ${sym(t)}`, url: tokUrl(t._id), related: rel,
-      text: `A watched creator launched ${sym(t)} (${t._id}) on ${t.launchpad}.`, data: { hash: t.live_tx } });
+      text: `A watched creator launched ${sym(t)} (${t._id}) on ${t.launchpad}.`, data: { hash: t.live_tx, event_ts: t.live_ts } });
   }
 }
 
@@ -111,31 +115,35 @@ async function watchedActivity(since, watched) {
   const groupMembers = watched.group.size ? await col('wallets').find({ cluster_id: { $in: [...watched.group] } }, { projection: { cluster_id: 1 } }).toArray() : [];
   const groupOf = new Map(groupMembers.map((w) => [w._id, w.cluster_id]));
   const wallets = [...new Set([...watched.wallet, ...groupOf.keys()])];
-  const entries = await col('entries').find({ wallet: { $in: wallets }, first_buy_ts: { $gt: since - 10 * MIN } }, { projection: { token: 1, wallet: 1, rank: 1, buy_near: 1, symbol: 1, delay_s: 1, first_buy_hash: 1 } }).toArray();
+  const from = Math.max(since - 10 * MIN, freshFrom());
+  const entries = await col('entries').find({ wallet: { $in: wallets }, first_buy_ts: { $gt: from } }, { projection: { token: 1, wallet: 1, rank: 1, buy_near: 1, symbol: 1, delay_s: 1, first_buy_hash: 1, first_buy_ts: 1 } }).toArray();
   for (const e of entries) await raise(`watched_buy|${e.token}|${e.wallet}`, { type: 'watched_buy', severity: 'info', title: `${e.wallet} bought ${e.symbol || e.token} early`, url: tokUrl(e.token),
-    related: { tokens: [e.token], wallets: [e.wallet], groups: [groupOf.get(e.wallet)] }, text: `Early buyer #${e.rank}, ${e.delay_s}s after launch, ${(e.buy_near ?? 0).toFixed(1)} NEAR${groupOf.get(e.wallet) ? ` (group ${groupOf.get(e.wallet)})` : ''}.`, data: { hash: e.first_buy_hash } });
-  const sells = await col('trades').aggregate([{ $match: { trader: { $in: wallets }, buy: false, ts: { $gt: since - 10 * MIN } } }, { $sort: { ts: 1 } }, { $group: { _id: { t: '$token', w: '$trader' }, near: { $sum: '$near' }, last: { $max: '$ts' }, hash: { $last: '$hash' } } }, { $match: { near: { $gte: 2 } } }]).toArray();
+    related: { tokens: [e.token], wallets: [e.wallet], groups: [groupOf.get(e.wallet)] }, text: `Early buyer #${e.rank}, ${e.delay_s}s after launch, ${(e.buy_near ?? 0).toFixed(1)} NEAR${groupOf.get(e.wallet) ? ` (group ${groupOf.get(e.wallet)})` : ''}.`, data: { hash: e.first_buy_hash, event_ts: e.first_buy_ts } });
+  const sells = await col('trades').aggregate([{ $match: { trader: { $in: wallets }, buy: false, ts: { $gt: from } } }, { $sort: { ts: 1 } }, { $group: { _id: { t: '$token', w: '$trader' }, near: { $sum: '$near' }, last: { $max: '$ts' }, hash: { $last: '$hash' } } }, { $match: { near: { $gte: 2 } } }]).toArray();
   for (const s of sells) await raise(`watched_sell|${s._id.t}|${s._id.w}|${Math.floor(s.last / HOUR)}`, { type: 'watched_sell', severity: 'info', title: `${s._id.w} sold ${s._id.t}`, url: tokUrl(s._id.t),
-    related: { tokens: [s._id.t], wallets: [s._id.w], groups: [groupOf.get(s._id.w)] }, text: `Sold for ${s.near.toFixed(1)} NEAR in the last pass.`, data: { hash: s.hash } });
+    related: { tokens: [s._id.t], wallets: [s._id.w], groups: [groupOf.get(s._id.w)] }, text: `Sold for ${s.near.toFixed(1)} NEAR in the last ${config.alerts.maxAgeMinutes} minutes.`, data: { hash: s.hash, event_ts: s.last } });
 }
 
-/** Signals in a watched token's recent trades (oldest first). Pure: returns [{ key, type, severity, title, text, data }]. */
-export function tokenSignals(t, trades, { bigSellNear = 25, priceDrop = 0.3, now = Date.now() } = {}) {
+/**
+ * Signals in a watched token's recent trades (oldest first). Pure: returns [{ key, type, severity, title, text, data }]. Only trades after
+ * `since` raise anything (older trades still set the hour's high for the price-drop check).
+ */
+export function tokenSignals(t, trades, { bigSellNear = 25, priceDrop = 0.3, since = -Infinity } = {}) {
   const out = [], name = t.symbol || t._id;
   for (const x of trades) {
-    if (x.buy || !(x.near > 0)) continue;
+    if (x.buy || !(x.near > 0) || !(x.ts > since)) continue;
     if (t.creator && x.trader === t.creator) out.push({ key: `token_creator_sell|${t._id}|${x._id}`, type: 'token_creator_sell', severity: 'high', title: `${name}: the creator is selling`,
-      text: `The creator ${x.trader} sold ${x.near.toFixed(1)} NEAR of ${name}.`, data: { near: x.near, hash: x.hash } });
+      text: `The creator ${x.trader} sold ${x.near.toFixed(1)} NEAR of ${name}.`, data: { near: x.near, hash: x.hash, event_ts: x.ts } });
     else if (x.near >= bigSellNear) out.push({ key: `token_big_sell|${t._id}|${x._id}`, type: 'token_big_sell', severity: 'medium', title: `${name}: ${x.near.toFixed(0)} NEAR sell`,
-      text: `${x.trader} sold ${x.near.toFixed(1)} NEAR of ${name}.`, data: { near: x.near, trader: x.trader, hash: x.hash } });
+      text: `${x.trader} sold ${x.near.toFixed(1)} NEAR of ${name}.`, data: { near: x.near, trader: x.trader, hash: x.hash, event_ts: x.ts } });
   }
   // fast drop: the last price against the highest of the hour before it
   const s = priceSeries(trades);
   if (s.length >= 2) {
     const last = s[s.length - 1], hi = Math.max(...s.filter((p) => p.ts >= last.ts - HOUR).map((p) => p.price));
     const drop = 1 - last.price / hi;
-    if (drop >= priceDrop && now - last.ts < 2 * HOUR) out.push({ key: `token_price_drop|${t._id}|${Math.floor(last.ts / HOUR)}`, type: 'token_price_drop', severity: 'high', title: `${name}: down ${(drop * 100).toFixed(0)}% within an hour`,
-      text: `${name} fell ${(drop * 100).toFixed(0)}% from its high of the last hour.`, data: { drop } });
+    if (drop >= priceDrop && last.ts > since) out.push({ key: `token_price_drop|${t._id}|${Math.floor(last.ts / HOUR)}`, type: 'token_price_drop', severity: 'high', title: `${name}: down ${(drop * 100).toFixed(0)}% within an hour`,
+      text: `${name} fell ${(drop * 100).toFixed(0)}% from its high of the last hour.`, data: { drop, event_ts: last.ts } });
   }
   return out;
 }
@@ -145,9 +153,10 @@ export function tokenSignals(t, trades, { bigSellNear = 25, priceDrop = 0.3, now
  * Large = worth at least minNear at the last price, or at least minShare of the supply. The creator moving tokens is high; a move to an
  * exchange is said so (a deposit before selling there).
  */
-export function transferSignals(t, transfers, { price = null, supply = null, minNear = 250, minShare = 0.01 } = {}) {
+export function transferSignals(t, transfers, { price = null, supply = null, minNear = 250, minShare = 0.01, since = -Infinity } = {}) {
   const out = [], name = t.symbol || t._id, fmt = (x) => Math.round(x).toLocaleString('en-US');
   for (const x of transfers) {
+    if (!(x.ts > since)) continue;
     if (INFRA.test(x.from) || INFRA.test(x.to)) continue; // swaps through a router or app, fees: not a hand-off (older stored rows)
     const near = price != null ? x.tokens * price : null, share = supply ? x.tokens / supply : null;
     if (!((near != null && near >= minNear) || (share != null && share >= minShare))) continue;
@@ -157,13 +166,13 @@ export function transferSignals(t, transfers, { price = null, supply = null, min
     out.push({ key: `token_transfer|${t._id}|${x._id}`, type: 'token_transfer', severity: fromCreator ? 'high' : 'medium',
       title: `${name}: ${fromCreator ? 'the creator moved' : 'large transfer of'} ${fmt(x.tokens)} tokens${toEx}`,
       text: `${x.from} sent ${fmt(x.tokens)} ${name} (${what}) to ${x.to}${ex ? ` (${ex.label})` : ''} without selling: a move to another wallet${toEx ? ' or an exchange deposit' : ''}, often before a sale.`,
-      data: { from: x.from, to: x.to, tokens: x.tokens, near, share, hash: x.hash, from_creator: fromCreator || undefined } });
+      data: { from: x.from, to: x.to, tokens: x.tokens, near, share, hash: x.hash, event_ts: x.ts, from_creator: fromCreator || undefined } });
   }
   return out;
 }
 
-/** Watched tokens: re-read their trades every few minutes (a few per pass), then raise tokenSignals on the last 6 hours (each event once). */
-async function watchedTokens(watched, limit = 4) {
+/** Watched tokens: re-read their trades every few minutes (a few per pass), then raise signals for the events of the last maxAgeMinutes (each once). */
+async function watchedTokens(watched, limit = 8) {
   if (!watched.token.size) return;
   const now = Date.now(), A = config.alerts;
   const toks = await col('tokens').find({ _id: { $in: [...watched.token] } }, { projection: { symbol: 1, creator: 1, status: 1, ledger: 1 } }).toArray();
@@ -173,10 +182,10 @@ async function watchedTokens(watched, limit = 4) {
   for (const t of due) await followToken(await col('tokens').findOne({ _id: t._id })).catch((e) => warn(`watched token ${t._id}: ${e.message}`));
   for (const t of toks) {
     const trades = await col('trades').find({ token: t._id, ts: { $gt: now - 6 * HOUR } }, { projection: { trader: 1, buy: 1, near: 1, tokens: 1, ts: 1, hash: 1 } }).sort({ ts: 1 }).toArray();
-    for (const s of tokenSignals(t, trades, { bigSellNear: A.bigSellNear, priceDrop: A.priceDrop, now }))
+    for (const s of tokenSignals(t, trades, { bigSellNear: A.bigSellNear, priceDrop: A.priceDrop, since: freshFrom(now) }))
       await raise(s.key, { type: s.type, severity: s.severity, title: s.title, text: s.text, data: s.data, url: tokUrl(t._id),
         related: { tokens: [t._id], creators: [t.creator], wallets: s.data.trader ? [s.data.trader] : [] } });
-    const moves = await col('transfers').find({ token: t._id, ts: { $gt: now - 6 * HOUR } }, { projection: { from: 1, to: 1, tokens: 1, ts: 1, hash: 1 } }).sort({ ts: 1 }).toArray();
+    const moves = await col('transfers').find({ token: t._id, ts: { $gt: freshFrom(now) } }, { projection: { from: 1, to: 1, tokens: 1, ts: 1, hash: 1 } }).sort({ ts: 1 }).toArray();
     if (!moves.length) continue;
     const [supply, last] = await Promise.all([tokenSupply(t._id), lastPrice(t._id)]);
     for (const s of transferSignals(t, moves, { price: last?.price ?? null, supply, minNear: A.bigTransferNear, minShare: A.bigTransferShare }))
@@ -187,14 +196,15 @@ async function watchedTokens(watched, limit = 4) {
 
 /** NFT collections with new sales: the team (or wallets it funded) selling, suspected wash trades rising. */
 async function nftSignals(since, limit = 5) {
-  const active = await col('nft_events').aggregate([{ $match: { kind: 'sale', ts: { $gt: since - 10 * MIN } } }, { $group: { _id: '$collection', n: { $sum: 1 } } }, { $sort: { n: -1 } }, { $limit: limit }]).toArray();
+  const from = Math.max(since - 10 * MIN, freshFrom());
+  const active = await col('nft_events').aggregate([{ $match: { kind: 'sale', ts: { $gt: from } } }, { $group: { _id: '$collection', n: { $sum: 1 } } }, { $sort: { n: -1 } }, { $limit: limit }]).toArray();
   for (const { _id: id } of active) {
     const a = await getNftAnalysis(id, { refresh: true }).catch(() => null); if (!a) continue;
     const name = a.info.name || id, url = `/nfts/${encodeURIComponent(id)}`;
     const team = new Set([...a.team.accounts, ...a.team.minters.map((m) => m.wallet)]);
-    const sales = await col('nft_events').find({ collection: id, kind: 'sale', ts: { $gt: since - 10 * MIN } }, { projection: { from: 1, to: 1, price_near: 1, token_ids: 1, hash: 1 } }).toArray();
+    const sales = await col('nft_events').find({ collection: id, kind: 'sale', ts: { $gt: from } }, { projection: { from: 1, to: 1, price_near: 1, token_ids: 1, hash: 1, ts: 1 } }).toArray();
     for (const s of sales.filter((x) => team.has(x.from))) await raise(`nft_team_sell|${s.hash}|${s.from}`, { type: 'nft_team_sell', severity: 'medium', title: `${name}: the team sold`, url,
-      related: { collections: [id], wallets: [s.from] }, text: `${s.from} (team or team-funded) sold #${s.token_ids?.[0] ?? '?'} for ${(s.price_near ?? 0).toFixed(2)} NEAR.`, data: { hash: s.hash, price_near: s.price_near } });
+      related: { collections: [id], wallets: [s.from] }, text: `${s.from} (team or team-funded) sold #${s.token_ids?.[0] ?? '?'} for ${(s.price_near ?? 0).toFixed(2)} NEAR.`, data: { hash: s.hash, price_near: s.price_near, event_ts: s.ts } });
     const c = await col('nft_collections').findOne({ _id: id }, { projection: { alert_wash: 1 } });
     if (a.market.wash.sales > (c?.alert_wash ?? 0)) {
       if ((c?.alert_wash ?? 0) > 0 || a.market.wash.sales >= 2) await raise(`nft_wash|${id}|${a.market.wash.sales}`, { type: 'nft_wash', severity: a.market.wash.share >= 0.2 ? 'high' : 'medium', title: `${name}: ${a.market.wash.sales} suspected wash trades`, url,

@@ -73,7 +73,8 @@ export const config = {
     webhookUrl: process.env.ALERTS_WEBHOOK_URL || '',                // global webhook for the same alerts
     publicSeverity: ['high', 'medium', 'info'].includes(process.env.ALERTS_PUBLIC_SEVERITY) ? process.env.ALERTS_PUBLIC_SEVERITY : 'high',
     // watched tokens: trades re-read this often, and what counts as a large sell / a fast drop
-    watchSyncMinutes: num(process.env.ALERTS_WATCH_SYNC_MINUTES, 10),
+    watchSyncMinutes: num(process.env.ALERTS_WATCH_SYNC_MINUTES, 3),  // short enough that an event is read well inside maxAgeMinutes
+    maxAgeMinutes: num(process.env.ALERTS_MAX_AGE_MINUTES, 10),        // activity alerts only for on-chain events this recent; older ones are never announced
     bigSellNear: num(process.env.ALERTS_BIG_SELL_NEAR, 25),
     priceDrop: num(process.env.ALERTS_PRICE_DROP, 0.3),
     bigTransferNear: num(process.env.ALERTS_BIG_TRANSFER_NEAR, 250),      // a wallet-to-wallet move of a watched token worth this much ...

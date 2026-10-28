@@ -616,6 +616,18 @@ test('alerts: a NearBlocks link for the transaction an alert is about, in Telegr
   assert.equal(txUrl({ data: {} }), null, 'alerts about a state have no transaction');
   assert.equal(txUrl({ data: { hash: 'javascript:alert(1)' } }), null, 'only a real tx hash becomes a link');
 });
+test('alerts: only events of the last minutes are announced; an old event is never sent', async () => {
+  const { tokenSignals, transferSignals } = await import('../src/alerts/detect.js');
+  const { isStale, alertMessage } = await import('../src/alerts/deliver.js');
+  const M = 60e3, now = 100 * 3600e3, since = now - 10 * M, t = { _id: 'x.near', symbol: 'X', creator: 'dev.near' };
+  const sell = (ago, o) => ({ _id: `s${ago}|0`, ts: now - ago * M, buy: false, near: 40, tokens: 40, trader: 'a.near', hash: 'h', ...o });
+  assert.deepEqual(tokenSignals(t, [sell(180), sell(5)], { since }).map((x) => x.data.event_ts), [now - 5 * M], 'a sell from 3 hours ago is not news');
+  assert.equal(transferSignals(t, [{ _id: 'm|t0', ts: now - 120 * M, from: 'a.near', to: 'b.near', tokens: 5e5 }], { supply: 1e6, since }).length, 0);
+  assert.equal(isStale({ ts: now, data: { event_ts: now - 30 * M } }, now, 10), true, 'raised now, but about an event 30 minutes old');
+  assert.equal(isStale({ ts: now - 2 * M, data: { event_ts: now - 4 * M } }, now, 10), false);
+  assert.equal(isStale({ ts: now - 3 * 3600e3 }, now, 10), true, 'a state alert waiting 3 hours in a backlog');
+  assert.match(alertMessage({ severity: 'medium', title: 'T', text: 'x', data: { event_ts: Date.UTC(2026, 9, 28, 6, 41) } }), /🕒 06:41 UTC/);
+});
 test('alerts: an old watched token only alerts when a rug flag turns on, not for its long-standing state', async () => {
   const { flagChanges } = await import('../src/alerts/detect.js');
   assert.deepEqual(flagChanges(null, { rugged: true, collapsed: true }), [], 'first reading is the baseline');
