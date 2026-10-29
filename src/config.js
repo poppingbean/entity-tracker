@@ -68,7 +68,7 @@ export const config = {
     enabled: process.env.ALERTS_ENABLED !== 'false',
     everyMs: num(process.env.ALERTS_EVERY_SECONDS, 60) * 1000,
     telegramToken: process.env.TELEGRAM_BOT_TOKEN || '',
-    telegramBot: (process.env.TELEGRAM_BOT_NAME || '').replace(/^@/, ''),     // the bot's @name, shown on the Alerts page
+    telegramBot: (process.env.TELEGRAM_BOT_NAME || 'safenear_bot').replace(/^@/, ''), // the bot's @name, shown on the Alerts page
     telegramChannel: process.env.TELEGRAM_CHANNEL_ID || '',          // public channel / chat for alerts at publicSeverity and above
     webhookUrl: process.env.ALERTS_WEBHOOK_URL || '',                // global webhook for the same alerts
     publicSeverity: ['high', 'medium', 'info'].includes(process.env.ALERTS_PUBLIC_SEVERITY) ? process.env.ALERTS_PUBLIC_SEVERITY : 'high',

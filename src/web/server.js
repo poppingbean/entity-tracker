@@ -583,7 +583,7 @@ const routes = {
     if (kind && id && KINDS.includes(kind)) f[`related.${kind === 'group' ? 'groups' : kind + 's'}`] = id;
     const offset = Math.max(0, Number(u.searchParams.get('offset')) || 0);
     const [total, rows] = await Promise.all([col('alerts').countDocuments(f), col('alerts').find(f).sort({ ts: -1 }).skip(offset).limit(limit).toArray()]);
-    return { total, types: Object.fromEntries(Object.entries(TYPES).map(([k, v]) => [k, v.label])), telegram_bot: config.alerts.telegramBot || null, rows: rows.map(alertPayload) };
+    return { total, types: Object.fromEntries(Object.entries(TYPES).map(([k, v]) => [k, v.label])), telegram_bot: config.alerts.telegramBot || null, telegram_channel: /^@\w+$/.test(config.alerts.telegramChannel) ? config.alerts.telegramChannel.slice(1) : null, rows: rows.map(alertPayload) };
   },
   '/api/watchlist': async (u) => {
     const key = u.searchParams.get('key');

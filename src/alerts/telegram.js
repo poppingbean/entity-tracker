@@ -10,7 +10,7 @@ import { getNftAnalysis } from '../nft/analysis.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
 const HELP = `<b>Safe Near alerts</b>
-/watch &lt;token | wallet | group | creator | NFT collection&gt; – get alerts about it here
+/watch &lt;token symbol or contract | wallet | group | creator | NFT collection&gt; – get alerts about it here (e.g. /watch THREE)
 /unwatch &lt;id&gt; – stop
 /list – what this chat watches
 /alerts – the latest alerts for this chat's watchlist
