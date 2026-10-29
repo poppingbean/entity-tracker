@@ -64,6 +64,13 @@ export const config = {
   },
 
   // alerts: detectors run beside the worker loop; delivery to Telegram (public channel + each subscriber's chat), webhooks, dashboard, API
+  // transaction firewall (POST /api/v1/tx/check): open to any wallet / dApp, cross-origin
+  firewall: {
+    maxBodyBytes: num(process.env.FIREWALL_MAX_BODY_BYTES, 2_000_000),  // a DeployContract carries the code
+    perIp10Min: num(process.env.FIREWALL_PER_IP_10MIN, 300),              // checks per client IP per 10 minutes without an API key
+    apiKeys: (process.env.FIREWALL_API_KEYS || '').split(',').map((s) => s.trim()).filter(Boolean), // x-api-key values with no per-IP limit
+    explainTimeoutMs: num(process.env.FIREWALL_EXPLAIN_TIMEOUT_MS, 15000),
+  },
   alerts: {
     enabled: process.env.ALERTS_ENABLED !== 'false',
     everyMs: num(process.env.ALERTS_EVERY_SECONDS, 60) * 1000,

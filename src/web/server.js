@@ -27,12 +27,13 @@ import { newKey, validKey, resolveTarget, findWatched, setWatch, getWatchlist, a
 import { alertPayload, checkWebhookUrl } from '../alerts/deliver.js';
 import { assessWithAi, getRun } from '../analysis/ai.js';
 import { addFeedback, FEEDBACK_KINDS } from '../accuracy/feedback.js';
+import { checkRequest, accountReputation, FIREWALL_VERSION } from '../firewall/service.js';
 
 const page = fs.readFileSync(new URL('./index.html', import.meta.url), 'utf8');
 // Google Search Console ownership file for app.safe-near.org, served as is at /<name>.html (before the password check, so Google can read it).
 const SITE_VERIFY = { '/google65675d2fcb9ab898.html': fs.readFileSync(new URL('./google65675d2fcb9ab898.html', import.meta.url), 'utf8') };
 // pages of the single-page UI; each is served the same HTML and the browser routes with the History API (no # in URLs)
-const UI_VIEWS = new Set(['accuracy', 'alerts', 'nfts', 'taggroups', 'analysis', 'creators', 'explore', 'audit', 'monitor', 'sim', 'scans', 'overview', 'signals', 'groups', 'entities', 'wallets', 'tokens', 'logs', 'config']);
+const UI_VIEWS = new Set(['firewall', 'accuracy', 'alerts', 'nfts', 'taggroups', 'analysis', 'creators', 'explore', 'audit', 'monitor', 'sim', 'scans', 'overview', 'signals', 'groups', 'entities', 'wallets', 'tokens', 'logs', 'config']);
 const HIDDEN_PUBLIC = new Set(['/api/logs', '/api/config']);
 const auditHits = new Map(); // ip -> [timestamps]
 const analysisHits = new Map(), aiHits = new Map();
@@ -100,6 +101,34 @@ function startNftSync(id) {
   return job;
 }
 /** At most `max` calls per IP in 10 minutes. */
+// ------------------------------------------------------------ transaction firewall: a public, cross-origin API for wallets and dApps
+const fwHits = new Map();
+/** The caller's IP: behind a proxy (Railway) every request comes from the proxy, the client is the first x-forwarded-for entry. */
+const clientIp = (req) => String(req.headers['x-forwarded-for'] || '').split(',')[0].trim() || req.socket.remoteAddress || 'ip';
+const CORS = { 'access-control-allow-origin': '*', 'access-control-allow-methods': 'GET, POST, OPTIONS', 'access-control-allow-headers': 'content-type, x-api-key', 'access-control-max-age': '86400' };
+const FW_DOC = { name: 'Safe Near transaction firewall', version: FIREWALL_VERSION, docs: 'https://github.com/poppingbean/entity-tracker/blob/main/docs/tx-firewall.md',
+  endpoints: { 'POST /api/v1/tx/check': 'check transactions before they are signed', 'GET /api/v1/account?id=<account>': 'reputation of one account' } };
+async function firewallApi(req, res, u) {
+  const send = (code, body) => res.writeHead(code, { 'content-type': 'application/json', 'cache-control': 'no-store', ...CORS }).end(JSON.stringify(body));
+  if (req.method === 'OPTIONS') { res.writeHead(204, CORS).end(); return; }
+  const keyed = config.firewall.apiKeys.includes(String(req.headers['x-api-key'] || ''));
+  if (!keyed && limited(fwHits, clientIp(req), config.firewall.perIp10Min)) { send(429, { error: `rate limit: ${config.firewall.perIp10Min} requests per 10 minutes per IP (ask for an API key for more)` }); return; }
+  if (u.pathname === '/api/v1' || u.pathname === '/api/v1/') { send(200, FW_DOC); return; }
+  if (u.pathname === '/api/v1/account' && req.method === 'GET') {
+    const id = String(u.searchParams.get('id') || '').trim().toLowerCase();
+    if (!validNearAddress(id)) { send(400, { error: 'id must be a NEAR account' }); return; }
+    send(200, await accountReputation(id)); return;
+  }
+  if (u.pathname === '/api/v1/tx/check' && req.method === 'POST') {
+    const chunks = []; let size = 0;
+    for await (const d of req) { size += d.length; if (size > config.firewall.maxBodyBytes) { send(413, { error: `body over ${config.firewall.maxBodyBytes} bytes` }); return; } chunks.push(d); }
+    let body; try { body = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}'); } catch { send(400, { error: 'invalid JSON' }); return; }
+    try { send(200, await checkRequest(body)); } catch (e) { send(400, { error: e.message }); }
+    return;
+  }
+  send(404, { error: 'not found', ...FW_DOC });
+}
+
 function limited(map, ip, max) {
   const now = Date.now(), list = (map.get(ip) || []).filter((t) => now - t < 10 * 60e3);
   if (list.length >= max) { map.set(ip, list); return true; }
@@ -698,6 +727,7 @@ export function startWeb() {
     try {
       const verify = req.method === 'GET' && SITE_VERIFY[req.url.split('?')[0]];
       if (verify) { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end(verify); return; }
+      if (req.url.startsWith('/api/v1')) { await firewallApi(req, res, new URL(req.url, 'http://localhost')); return; } // public: no password, any origin
       if (exposed() && config.web.password && !authorized(req)) { res.writeHead(401, { 'www-authenticate': 'Basic realm="entity tracker"' }).end('authentication required'); return; }
       const u = new URL(req.url, 'http://localhost');
       if (req.method === 'POST' && u.pathname === '/api/sim/sell') {
