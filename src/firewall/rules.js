@@ -25,8 +25,9 @@ const fold = (s) => s.replace(/rn/g, 'm').replace(/0/g, 'o').replace(/1/g, 'l').
 /** The trusted account `id` imitates, if any: a near-identical name, or a trusted name used as a label inside another account. */
 export function lookalikeOf(id, trusted = TRUSTED) {
   if (!id || trusted.has(id) || IMPLICIT.test(id)) return null;
+  for (const t of trusted) if (t.includes('.') && id.endsWith('.' + t)) return null; // only the owner of a trusted account can create its sub-accounts
   for (const t of trusted) {
-    if (t.length < 6 || id.endsWith('.' + t)) continue; // too short to judge / a real sub-account of it
+    if (t.length < 6) continue; // too short to judge
     if (lev(id, t) <= 2 || fold(id) === fold(t)) return t;
     if (id.includes(t.replace(/\.near$/, '')) && t.includes('.') && t.replace(/\.near$/, '').length >= 6) return t; // "wrap.near-claim.near", "v2.ref-finance.near.gift.near"
   }

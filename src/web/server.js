@@ -28,8 +28,9 @@ import { alertPayload, checkWebhookUrl } from '../alerts/deliver.js';
 import { assessWithAi, getRun } from '../analysis/ai.js';
 import { addFeedback, FEEDBACK_KINDS } from '../accuracy/feedback.js';
 import { checkRequest, accountReputation, FIREWALL_VERSION } from '../firewall/service.js';
-import { autoAudit, AUTO_AUDIT_V } from '../audit/auto.js';
-import { enqueueAudit } from '../audit/watcher.js';
+import { AUTO_AUDIT_V } from '../audit/auto.js';
+import { contractReport, startAutoAudit, auditJob } from '../audit/report.js';
+import { inspect } from '../firewall/inspect.js';
 
 const page = fs.readFileSync(new URL('./index.html', import.meta.url), 'utf8');
 // Google Search Console ownership file for app.safe-near.org, served as is at /<name>.html (before the password check, so Google can read it).
@@ -41,7 +42,6 @@ const auditHits = new Map(); // ip -> [timestamps]
 const analysisHits = new Map(), aiHits = new Map();
 const aiRunning = new Map(); // token -> { started, error }
 const watchHits = new Map(), keyHits = new Map(), feedbackHits = new Map();
-const autoJobs = new Map(); // account -> { running, started, error }: automated audits started from the page
 /** Watchlist changes over POST (JSON body): create a key, add / remove an item, set an API key's webhook. */
 const POSTS = {
   '/api/watch/key': async (b, ip) => {
@@ -110,28 +110,19 @@ const fwHits = new Map();
 const clientIp = (req) => String(req.headers['x-forwarded-for'] || '').split(',')[0].trim() || req.socket.remoteAddress || 'ip';
 const CORS = { 'access-control-allow-origin': '*', 'access-control-allow-methods': 'GET, POST, OPTIONS', 'access-control-allow-headers': 'content-type, x-api-key', 'access-control-max-age': '86400' };
 const FW_DOC = { name: 'Safe Near transaction firewall', version: FIREWALL_VERSION, docs: 'https://github.com/poppingbean/entity-tracker/blob/main/docs/tx-firewall.md',
-  endpoints: { 'POST /api/v1/tx/check': 'check transactions before they are signed', 'GET /api/v1/account?id=<account>': 'reputation of one account', 'GET /api/v1/contract?id=<account>': 'the automated audit of a contract' } };
-/** The automated audit of one contract, as the public API gives it; queued when missing or older than a day. */
-async function contractReport(id) {
-  const doc = await col('audits').findOne({ _id: id }, { projection: { auto: 1, fetchedAt: 1 } });
-  const a = doc?.auto;
-  const stale = !a || a.v !== AUTO_AUDIT_V || Date.now() - a.ts > 86400e3;
-  if (stale) await enqueueAudit(id, { reason: 'api', priority: 3, force: false });
-  if (!a) return { account: id, status: 'queued', note: 'no audit yet: one has been queued, ask again in a minute or two' };
-  if (a.no_code) return { account: id, status: 'no_contract' };
-  return { account: id, status: stale ? 'refreshing' : 'ok', audited_ts: a.ts, type: { role: a.role, label: a.label, standards: a.standards, confidence: a.confidence, source: a.role_source },
-    level: a.level, control: { summary: a.control?.summary, full_access_keys: a.control?.full_keys, controllers: (a.control?.controllers || []).map((c) => ({ account: c.account, kind: c.kind, via: c.via, flags: c.flags })) },
-    powers: (a.powers || []).map((p) => ({ power: p.power, label: p.label, methods: p.methods, severity: p.severity, normal_for_type: !!p.normal_for_role })),
-    findings: (a.findings || []).filter((f) => f.severity !== 'info').map((f) => ({ severity: f.severity, key: f.key, title: f.title, detail: f.detail, ai: !!f.ai })),
-    family: { code: a.code_key, accounts: a.family_n }, source: a.source ? { link: a.source.link, version: a.source.version, verified_methods: a.source_review ? !a.source_review.missing?.length && !a.source_review.error : null } : null,
-    deploy: a.deploy ? { deployer: a.deploy.deployer, signer: a.deploy.signer } : null, summary: a.summary ? { headline: a.summary.headline, summary: a.summary.summary, risks_for_users: a.summary.risks_for_users } : null, change: a.change ? { added_powers: a.change.added_powers, removed_powers: a.change.removed_powers, explanation: a.change.ai?.explanation || null } : null };
-}
+  endpoints: { 'POST /api/v1/tx/check': 'check transactions before they are signed', 'GET /api/v1/account?id=<account>': 'reputation of one account', 'GET /api/v1/contract?id=<account>': 'the automated audit of a contract', 'GET /api/v1/inspect?q=<wallet | contract | tx hash | link>': 'is it safe? one answer for whatever is pasted' } };
 async function firewallApi(req, res, u) {
   const send = (code, body) => res.writeHead(code, { 'content-type': 'application/json', 'cache-control': 'no-store', ...CORS }).end(JSON.stringify(body));
   if (req.method === 'OPTIONS') { res.writeHead(204, CORS).end(); return; }
   const keyed = config.firewall.apiKeys.includes(String(req.headers['x-api-key'] || ''));
   if (!keyed && limited(fwHits, clientIp(req), config.firewall.perIp10Min)) { send(429, { error: `rate limit: ${config.firewall.perIp10Min} requests per 10 minutes per IP (ask for an API key for more)` }); return; }
   if (u.pathname === '/api/v1' || u.pathname === '/api/v1/') { send(200, FW_DOC); return; }
+  if (u.pathname === '/api/v1/inspect' && req.method === 'GET') {
+    const q = String(u.searchParams.get('q') || '').trim().slice(0, 300);
+    if (!q) { send(400, { error: 'q: a wallet, a contract or a transaction hash' }); return; }
+    try { send(200, await inspect(q)); } catch (e) { send(400, { error: e.message }); }
+    return;
+  }
   if (u.pathname === '/api/v1/contract' && req.method === 'GET') {
     const id = String(u.searchParams.get('id') || '').trim().toLowerCase();
     if (!validNearAddress(id)) { send(400, { error: 'id must be a NEAR account' }); return; }
@@ -460,15 +451,13 @@ const routes = {
     const id = (u.searchParams.get('address') || '').trim().toLowerCase();
     if (!validNearAddress(id)) return { error: 'invalid NEAR account id' };
     const doc = await col('audits').findOne({ _id: id }, { projection: { auto: 1 } });
-    const job = autoJobs.get(id);
+    const job = auditJob(id);
     const want = u.searchParams.get('run') === '1' && (!doc?.auto || doc.auto.v !== AUTO_AUDIT_V || u.searchParams.get('force') === '1');
     if (want && !job?.running) {
       if (!auditAllowed(req.socket.remoteAddress || 'ip')) return { error: 'too many audits, try again in a few minutes' };
-      const j = { running: true, started: Date.now(), error: null };
-      autoJobs.set(id, j);
-      autoAudit(id, { force: u.searchParams.get('force') === '1' }).catch((e) => { j.error = e.message; }).finally(() => { j.running = false; });
+      startAutoAudit(id, { force: u.searchParams.get('force') === '1' });
     }
-    const cur = autoJobs.get(id);
+    const cur = auditJob(id);
     return { id, auto: doc?.auto || null, current: doc?.auto?.v === AUTO_AUDIT_V, job: cur ? { running: cur.running, started: cur.started, error: cur.error } : null };
   },
   /** Contracts the deploy watcher found, newest first, with their automated audit. */
