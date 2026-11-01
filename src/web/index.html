@@ -342,7 +342,7 @@ const mixCell = (m, rug) => { const tot = mixTotal(m); if (!tot) return '<span c
 const wavg = (pairs) => { const w = pairs.reduce((s, [, x]) => s + (x || 0), 0); return w ? pairs.reduce((s, [r, x]) => s + r * (x || 0), 0) / w : null; };
 
 // ---- list state, filters, pager
-const ST = { scans: { kind: '', pass: '', bought: '', q: '', offset: 0 }, entities: { type: '', q: '', sort: 'funded', offset: 0 }, groups: { tag: '', q: '', sort: 'size', offset: 0 }, taggroups: { only: '', sort: 'pnl', offset: 0 }, nfts: { tab: '', q: '', sort: '', offset: 0 }, alerts: { tab: '', group: '', offset: 0 },
+const ST = { scans: { kind: '', pass: '', bought: '', q: '', offset: 0 }, entities: { type: '', q: '', sort: 'funded', offset: 0 }, groups: { tag: '', q: '', sort: 'size', offset: 0 }, taggroups: { only: '', sort: 'pnl', offset: 0 }, nfts: { tab: '', q: '', sort: '', offset: 0 }, alerts: { tab: '', group: '', offset: 0 }, newContracts: { role: '', level: '', offset: 0 },
   wallets: { q: '', tag: '', sort: 'tokens', offset: 0 }, creators: { q: '', filter: '', sort: '', offset: 0 }, tokens: { q: '', tab: '', status: '', launchpad: '', offset: 0 }, signals: { hours: 72 }, logs: { level: '' } };
 const setSt = (view, field, value, reset = true) => { ST[view][field] = value; if (reset && 'offset' in ST[view]) ST[view].offset = 0; render(); };
 const sel = (view, field, opts) => `<select onchange="setSt('${view}','${field}',this.value)">${opts.map(([v, l]) => `<option value="${esc(v)}" ${String(ST[view][field]) === String(v) ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select>`;
@@ -877,7 +877,7 @@ function auditBody(a) {
   if (a.error) return `<div class="card err">${esc(a.error)}</div>`;
   if (a.notFound) return `<div class="card warn">${esc(a.address)}: there is no contract deployed on this account (a plain wallet), nothing to audit.</div>`;
   const sum = a.summary || {};
-  let h = `<div class="card"><div class="bar"><h2 style="margin:0">${esc(a.address)}${a.tokenSymbol ? ' · ' + esc(a.tokenSymbol) : ''} <span class="chip">${esc(a.kind)}</span></h2><span class="muted">audited ${when(a.fetchedAt)}${a.cached ? ' (cached ≤ 1 h)' : ''}</span>${a.kind === 'token' ? ilink(P.tok(a.address), 'Token page →') : ''}<span class="spacer"></span><button onclick="runAudit('${esc(a.address)}',true)">Re-run</button></div>
+  let h = `<div class="card"><div class="bar"><h2 style="margin:0">Keys, code and token checks: ${esc(a.address)}${a.tokenSymbol ? ' · ' + esc(a.tokenSymbol) : ''} <span class="chip">${esc(a.kind)}</span></h2><span class="muted">audited ${when(a.fetchedAt)}${a.cached ? ' (cached ≤ 1 h)' : ''}</span>${a.kind === 'token' ? ilink(P.tok(a.address), 'Token page →') : ''}<span class="spacer"></span><button onclick="runAudit('${esc(a.address)}',true)">Re-run</button></div>
     <div class="tiles">${gauge('Risk score (higher = riskier)', a.risk.score, a.risk.level, 'risk')}${gauge('Trust score', a.trust.score, a.trust.level, 'trust')}
     ${tile('Full-access keys', sum.full_access_keys ?? '–')}${tile('Confirmed malicious findings', (sum.confirmed_malicious || []).length, null, (sum.confirmed_malicious || []).length ? 'r' : 'g')}${tile('Recent sells', sum.sells ? sum.sells.ok + ' ok / ' + sum.sells.failed + ' failed' : '–')}</div>`;
   if ((sum.confirmed_malicious || []).length) h += `<p class="r"><b>Confirmed:</b> ${sum.confirmed_malicious.map((c) => esc(c.key) + (c.detail ? ' (' + esc(c.detail) + ')' : '')).join(' · ')}</p>`;
@@ -895,17 +895,19 @@ function auditBody(a) {
 async function runAudit(address, force) {
   address = (address || '').trim();
   if (!address || !$('auditResult')) return;
-  $('auditResult').innerHTML = '<div class="card muted">Auditing ' + esc(address) + ' … reading keys, code and recent transactions (10-30 s on a fresh contract)</div>';
+  $('auditResult').innerHTML = '<div id="autoResult"></div><div id="legacyResult"><div class="card muted">Reading keys, code and recent transactions …</div></div>';
   setUrl(P.audit(address));
-  const a = await get('/api/audit', { address, force: force ? '1' : '' }).catch((e) => ({ error: e.message }));
-  $('auditResult').innerHTML = auditBody(a);
   $('auditInput').value = address;
+  runAutoAudit(address, force);
+  const a = await get('/api/audit', { address, force: force ? '1' : '' }).catch((e) => ({ error: e.message }));
+  if ($('legacyResult')) $('legacyResult').innerHTML = auditBody(a);
 }
 views.audit = async () => {
   const recent = await get('/api/audits', { limit: 25 });
   return `<div class="card"><div class="bar"><input id="auditInput" type="search" style="flex:1;max-width:520px" placeholder="token or contract account, e.g. doge.neardogecoin.near" onkeydown="if(event.key==='Enter')runAudit(this.value)"><button class="primary" onclick="runAudit($('auditInput').value)">Audit</button></div>
-      <p class="muted" style="margin:0">Checks access keys (a full-access key can redeploy or drain the contract), WASM exports (fake NEP-145 storage methods are the classic honeypot backdoor, privileged methods), the launchpad buy/sell tax and recent sell behaviour. Tokens are also audited automatically when the scanner checks them, and a confirmed finding fails the <code>contract_audit_ok</code> gate.</p></div>
+      <p class="muted" style="margin:0">Any kind of contract: tokens, NFT collections, pools, liquid staking, lending, DAOs, bridges, smart wallets. It works out what the contract is, which powers its code gives someone over users (and what each method can really do in the code), who holds them (a DAO, a multisig, a single wallet, someone flagged), the checks for its type, recent behaviour and the source it claims; then the AI reviews what the rules can't place and writes a summary. Every contract deployed on NEAR is audited automatically (below).</p></div>
     <div id="auditResult"></div>
+    ${await newContractsCard()}
     <div class="card"><h2>Recent audits</h2><table><tr><th>When</th><th>Account</th><th>Kind</th><th>Risk</th><th>Trust</th></tr>${recent.rows.map((r) => `<tr data-id="${esc(r.id)}" data-href="" onclick="runAudit(this.dataset.id)"><td>${when(r.fetchedAt)}</td><td>${r.kind === 'token' ? tokCell(r.id, r.tokenSymbol, null, 34) : acct(r.id, 34)}</td><td>${esc(r.kind)}</td><td>${r.notFound ? '<span class="muted">no contract</span>' : `<span class="v ${LV[r.risk.level] || 'unknown'}">${r.risk.score} · ${esc(r.risk.level)}</span>`}</td><td>${r.notFound ? '–' : `<span class="v ${r.trust.level === 'high' ? 'good' : r.trust.level === 'unrated' ? 'unknown' : 'neutral'}">${r.trust.score} · ${esc(r.trust.level)}</span>`}</td></tr>`).join('') || empty(5, 'none yet')}</table></div>`;
 };
 
@@ -1224,6 +1226,7 @@ async function nftPage(id) {
         <button onclick="this.disabled=true;$('main').classList.add('loading');get('/api/nft',{id:${esc(JSON.stringify(id))},refresh:'1'}).then(()=>render())">Rebuild</button></div></div></div></div>`;
   if (J && !J.done) h += `<div class="banner"><span class="v neutral">reading</span><span class="muted">Reading the collection's history: ${J.passes} passes, ${J.events} NFT events so far. Rebuild in a moment for the full picture.</span></div>`;
   h += `<div class="card ${a.flags.some((f) => f.level === 'high') ? 'err' : a.flags.some((f) => f.level === 'medium') ? 'warn' : ''}"><h2>Risk notes</h2>${a.flags.length ? `<ul class="flags">${a.flags.map((f) => `<li><span class="v ${FLAGCLS[f.level]}">${f.level}</span> ${esc(f.text)}</li>`).join('')}</ul>` : '<p class="muted">Nothing flagged.</p>'}</div>`;
+  h += `<div id="nftSafety"></div>`; setTimeout(() => { if ($('nftSafety')) contractSafetyCard(id, $('nftSafety')); }, 0); // the automated contract audit, in short
   h += `<div id="anaAi">${anaAiBody(a)}</div>`;
   // mint
   h += `<div class="card"><h2>Mint</h2><div class="tiles">${tile('Minted', n(M.minted, 0), I.max_supply ? `of ${n(I.max_supply, 0)} max` : I.supply != null ? `supply now ${n(I.supply, 0)}` : '')}${tile('Raised', n(M.raised_near, 1) + ' N', M.free_tokens ? `${n(M.free_tokens, 0)} minted free` : '')}
@@ -1512,6 +1515,66 @@ views.firewall = async () => `<div class="grid2 main-l"><div><div class="card"><
     <li><b>Mistakes:</b> sending almost everything you hold, typos in the receiver</li></ul>
     <p class="muted small" style="margin:8px 0 0">The verdict comes from fixed rules; the AI only explains it and can never make a transaction look safer.</p></div></div></div>`;
 
+// ================================================================== AUTOMATED CONTRACT AUDIT (any kind of contract; new deploys found automatically)
+const LVL = { critical: 'bad', high: 'bad', medium: 'neutral', low: 'good', info: 'unrated' };
+const ROLE_OPTS = [['', 'every type'], ['token', 'fungible token'], ['nft', 'NFT collection'], ['amm', 'AMM / pool'], ['liquid_staking', 'liquid staking'], ['staking_pool', 'validator pool'], ['lending', 'lending'], ['dao', 'DAO'], ['multisig', 'multisig'], ['bridge', 'bridge'], ['router', 'intents / router'], ['factory', 'launchpad / factory'], ['account', 'smart wallet'], ['unknown', 'unknown']];
+const lvl = (l) => (l ? `<span class="v ${LVL[l] || 'unknown'}">${esc(l)}</span>` : '<span class="muted">not audited</span>');
+/** The automated audit of one contract (type, control, powers, findings, source, change, AI summary). */
+function autoBody(a, job) {
+  if (!a) return job?.running ? `<div class="card muted">Running the automated audit: reading the code, its type and powers, who controls it, recent behaviour, the claimed source, then the AI reviews (20-90 s) … started ${since(job.started)}</div>`
+    : `<div class="card muted">${job?.error ? `<span class="r">The automated audit failed: ${esc(job.error)}</span>` : 'No automated audit yet.'}</div>`;
+  if (a.no_code) return '<div class="card muted">No contract code on this account.</div>';
+  const S = a.summary, C = a.control || {};
+  let h = `<div class="card"><div class="bar"><h2 style="margin:0">Automated audit ${lvl(a.level)}</h2><span class="chip">${esc(a.label)}</span>${(a.standards || []).map((s) => `<span class="chip">${esc(s.toUpperCase())}</span>`).join('')}
+      <span class="muted small">${a.role_source === 'ai' ? 'type from the AI · ' : ''}${esc(a.confidence || '')} confidence · audited ${since(a.ts)} · code shared by ${a.family_n} account${a.family_n > 1 ? 's' : ''}</span>
+      <span class="spacer"></span>${job?.running ? '<span class="muted small">re-running …</span>' : `<button onclick="runAutoAudit('${esc(a.code_key ? '' : '')}${esc($('auditInput')?.value || '')}',true)">Re-run</button>`}</div>
+    ${S ? `<p><b>${esc(S.headline)}</b></p><p class="small">${esc(S.summary)}</p>${S.risks_for_users?.length ? `<ul class="flags small">${S.risks_for_users.map((r) => `<li>${esc(r)}</li>`).join('')}</ul>` : ''}<p class="muted small" style="margin:0">Written by the AI from the findings below; the level comes from the rules.</p>` : ''}</div>`;
+  h += `<div class="grid2"><div class="card"><h2>Who controls it <span class="muted">${esc(C.summary || '')}</span></h2>
+    <p class="small">${C.full_keys ? `<span class="r">${C.full_keys} full-access key${C.full_keys > 1 ? 's' : ''}</span>: whoever holds it can replace the code or move what the contract holds.` : 'No full-access key on the contract.'}</p>
+    ${(C.controllers || []).length ? `<table class="small"><tr><th>Account</th><th>What it is</th><th>Role</th><th>Record</th></tr>${C.controllers.map((c) => `<tr><td class="acct">${esc(short(c.account, 34))}</td><td>${esc(c.kind)}</td><td>${esc(c.via || '')}</td><td class="wrap ${c.flags?.length ? 'r' : 'muted'}">${esc((c.flags || []).join('; ') || '–')}</td></tr>`).join('')}</table>` : '<p class="muted small">No owner or admin exposed by its views (the code may still check one).</p>'}
+    ${a.deploy ? `<p class="small muted">Deployed by ${esc(a.deploy.deployer || '?')}${a.deploy.signer && a.deploy.signer !== a.deploy.deployer ? `, signed by ${esc(a.deploy.signer)}` : ''}${a.deploy.deployer_flags?.length ? ` <span class="r">(${esc(a.deploy.deployer_flags.join('; '))})</span>` : ''}</p>` : ''}</div>
+    <div class="card"><h2>Powers over users <span class="muted">what the code lets someone do</span></h2>
+    ${(a.powers || []).length ? `<table class="small"><tr><th>Power</th><th>Methods</th><th>Severity</th></tr>${a.powers.map((p) => `<tr><td>${esc(p.label)}${p.normal_for_role ? ' <span class="muted">(normal here)</span>' : ''}${p.source === 'ai' ? ' <span class="chip">AI</span>' : ''}</td><td class="wrap"><code>${p.methods.map(esc).join(', ')}</code></td><td>${lvl(p.severity)}</td></tr>`).join('')}</table>` : '<p class="muted small">No power over users found in its methods.</p>'}</div></div>`;
+  const F = (a.findings || []).filter((f) => f.severity !== 'info');
+  h += `<div class="card"><h2>Findings <span class="muted">${F.length}</span></h2>${F.length ? `<table class="small">${F.map((f) => `<tr><td>${lvl(f.severity)}</td><td class="wrap"><b>${esc(f.title)}</b>${f.ai ? ' <span class="chip">AI</span>' : ''}<div class="muted">${esc(f.detail || '')}${f.evidence ? ` <code>${esc(f.evidence)}</code>` : ''}</div></td></tr>`).join('')}</table>` : '<p class="muted small">Nothing beyond the notes below.</p>'}
+    ${a.ai_deep?.summary ? `<p class="small"><b>AI review:</b> ${esc(a.ai_deep.summary)}</p>` : ''}
+    <p class="muted small" style="margin:0">${a.source?.link ? `Source claimed: <a href="${esc(a.source.link)}" target="_blank" rel="noopener">${esc(short(a.source.link, 70))}</a>${a.source_review ? (a.source_review.error ? ` · could not be read (${esc(a.source_review.error)})` : ` · ${a.source_review.files_read} files read, ${a.source_review.missing?.length ? `<span class="r">${a.source_review.missing.length} deployed methods missing from it</span>` : 'every deployed method found in it'}`) : ''}` : 'No published source (NEP-330).'}</p></div>`;
+  if (a.change) h += `<div class="card warn"><h2>Changed by the last redeploy</h2><p class="small">${a.change.added_powers?.length ? `New powers: <b>${a.change.added_powers.map(esc).join(', ')}</b>. ` : ''}${a.change.removed_powers?.length ? `Removed: ${a.change.removed_powers.map(esc).join(', ')}. ` : ''}${esc(a.change.ai?.explanation || '')}</p></div>`;
+  return h;
+}
+let autoTimer = null;
+async function runAutoAudit(address, force) {
+  address = (address || '').trim();
+  if (!address || !$('autoResult')) return;
+  clearTimeout(autoTimer);
+  const tick = async (first) => {
+    if (!$('autoResult') || ($('auditInput') && $('auditInput').value.trim() !== address)) return;
+    const r = await get('/api/audit-auto', { address, run: first ? '1' : '', force: first && force ? '1' : '' }).catch((e) => ({ error: e.message }));
+    if (r.error) { $('autoResult').innerHTML = `<div class="card err">${esc(r.error)}</div>`; return; }
+    $('autoResult').innerHTML = autoBody(r.job?.running && force ? null : r.auto, r.job);
+    if (r.job?.running) autoTimer = setTimeout(() => tick(false), 4000);
+  };
+  tick(true);
+}
+/** A compact safety card for other pages (NFT collections): the automated audit's level, control and top findings. */
+async function contractSafetyCard(id, el) {
+  const r = await get('/api/audit-auto', { address: id }).catch(() => null);
+  const a = r?.auto;
+  if (!a || a.no_code) { el.innerHTML = `<div class="card"><div class="bar"><h2 style="margin:0">Contract safety</h2><span class="spacer"></span><button onclick="this.disabled=true;get('/api/audit-auto',{address:'${esc(id)}',run:'1'}).then(()=>setTimeout(()=>contractSafetyCard('${esc(id)}',document.getElementById('${el.id}')),20000))">Run the contract audit</button></div><p class="muted small" style="margin:0">Not audited yet: who controls this contract, what powers its code gives them (mint, change metadata, move NFTs, upgrade), and the checks for NFTs.</p></div>`; return; }
+  const top = (a.findings || []).filter((f) => f.severity !== 'info').slice(0, 4);
+  el.innerHTML = `<div class="card"><div class="bar"><h2 style="margin:0">Contract safety ${lvl(a.level)}</h2><span class="chip">${esc(a.label)}</span><span class="muted small">${esc(a.control?.summary || '')} · audited ${since(a.ts)}</span><span class="spacer"></span>${ilink(P.audit(id), 'Full audit →')}</div>
+    ${a.summary?.headline ? `<p class="small"><b>${esc(a.summary.headline)}</b></p>` : ''}${top.length ? `<ul class="flags small">${top.map((f) => `<li>${lvl(f.severity)} ${esc(f.title)}</li>`).join('')}</ul>` : '<p class="muted small">No finding beyond the notes on the audit page.</p>'}</div>`;
+}
+async function newContractsCard() {
+  const S = ST.newContracts;
+  const j = await get('/api/contracts-new', { role: S.role, level: S.level, offset: S.offset });
+  const q = j.queue || {};
+  return `<div class="card"><div class="bar"><h2 style="margin:0">New contracts <span class="muted">every contract deployed on NEAR, audited automatically</span></h2>${sel('newContracts', 'role', ROLE_OPTS)}${sel('newContracts', 'level', [['', 'every level'], ['critical', 'critical'], ['high', 'high'], ['medium', 'medium'], ['low', 'low']])}<span class="spacer"></span><span class="muted small">queue: ${q.pending || 0} waiting · ${q.running || 0} running · ${q.done || 0} done${q.error ? ` · ${q.error} failed` : ''}</span>${pager('newContracts', j.total)}</div>
+    <table><tr><th>When</th><th>Contract</th><th>How</th><th>Type</th><th>Level</th><th>Control</th><th>Top finding</th></tr>${j.rows.map((r) => `<tr ${row(P.audit(r.account))}><td>${when(r.ts)}<br><span class="muted small">${since(r.ts)}</span></td><td class="acct">${esc(short(r.account, 34))}<div class="muted small">by ${esc(short(r.signer || r.by || '?', 26))}</div></td>
+      <td class="small">${esc(/Global/.test(r.kind) ? `shared code${r.global ? ' ' + short(typeof r.global === 'string' ? r.global : JSON.stringify(r.global), 22) : ''}` : 'own code')}</td><td>${r.audit ? esc(r.audit.label) : '<span class="muted">queued</span>'}${r.audit?.family_n > 1 ? `<div class="muted small">${r.audit.family_n} accounts share it</div>` : ''}</td><td>${lvl(r.audit?.level)}</td><td class="small">${esc(r.audit?.control?.summary || '')}</td>
+      <td class="wrap small">${esc(r.audit?.summary?.headline || (r.audit?.findings || []).find((f) => f.severity !== 'info')?.title || '')}</td></tr>`).join('') || empty(7, 'none yet: the worker follows new blocks and adds them here')}</table></div>`;
+}
+
 // ================================================================== shell + router (History API: /tokens/<id>, /groups/<id>, no #)
 const SECTIONS = [
   { label: 'Explore', views: [['explore', 'Explore']] },
@@ -1534,7 +1597,7 @@ const TITLES = {
   creators: ['Creators', 'Who launched the tokens: launches, rugged launches and the dev-rug blacklist, and which groups they belong to'],
   wallets: ['Wallets', 'Every early buyer: its group, who funded it and how it did'], entities: ['Funders & entities', 'Exchange wallets, services, funders and destinations around the early investors'],
   sim: ['Simulated wallet', 'Paper trading with real pool quotes: equity, open and closed positions'],
-  scans: ['Evaluations', 'Every gate check and AI review, with the reasons'], audit: ['Contract audit', 'Access keys, code, tax and sell behaviour of any NEAR token or contract, scored for risk and trust'],
+  scans: ['Evaluations', 'Every gate check and AI review, with the reasons'], audit: ['Contract audit', 'Any NEAR contract: what it is, the powers its code gives someone over users, who holds them, and every new contract audited automatically'],
   analysis: ['On-chain analysis', 'An investigation of any token: launch, creator, flows, who bought early and the groups behind them, who sold, who holds, risk notes'],
   logs: ['Log', 'Worker activity'], config: ['Settings', 'Read-only view of the configuration in use'],
 };

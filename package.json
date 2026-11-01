@@ -4,7 +4,9 @@
   "description": "Online tracker of early investors in NEAR launchpad tokens: groups wallets by on-chain funding and money flow, scores each group, and uses NEAR AI to judge good / bad groups. Read-only on-chain, MongoDB as the main database.",
   "type": "module",
   "private": true,
-  "engines": { "node": ">=20" },
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "start": "node src/main.js",
     "web": "node src/main.js --web-only",
@@ -16,10 +18,11 @@
     "reprofile": "node src/cli.js reprofile",
     "scan": "node src/cli.js scan",
     "sim-reset": "node src/cli.js sim-reset",
-    "test": "node --test test/logic.test.js test/firewall.test.js"
+    "test": "node --test test/logic.test.js test/firewall.test.js test/audit.test.js"
   },
   "dependencies": {
     "dotenv": "^17.2.0",
-    "mongodb": "^7.7.0"
+    "mongodb": "^7.7.0",
+    "wabt": "^1.0.39"
   }
 }

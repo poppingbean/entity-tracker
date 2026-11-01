@@ -8,6 +8,7 @@ import { builtinLabel } from '../labels.js';
 import { accountRole, KNOWN_ACTORS } from '../analysis/prompt.js';
 import { nearUsdPrice } from '../near/quotes.js';
 import { accountsIn, TRUSTED } from './rules.js';
+import { enqueueAudit } from '../audit/watcher.js';
 
 const BUDGET_MS = 2500, CACHE_MS = 60e3, MAX_ACCOUNTS = 40;
 const cache = new Map(); // key -> { ts, value }
@@ -77,6 +78,9 @@ export async function buildContext(txs) {
     const bl = T.black.get(id); if (bl) flags.push({ severity: 'high', reason: 'a token creator on the dev-rug blacklist', detail: `${id} dumped its own token${bl.symbol ? ` ${bl.symbol}` : ''} (${bl.reason || 'balance emptied'}).` });
     const rr = T.ruggers.get(id); if (rr?.rugged >= 2) flags.push({ severity: 'medium', reason: `created ${rr.rugged} tokens that rugged`, detail: `${id} launched ${rr.launches} tokens; ${rr.rugged} of them rugged.` });
     if (au?.confirmed_malicious?.length) flags.push({ severity: 'critical', reason: 'contract with malicious code', detail: au.confirmed_malicious.map((x) => x.detail || x.key).join('; ') });
+    for (const s of au?.automated?.strong_findings || []) flags.push({ severity: s.severity, reason: s.title, detail: s.detail });
+    // a contract the automated audit hasn't seen yet: queue it, so the next check has the full picture (never waited on here)
+    if (f.contract && !A[i]?.auto && !TRUSTED.has(id)) enqueueAudit(id, { reason: 'firewall', priority: 2, force: false }).catch(() => {});
     const t = T.toks.get(id);
     let token = null;
     if (t) {

@@ -13,6 +13,7 @@ import { priceSeries } from '../collect/analyze.js';
 import { tokenSupply, lastPrice } from '../collect/supply.js';
 import { INFRA } from '../collect/trades.js';
 import { builtinLabel } from '../labels.js';
+import { enqueueAudit } from '../audit/watcher.js';
 import { viewAccount, viewAccessKeyList } from '../audit/rpc.js';
 import { creatorIndex } from '../evaluate/creators.js';
 import { getNftAnalysis } from '../nft/analysis.js';
@@ -101,6 +102,7 @@ async function contractChanges(watched, limit = 25) {
       const isNft = nfts.includes(id) || watched.collection.has(id);
       const rel = isNft ? { collections: [id] } : { tokens: [id] };
       const url = isNft ? `/nfts/${encodeURIComponent(id)}` : tokUrl(id);
+      if (prev && prev.code_hash && cur.code_hash && prev.code_hash !== cur.code_hash) await enqueueAudit(id, { reason: 'code_changed', priority: 3 });
       if (prev && prev.code_hash && cur.code_hash && prev.code_hash !== cur.code_hash) await raise(`code_changed|${id}|${cur.code_hash}`, { type: 'code_changed', severity: 'high', title: `${id}: contract code changed`, url, related: rel,
         text: `The contract was redeployed (code hash ${prev.code_hash.slice(0, 8)}… → ${cur.code_hash.slice(0, 8)}…). An upgrade can change fees, freeze transfers or drain holders.`, data: { from: prev.code_hash, to: cur.code_hash } });
       const added = prev ? full.filter((k) => !prev.full_keys.includes(k)) : [];
