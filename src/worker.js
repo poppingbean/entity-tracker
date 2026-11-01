@@ -13,6 +13,7 @@ import { detectAll } from './alerts/detect.js';
 import { deliverPending } from './alerts/deliver.js';
 import { pollTelegram } from './alerts/telegram.js';
 import { evaluateAccuracy } from './accuracy/run.js';
+import { watchDeploys, processAuditQueue } from './audit/watcher.js';
 import { evaluateGroups, reviewPending } from './evaluate/run.js';
 import { profileCreators } from './evaluate/creators.js';
 import { checkAi, aiEnabled, aiStatus } from './ai/nearai.js';
@@ -20,7 +21,7 @@ import { scanTick, followUpTick, blacklistCreator } from './scanner/pipeline.js'
 import { managePositions } from './sim/portfolio.js';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-export const runtime = { startedTs: Date.now(), cycles: 0, lastCycleTs: null, stopping: false, lastEvalTs: 0, lastPositionCheck: 0, lastRugCheck: 0, lastCreatorCheck: 0, reviewing: null, reviewed: 0, nft: null, nftLast: null, alerts: null, lastAlerts: 0, telegram: null, accuracy: null, lastAccuracy: 0 };
+export const runtime = { startedTs: Date.now(), cycles: 0, lastCycleTs: null, stopping: false, lastEvalTs: 0, lastPositionCheck: 0, lastRugCheck: 0, lastCreatorCheck: 0, reviewing: null, reviewed: 0, nft: null, nftLast: null, alerts: null, lastAlerts: 0, telegram: null, accuracy: null, lastAccuracy: 0, autoAudit: null, lastAutoAudit: 0 };
 
 /** One pass of the pipeline. Returns what it did, so callers (the CLI) can loop until idle. */
 export async function cycle({ evaluate = true } = {}) {
@@ -53,6 +54,11 @@ export async function cycle({ evaluate = true } = {}) {
   if (config.alerts.enabled && !runtime.alerts && Date.now() - runtime.lastAlerts > config.alerts.everyMs) {
     runtime.lastAlerts = Date.now();
     runtime.alerts = detectAll().then(() => deliverPending()).catch((e) => warn(`alerts pass failed: ${e.message}`)).finally(() => { runtime.alerts = null; });
+  }
+  // automated contract audits: follow new deploys and audit them, beside the loop
+  if (config.autoAudit.enabled && !runtime.autoAudit && Date.now() - runtime.lastAutoAudit > config.autoAudit.everyMs) {
+    runtime.lastAutoAudit = Date.now();
+    runtime.autoAudit = watchDeploys().catch((e) => warn(`deploy watcher: ${e.message}`)).then(() => processAuditQueue()).catch((e) => warn(`audit queue: ${e.message}`)).finally(() => { runtime.autoAudit = null; });
   }
   // measured accuracy: recomputed every hour beside the loop
   if (!runtime.accuracy && Date.now() - runtime.lastAccuracy > config.accuracy.everyMs) {

@@ -27,6 +27,7 @@ export const config = {
   txIndexerUrl: process.env.FASTNEAR_TX_URL || 'https://tx.main.fastnear.com',
   fastnearApiUrl: process.env.FASTNEAR_API_URL || 'https://api.fastnear.com',
   fastnearApiKey: process.env.FASTNEAR_API_KEY || '',
+  githubToken: process.env.GITHUB_TOKEN || '', // optional: raises the GitHub API limit for source reviews (60 / h without)
 
   launchpads: list(process.env.LAUNCHPADS, ['nearlytrade', 'justhoot', 'memecooking']),
   pollSeconds: num(process.env.POLL_SECONDS, 20),
@@ -64,6 +65,18 @@ export const config = {
   },
 
   // alerts: detectors run beside the worker loop; delivery to Telegram (public channel + each subscriber's chat), webhooks, dashboard, API
+  // automated contract audits: every contract deployed on NEAR, found by following the chain tip (FastNEAR neardata)
+  autoAudit: {
+    enabled: process.env.AUTO_AUDIT_ENABLED !== 'false',
+    neardataUrl: process.env.NEARDATA_URL || 'https://mainnet.neardata.xyz',
+    everyMs: num(process.env.AUTO_AUDIT_EVERY_SECONDS, 15) * 1000,
+    blocksPerTick: num(process.env.AUTO_AUDIT_BLOCKS_PER_TICK, 60),        // the chain makes ~1 block / s
+    fetchConcurrency: num(process.env.AUTO_AUDIT_FETCH_CONCURRENCY, 6),
+    maxBehindBlocks: num(process.env.AUTO_AUDIT_MAX_BEHIND_BLOCKS, 21600), // ~6 h: older blocks come from a slow archive
+    auditsPerTick: num(process.env.AUTO_AUDIT_PER_TICK, 2),
+    aiDailyBudget: num(process.env.AUTO_AUDIT_AI_PER_DAY, 200),            // AI calls per day for the audit stages
+    writeUp: process.env.AUTO_AUDIT_WRITE_UP !== 'false',                  // a plain-language AI summary with every audit
+  },
   // transaction firewall (POST /api/v1/tx/check): open to any wallet / dApp, cross-origin
   firewall: {
     maxBodyBytes: num(process.env.FIREWALL_MAX_BODY_BYTES, 2_000_000),  // a DeployContract carries the code

@@ -53,13 +53,26 @@ async function run(address, force) {
     raw: notFound ? null : { account, accessKeys, tax, code: stat && { exports: stat.exports, fakeStorage: stat.fakeStorage, nonStandard: stat.nonStandard, privilegedNames: stat.privilegedNames }, behaviour: beh },
     notFound, fetchedAt: Date.now(),
   };
-  await col('audits').replaceOne({ _id: address }, doc, { upsert: true });
+  // update the token-audit fields only: the automated audit (auto) lives on the same record
+  const { _id: _ignored, ...fields } = doc;
+  await col('audits').updateOne({ _id: address }, { $set: fields }, { upsert: true });
   return doc;
 }
 
 /** The few numbers and findings the gates and the AI analyst need (not the whole checklist). */
+// automated-audit findings strong enough to warn a user about the contract wherever it appears (the firewall, token pages): what the code
+// or its owner can do to users, not how centrally a protocol is run
+export const STRONG_FINDINGS = new Set(['fake_storage', 'hidden_power', 'unguarded_power', 'flagged_owner', 'flagged_deployer', 'used_move_user_funds', 'used_account_control', 'user_calls_failing', 'power_added', 'source_mismatch']);
+/** The automated layer in short. */
+export function summarizeAuto(auto) {
+  if (!auto || auto.no_code) return null;
+  return { role: auto.role, label: auto.label, level: auto.level, control: auto.control?.summary || null, family_n: auto.family_n, audited_ts: auto.ts,
+    strong_findings: (auto.findings || []).filter((f) => STRONG_FINDINGS.has(f.key) && (f.severity === 'critical' || f.severity === 'high')).map((f) => ({ key: f.key, severity: f.severity, title: f.title, detail: f.detail })),
+    headline: auto.summary?.headline || null };
+}
+
 export function summarizeAudit(doc) {
-  if (!doc || doc.notFound || doc.risk?.score == null) return { available: false, reason: doc?.notFound ? 'account has no contract' : 'no audit' };
+  if (!doc || doc.notFound || doc.risk?.score == null) return { available: false, reason: doc?.notFound ? 'account has no contract' : 'no audit', automated: summarizeAuto(doc?.auto) };
   const hits = doc.risk.factors.filter((f) => f.hit && f.weight > 0).sort((a, b) => b.weight - a.weight);
   const code = doc.raw?.code, beh = doc.raw?.behaviour;
   return {
@@ -69,5 +82,6 @@ export function summarizeAudit(doc) {
     full_access_keys: doc.raw?.accessKeys?.filter((k) => k.access_key?.permission === 'FullAccess').length ?? null,
     privileged_methods: code?.privilegedNames?.slice(0, 8) || [], non_standard_methods: code?.nonStandard?.slice(0, 8) || [],
     sells: beh ? { ok: beh.sellOk, failed: beh.sellFail, blocked_wallets: beh.blockedSellers, buys: beh.buys } : null, audited_ts: doc.fetchedAt,
+    automated: summarizeAuto(doc.auto),
   };
 }
