@@ -17,6 +17,8 @@
 //   node src/cli.js review [n]                         NEAR AI review of up to n groups
 //   node src/cli.js status                             counts
 //   node src/cli.js check-ai                           test the NEAR AI key / model
+//   node src/cli.js flag <account> critical|high|medium "<reason>"   report an account to the transaction firewall (unflag <account> to undo)
+//   node src/cli.js check-tx '<json>'                    run the transaction firewall on a request body
 //   node src/cli.js accuracy                           score gates, rule score, audit risk, AI and group verdicts against what happened
 //   node src/cli.js backtest KEY=VALUE ...             replay the gates on every stored check with config.rules changed (e.g. minBuyers=8)
 //   node src/cli.js truth <kind> <id> bad|good|clear [note]   hand label (kind: token|group|wallet|collection)
@@ -40,6 +42,7 @@ const buildEntries_done = async () => { await evaluateGroups(); };
 import { resetSim, simBuy, managePositions } from './sim/portfolio.js';
 import { checkAi, aiEnabled, aiStatus } from './ai/nearai.js';
 import { evaluateAccuracy, backtest } from './accuracy/run.js';
+import { flagAccount, unflagAccount, checkRequest } from './firewall/service.js';
 import { listFeedback, resolveFeedback, setTruth, clearTruth } from './accuracy/feedback.js';
 
 const [cmd, ...args] = process.argv.slice(2);
@@ -168,6 +171,15 @@ try {
   } else if (cmd === 'check-ai') {
     const s = await checkAi();
     console.log(JSON.stringify({ enabled: aiEnabled(), model: config.ai.model, baseUrl: config.ai.baseUrl, ok: s.ok, error: s.error, calls: s.calls }, null, 1));
+  } else if (cmd === 'flag') {
+    // node src/cli.js flag <account> critical|high|medium "<reason>" ["<detail>"]: the transaction firewall warns about it from now on
+    await flagAccount(args[0], args[1], args[2] || 'reported', args[3] || '');
+    info(`firewall: ${args[0]} flagged ${args[1]} (${args[2] || 'reported'})`);
+  } else if (cmd === 'unflag') {
+    await unflagAccount(args[0]); info(`firewall: ${args[0]} unflagged`);
+  } else if (cmd === 'check-tx') {
+    // node src/cli.js check-tx '<json body>' : what the firewall API answers
+    console.log(JSON.stringify(await checkRequest(JSON.parse(args[0])), null, 1));
   } else if (cmd === 'accuracy') {
     console.log(JSON.stringify(await evaluateAccuracy(), null, 1));
   } else if (cmd === 'backtest') {

@@ -1464,11 +1464,60 @@ views.accuracy = async () => {
       <table><tr><th>Verdict before the buy</th><th class="num">Buys</th><th class="num">Went bad</th><th class="num">Median 24 h</th></tr>${GR.per_verdict.map((v) => `<tr><td>${esc(v.verdict)}</td><td class="num">${v.entries}</td><td class="num">${pct(v.bad_rate)}</td><td class="num">${pct(v.median_roi, 1)}</td></tr>`).join('')}</table></div></div>`;
 };
 
+// ================================================================== TRANSACTION FIREWALL (paste a transaction, see what signing it would do)
+const FW_EXAMPLES = {
+  'Drainer: full-access key': { transaction: { signerId: 'alice.near', receiverId: 'alice.near', actions: [{ type: 'AddKey', params: { publicKey: 'ed25519:6E8sCci9badyRkXb3JoRpBj5p8C6Tw41ELDZoiihKEtp', accessKey: { permission: 'FullAccess' } } }] } },
+  'Phishing look-alike': { transaction: { signerId: 'alice.near', receiverId: 'wrap.nera', actions: [{ type: 'FunctionCall', params: { methodName: 'near_deposit', args: {}, gas: '30000000000000', deposit: '50000000000000000000000000' } }] } },
+  'NFT approval': { transaction: { signerId: 'alice.near', receiverId: 'x.paras.near', actions: [{ type: 'FunctionCall', params: { methodName: 'nft_approve', args: { token_id: '42', account_id: 'free-mint-claim.near' }, gas: '30000000000000', deposit: '10000000000000000000000' } }] } },
+  'Everyday: wrap 1 NEAR': { transaction: { signerId: 'alice.near', receiverId: 'wrap.near', actions: [{ type: 'FunctionCall', params: { methodName: 'near_deposit', args: {}, gas: '30000000000000', deposit: '1000000000000000000000000' } }] } },
+};
+const FW_STYLE = { block: ['bad', 'BLOCK: do not sign'], warn: ['bad', 'WARNING'], caution: ['neutral', 'CAUTION'], ok: ['good', 'NO KNOWN RISK'] };
+const FW_SEV = { critical: 'bad', high: 'bad', medium: 'neutral', info: 'unrated' };
+function fwExample(name) { $('fwInput').value = JSON.stringify(FW_EXAMPLES[name], null, 1); }
+async function fwCheck() {
+  const raw = $('fwInput').value.trim(), out = $('fwOut');
+  if (!raw) return;
+  let body;
+  if (/^[{[]/.test(raw)) { try { body = JSON.parse(raw); } catch (e) { out.innerHTML = `<div class="card err">Not valid JSON: ${esc(e.message)}</div>`; return; } if (Array.isArray(body)) body = { transactions: body }; else if (!body.transaction && !body.transactions && !/_base64$/.test(Object.keys(body)[0] || '')) body = { transaction: body }; }
+  else body = { base64: raw.replace(/\s+/g, '') };
+  if ($('fwSigner').value.trim()) body.signer_id = $('fwSigner').value.trim();
+  if ($('fwExplain').checked) body.explain = true;
+  out.innerHTML = `<div class="card muted">Checking${body.explain ? ' (the AI explanation takes a few seconds)' : ''} …</div>`;
+  const r = await fetch('/api/v1/tx/check', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }).then((x) => x.json()).catch((e) => ({ error: e.message }));
+  if (r.error) { out.innerHTML = `<div class="card err">${esc(r.error)}</div>`; return; }
+  const [cls, label] = FW_STYLE[r.verdict] || ['unrated', r.verdict];
+  const E = r.explanation;
+  out.innerHTML = `<div class="card"><div class="head"><h2><span class="v ${cls}" style="font-size:15px">${label}</span> ${esc(r.summary)}</h2><span class="muted small">${r.took_ms} ms${r.context?.complete === false ? ' · some lookups timed out' : ''}</span></div>
+    ${E ? `<p><b>${esc(E.headline)}</b></p><p class="small">${esc(E.explanation)}</p>${E.advice?.length ? `<ul class="flags small">${E.advice.map((a) => `<li>${esc(a)}</li>`).join('')}</ul>` : ''}` : ''}
+    ${r.findings.length ? `<h3>Findings</h3><table class="small">${r.findings.map((f) => `<tr><td><span class="v ${FW_SEV[f.severity]}">${esc(f.severity)}</span></td><td><b>${esc(f.title)}</b><div class="muted">${esc(f.detail)}</div></td><td><code>${esc(f.code)}</code></td></tr>`).join('')}</table>` : ''}
+    <h3>What signing does</h3>${r.transactions.map((t, i) => `<div class="small" style="margin:6px 0"><b>${r.transactions.length > 1 ? `Transaction ${i + 1}: ` : ''}${esc(t.signer || '(signer not given)')} → ${esc(t.receiver)}</b>${t.meta ? ' <span class="muted">meta transaction</span>' : ''}
+      <ol style="margin:4px 0;padding-left:20px">${t.actions.map((a) => `<li>${esc(a.text)}</li>`).join('')}</ol></div>`).join('')}</div>`;
+}
+views.firewall = async () => `<div class="grid2 main-l"><div><div class="card"><h2>Check a transaction before you sign it</h2>
+    <p class="small muted" style="margin-top:0">Paste what a wallet or dApp is asking you to sign: JSON (wallet-selector or RPC format) or base64 borsh (Transaction, SignedTransaction, or a meta-transaction SignedDelegateAction). Nothing is signed or sent.</p>
+    <div class="bar">${Object.keys(FW_EXAMPLES).map((k) => `<button onclick="fwExample('${esc(k)}')">${esc(k)}</button>`).join('')}</div>
+    <textarea id="fwInput" rows="12" style="width:100%;font-family:var(--mono, monospace);font-size:12px" placeholder='{"signerId":"alice.near","receiverId":"wrap.near","actions":[{"type":"FunctionCall","params":{"methodName":"near_deposit","args":{},"gas":"30000000000000","deposit":"1000000000000000000000000"}}]}'></textarea>
+    <div class="bar"><input id="fwSigner" placeholder="signer account (if not in the transaction)" style="flex:1"><label class="small"><input type="checkbox" id="fwExplain"> explain with AI</label><button class="cta" style="padding:9px 18px;font-size:14px" onclick="fwCheck()">Check</button></div></div>
+  <div id="fwOut"></div></div>
+  <div><div class="card"><h2>For wallets and dApps</h2>
+    <p class="small">Call the same check from your wallet or dApp right before the signing screen. It's free, works from any origin, and keeps nothing about the transaction.</p>
+    <p class="small"><code>POST /api/v1/tx/check</code> with <code>{"transaction": …}</code>, <code>{"transactions": [ … ]}</code> or <code>{"transaction_base64": "…"}</code> → <code>verdict</code> (ok / caution / warn / block), the findings, and one plain line per action. Add <code>"explain": true</code> for an AI explanation.</p>
+    <p class="small"><code>GET /api/v1/account?id=…</code> → the reputation of one account, for "send to" screens.</p>
+    <p class="small"><a href="https://github.com/poppingbean/entity-tracker/blob/main/docs/tx-firewall.md" target="_blank" rel="noopener">Integration guide ↗</a> · 300 checks per 10 minutes per IP.</p></div>
+  <div class="card"><h2>What it catches</h2><ul class="flags small">
+    <li><b>Wallet drainers:</b> full-access keys, key swaps, account deletion, code deployed on your wallet</li>
+    <li><b>Phishing:</b> look-alike contracts (wrap.nera, v2.ref-flnance.near) and reported drainers</li>
+    <li><b>Approvals:</b> NFT approvals and rights granted to unknown contracts</li>
+    <li><b>Rugs:</b> buying or sending tokens that rugged, or whose creator dumped before</li>
+    <li><b>Mistakes:</b> sending almost everything you hold, typos in the receiver</li></ul>
+    <p class="muted small" style="margin:8px 0 0">The verdict comes from fixed rules; the AI only explains it and can never make a transaction look safer.</p></div></div></div>`;
+
 // ================================================================== shell + router (History API: /tokens/<id>, /groups/<id>, no #)
 const SECTIONS = [
   { label: 'Explore', views: [['explore', 'Explore']] },
   { label: 'Tokens & Scanner', views: [['tokens', 'Launches'], ['signals', 'Smart-money signals'], ...(SHOW_SIM ? [['sim', 'Simulated wallet']] : []), ['analysis', 'On-chain analysis'], ['scans', 'Evaluations'], ['audit', 'Contract audit']] },
   { label: 'Alerts', views: [['alerts', 'Alerts']] },
+  { label: 'Tx Firewall', views: [['firewall', 'Transaction check']] },
   { label: 'Accuracy', views: [['accuracy', 'Accuracy']] },
   { label: 'NFT Collectibles', views: [['nfts', 'Collections']] },
   { label: 'Wallets & Groups', views: [['groups', 'Linked groups'], ['taggroups', 'Tag groups'], ['wallets', 'Wallets'], ['creators', 'Creators'], ['entities', 'Funders & entities']] },
@@ -1477,6 +1526,7 @@ const TITLES = {
   explore: ['Explore', ''], tokens: ['Tokens & Scanner', "Every launch: who bought it early (by win-rate tag), the scanner's first check and gates, its outcome and whether it was rugged"],
   signals: ['Smart-money signals', 'Recent tokens where winners (win80 / win50 / sniper) or loss wallets were among the early buyers'],
   groups: ['Linked groups', 'Wallets one owner controls, linked by money only: funding, transfers, shared funders and destinations (co-buy partners are marked apart)'],
+  firewall: ['Transaction firewall', 'See what a transaction will really do before you sign it: wallet drainers, phishing contracts, risky approvals and rugged tokens'],
   accuracy: ['Measured accuracy', 'How often the gates, rule score, contract audit, AI analyst and group verdicts were right, scored against what happened afterwards'],
   alerts: ['Alerts', 'Rugs in progress, contract changes, ruggers launching again, NFT team selling and wash trades, and everything on your watchlist'],
   nfts: ['NFT Collectibles', 'NFT collections: who minted (and whether the team minted its own), minter groups linked by money, the secondary market with wash-trade checks, holders'],

@@ -72,6 +72,18 @@ Everything is stored in MongoDB (`scans`, `followups`, `sim_account`, `sim_posit
 
 `node src/cli.js import-scanner [path/to/state.json] [--dry]` (default `../near-launch-scanner/data/state.json`) copies what the scanner already knows: its launches become `tokens` (new ones are queued so the tracker reads their trades and early buyers), its evaluations and follow-up reviews become `scans` (source `scanner`, with gates, scores, AI verdicts and features), its creator blacklist feeds the tracker's creator gate, its code-hash counts merge into `templates`, and its **real** positions and spend go to `scanner_positions` / `scanner_spend`, kept apart so they never touch the simulated wallet. Imported launches are marked scanned, so the simulated wallet never buys them. Safe to re-run; existing tracker data is not overwritten.
 
+## Transaction firewall (for wallets and dApps)
+
+A public service any wallet or dApp can call **right before the user signs**: `POST /api/v1/tx/check` with the transaction as the wallet holds it (wallet-selector or near-api-js / RPC JSON, or base64 borsh of a `Transaction`, `SignedTransaction` or NEP-366 `SignedDelegateAction`; a meta transaction's inner actions are checked as their sender). It answers with a **verdict** (`ok`, `caution`, `warn`, `block`), one plain line per action ("Give FULL ACCESS to your account to key …", "Swap 5 wNEAR for ANIMATE on v2.ref-finance.near") and the findings behind the verdict:
+
+- **Drainers:** a full-access key added to your account, your keys swapped for someone else's or your last one removed, account deletion, code deployed on your wallet.
+- **Phishing:** look-alike contracts (`wrap.nera`, `v2.ref-flnance.near`, `v2.ref-finance.near.claim.near`) and reported accounts.
+- **Approvals:** NFT approvals and rights granted to unknown contracts.
+- **Rugs, from the tracker's own data:** sending to dev-rug creators, buying tokens that rugged (tokens inside Ref swap messages included), high-risk contract audits.
+- **Mistakes:** sending almost everything you hold, a receiver that doesn't exist, call data aimed at AI reviewers.
+
+The verdict always comes from rules (`src/firewall/rules.js`); `"explain": true` adds a plain-language AI explanation that can never change it. Lookups run in parallel under a 2.5 s budget (`context.complete: false` when some didn't answer). `GET /api/v1/account?id=` gives one account's reputation for "send to" screens. Open to any origin, no password; 300 checks per 10 minutes per IP (`FIREWALL_PER_IP_10MIN`), unlimited with a key from `FIREWALL_API_KEYS` (`x-api-key`); bodies up to 2 MB (`FIREWALL_MAX_BODY_BYTES`). Nothing about a transaction is stored, only counters per verdict. Operators report accounts with `node src/cli.js flag <account> critical|high|medium "<reason>"` (`firewall_flags`; `unflag` undoes it), and `node src/cli.js check-tx '<json>'` runs a check from the command line. The **Tx Firewall** page (`/firewall`) checks a pasted transaction. Integration guide: [docs/tx-firewall.md](docs/tx-firewall.md).
+
 ## Contract audit
 
 Ported from the TrustFlow backend (`contractAuditService`, `nearContractAnalysis`, `nearRpcClient`): a NEAR token / contract audit scored into a **risk** (0-100, higher = riskier: low / medium / high / critical) and a separate **trust** score, with the full checklist (passed checks are listed too):
