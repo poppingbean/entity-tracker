@@ -99,6 +99,19 @@ Reputation of one account, e.g. on a "send to" screen:
   "label": null, "token": null, "audit": null, "complete": true }
 ```
 
+## `GET /api/v1/inspect?q=<anything>`
+
+The answer the **Safety Check** page gives, for whatever a user pastes: a wallet, a contract (any type), a token name or `$SYMBOL`, an NFT (`contract:token_id` or a marketplace link), a transaction hash, a NearBlocks / Pikespeak / Mintbase / Paras link, a website, a public key, or a transaction to sign (JSON or base64). Seed phrases and private keys are refused without being read.
+
+```json
+{ "input_kind": "website", "kind": "website", "verdict": "danger",
+  "headline": "Do not use ref-flnance.com: it looks like a phishing site.",
+  "points": [{ "level": "bad", "text": "The address imitates app.ref.finance, but it is a different site." }],
+  "actions": ["Never type your seed phrase or private key into a website."], "facts": { "host": "ref-flnance.com" } }
+```
+
+`verdict` is `safe`, `caution`, `danger`, `unknown`, or `pending` (a contract seen for the first time is being audited: ask again in a minute). `points[].level` is `bad`, `warn`, `info` or `good`. Kinds: `wallet` (keys, connected apps, risky tokens held), `token`, `nft_collection`, `nft`, `contract`, `tx`, `unsigned_tx`, `website` (judged by its name, never fetched), `public_key`, `missing`, `secret`, `unknown`. Owner powers that are normal for a well-known contract (a stablecoin's freeze) give `caution`, not `danger`.
+
 ## Integrating
 
 ### A dApp or wallet using wallet-selector
