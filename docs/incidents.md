@@ -4,7 +4,7 @@ Safe Near watches NEAR for hacks as they happen and rebuilds each one from the c
 - Pasting an attack transaction, an attacker's account or an exploited contract shows the incident.
 - Each investigation has its own page at `/firewall/<incident>`.
 
-Code: `src/incident/` (`flows.js`, `trace.js`, `oneclick.js`, `prices.js`, `ai.js`, `detect.js`, `service.js`).
+Code: `src/incident/` (`flows.js`, `trace.js`, `oneclick.js`, `prices.js`, `ai.js`, `detect.js`, `service.js`). NEAR AI prompts: `src/ai/prompts/incident-report.md` and `incident-deep-review.md`.
 
 ## What an investigation answers
 

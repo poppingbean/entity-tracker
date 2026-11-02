@@ -8,7 +8,7 @@ import { col } from '../db.js';
 import { config } from '../config.js';
 import { info } from '../log.js';
 import { raise } from '../alerts/store.js';
-import { cleanText, looksLikeInjection } from '../ai/untrusted.js';
+import { cleanText, looksLikeInjection } from '../ai/tools/untrusted.js';
 import { parseInvestigation, enqueueIncident } from './service.js';
 
 /** A report from a person. Returns { ok, id, input } or { error }. Rate limiting is the caller's job. */

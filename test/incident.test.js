@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { flowsOfReceipt, netOf } from '../src/incident/flows.js';
 import { assetChain } from '../src/incident/oneclick.js';
-import { unverifiedAmounts } from '../src/incident/ai.js';
+import { unverifiedAmounts } from '../src/ai/tools/verify.js';
 import { protocolOutflows } from '../src/incident/detect.js';
 import { parseInvestigation } from '../src/incident/service.js';
 

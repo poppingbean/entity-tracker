@@ -6,10 +6,11 @@
 //            or code is at most low risk, whatever the AI says
 // Once per code (cached on the code audit).
 import { config } from '../config.js';
-import { chatJSON, aiEnabled } from '../ai/nearai.js';
-import { UNTRUSTED_RULE, evidenceMessage } from '../ai/untrusted.js';
-import { aiBudget } from './ai.js';
+import { chatJSON, aiEnabled } from '../ai/tools/nearai.js';
+import { UNTRUSTED_RULE, evidenceMessage } from '../ai/tools/untrusted.js';
+import { aiBudget } from '../ai/tools/budget.js';
 
+import { prompt } from '../ai/prompts/index.js';
 const STD_VIEW = /^(get_|is_|view_|ft_metadata|ft_total_supply|ft_balance_of|nft_token|nft_tokens|nft_metadata|nft_supply|nft_total_supply|storage_balance_of|storage_balance_bounds|contract_source_metadata|version|get|count|list|of|view|lookup|find|resolve_name)$|^(get|list|count|of|view)_/;
 const SAY = { writes_state: 'changes stored data', deletes_state: 'deletes stored data', reads_deposit: 'accepts a NEAR deposit', send_near: 'sends NEAR out', call_contracts: 'calls other contracts',
   generic_promise: 'starts calls to other contracts', callback: 'handles the result of an earlier call', reads_caller: 'checks who called it', randomness: 'uses randomness',
@@ -33,13 +34,7 @@ export function describeFunctions(exports, effects) {
   });
 }
 
-const SYSTEM = `You are a NEAR smart-contract reviewer explaining a contract's functions to an ordinary user. For each exported method you get
-its name and what its compiled code can do (effects: changes stored data, accepts a deposit, sends NEAR, calls other contracts, checks
-who called it, …), plus the contract's strings and what an automated audit already found. Explain each method's likely purpose in one plain
-sentence, who can likely call it (anyone, the owner/admin, only the contract itself as a callback, nobody after setup), and its risk to
-users. Base every claim on the method name, its effects and the strings; say "likely" when you infer. Also say in 2-3 sentences what the
-contract as a whole seems to be for.
-Answer with ONE JSON object: {"contract":"2-3 sentences","functions":[{"method":"exact name","purpose":"one sentence","who":"anyone|owner|callback|setup|unclear","risk":"none|low|medium|high","note":"optional: what a user should know"}]}`;
+const SYSTEM = prompt('audit-functions'); // src/ai/prompts/audit-functions.md
 
 /** NEAR AI's reading of every method (null when the AI is off or the budget is spent). Unknown methods are dropped; risks are capped by the code. */
 export async function aiFunctionReview(code, functions, strings = []) {

@@ -101,7 +101,7 @@ test('wasm capabilities: host calls reached from each export; SDK promise dispat
 });
 
 test('AI findings: kept only with evidence the pipeline can check; never critical (rules decide that)', async () => {
-  const { verifiedFindings } = await import('../src/audit/ai.js');
+  const { verifiedFindings } = await import('../src/ai/tools/verify.js');
   const out = verifiedFindings([
     { severity: 'critical', title: 'Owner can wipe balances', detail: 'x', evidence: 'set_balance' },
     { severity: 'high', title: 'Invented method', detail: 'x', evidence: 'drain_everything' },

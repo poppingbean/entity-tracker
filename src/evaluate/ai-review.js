@@ -1,19 +1,11 @@
 // Ask NEAR AI to judge a group of early investors from the evidence the tracker collected.
-import { chatJSON } from './nearai.js';
-import { UNTRUSTED_RULE, evidenceMessage } from './untrusted.js';
+import { chatJSON } from '../ai/tools/nearai.js';
+import { UNTRUSTED_RULE, evidenceMessage } from '../ai/tools/untrusted.js';
 
+import { prompt } from '../ai/prompts/index.js';
 const r2 = (x, d = 2) => (x == null || Number.isNaN(x) ? null : Math.round(x * 10 ** d) / 10 ** d);
 
-export const SYSTEM = `You are an on-chain analyst for NEAR Protocol memecoin launchpads (nearly.trade, justhoot, meme.cooking).
-You are shown one GROUP of wallets that repeatedly bought tokens EARLY (inside the first minutes after the pool opened), grouped by on-chain relationships:
-shared funders up the funding chain, NEAR flowing between them or into a shared destination, near-simultaneous buys across several tokens, and funding by a token's creator.
-Decide whether the group is GOOD or BAD early money, judging only from the evidence given. Definitions:
-- good: early buyers that make money in tokens that hold up (low rug share), with no insider links. Worth watching or following.
-- bad: insiders (funded by or paying the token creator), rug farmers (profit mostly from tokens that collapsed), coordinated sybil snipers (many fresh wallets buying in the same seconds), bots, or consistent losers. Worth avoiding, or a warning when they appear in a token.
-- neutral: mixed or unremarkable. unknown: too few judged tokens to say.
-Rules: use only the supplied numbers; do not invent facts or token names; roi values are fractions (0.5 = +50%); a token "rugged" when its price fell at least 90% from its peak. Many tokens with few wallets each is weaker evidence than few wallets across many tokens. Lower your confidence when the sample is small (fewer than 5 judged tokens) or the evidence is mixed.
-Reply with ONE JSON object and nothing else, with exactly these keys:
-{"verdict":"good"|"bad"|"neutral"|"unknown","confidence":number 0..1,"label":"2-4 word name for the group","archetype":"smart-early"|"insider"|"rug-farmer"|"sybil-sniper"|"bot"|"consistent-loser"|"trader"|"unclear","summary":"2-3 sentences","reasons":["short evidence-based points"],"red_flags":["things that argue against the verdict or deserve caution"],"follow_advice":"follow"|"watch"|"avoid"|"ignore"}`;
+export const SYSTEM = prompt('group-review'); // src/ai/prompts/group-review.md
 
 /** The compact evidence packet sent to the model. */
 export function buildPacket(cluster, walletDocs, tokenRows) {

@@ -1,6 +1,6 @@
 // NEAR AI Cloud client (OpenAI-compatible chat completions). The AI is the analysis brain; everything it is shown is data the
 // tracker collected on-chain, and everything it returns is validated before use.
-import { config } from '../config.js';
+import { config } from '../../config.js';
 
 export const aiEnabled = () => !!config.ai.key;
 export const aiStatus = { ok: null, checkedTs: 0, error: null, model: config.ai.model, calls: 0, failures: 0, promptTokens: 0, completionTokens: 0 };

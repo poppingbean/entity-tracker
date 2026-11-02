@@ -21,7 +21,7 @@ import { processDeepReview, backfillReviews } from './incident/deepreview.js';
 import { pollNews } from './incident/signals.js';
 import { evaluateGroups, reviewPending } from './evaluate/run.js';
 import { profileCreators } from './evaluate/creators.js';
-import { checkAi, aiEnabled, aiStatus } from './ai/nearai.js';
+import { checkAi, aiEnabled, aiStatus } from './ai/tools/nearai.js';
 import { scanTick, followUpTick, blacklistCreator } from './scanner/pipeline.js';
 import { managePositions } from './sim/portfolio.js';
 

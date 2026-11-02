@@ -10,14 +10,15 @@
 import { col } from '../db.js';
 import { config } from '../config.js';
 import { info, warn } from '../log.js';
-import { chatJSON, aiEnabled } from '../ai/nearai.js';
-import { UNTRUSTED_RULE, evidenceMessage } from '../ai/untrusted.js';
-import { aiBudget } from '../audit/ai.js';
+import { chatJSON, aiEnabled } from '../ai/tools/nearai.js';
+import { UNTRUSTED_RULE, evidenceMessage } from '../ai/tools/untrusted.js';
+import { aiBudget } from '../ai/tools/budget.js';
 import { txIndexer } from '../near/rpc.js';
 import { flowsOfTx } from './flows.js';
 import { valueOf } from './prices.js';
 import { packetOf } from './ai.js';
 
+import { prompt } from '../ai/prompts/index.js';
 const delay = () => (config.incidents.reviewDelayMinutes ?? 10) * 60e3;
 
 /** Queue a finding for its deep review (once): `kind` is detection or incident, `foundTs` when it was found. */
@@ -49,25 +50,7 @@ async function pastTransfers(receiver, payers, beforeTs, { maxRows = 3000 } = {}
   return { rows, payers: [...per].map(([account, p]) => ({ account, ...p, usd: Math.round(p.usd) })) };
 }
 
-const SYSTEM = `You are a senior blockchain security investigator doing the second, careful review of a possible hack on NEAR Protocol,
-some minutes after an automated detector raised it. Detectors raise false alarms: whales withdrawing their own stake, funds or OTC desks
-consolidating their own wallets, exchanges paying customers or moving reserves. Your job is to decide, from the evidence, whether this is a
-hack or theft, or not.
-
-Weigh especially:
-- the rule evidence (fake tokens used, a brand-new account, an exchange hot wallet emptied into a just-created account, a shared signing
-  key across emptied wallets): these are strong signs of a hack;
-- the receiver's past with whoever paid it: many earlier transfers from the same accounts, over months, before the event, mean a routine
-  relationship (consolidation, treasury, OTC), not theft; none at all before the event is consistent with theft;
-- own funds: earlier deposits into the same protocol mean a withdrawal of its own money;
-- the receiver's age and activity before the event.
-
-Answer with JSON only:
-{"verdict": "hack" | "not_hack" | "unclear",
- "confidence": "high" | "medium" | "low",
- "what_it_is": "one short phrase, e.g. 'exchange hot-wallet drain', 'whale consolidating its own wallets', 'staking withdrawal'",
- "reasons": ["the 2-5 facts from the evidence that decide it"]}
-Use only facts in the evidence. If the evidence cannot decide, say "unclear".`;
+const SYSTEM = prompt('incident-deep-review'); // src/ai/prompts/incident-deep-review.md
 
 /** NEAR AI's verdict on a case, or null when the AI is off or the day's budget is spent. */
 async function aiVerdict(inc, facts) {

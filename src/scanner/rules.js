@@ -1,7 +1,7 @@
 // Deterministic gates + a 0-100 score (ported from the live scanner), plus two gates that only this tracker can apply because it
 // knows the entities: a creator with earlier rugged / dumped launches, and early buying dominated by groups judged bad.
 import { config } from '../config.js';
-import { looksLikeInjection } from '../ai/untrusted.js';
+import { looksLikeInjection } from '../ai/tools/untrusted.js';
 
 export function applyRules(f) {
   const R = config.rules;

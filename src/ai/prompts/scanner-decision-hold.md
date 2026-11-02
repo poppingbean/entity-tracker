@@ -1,0 +1,2 @@
+The simulated portfolio ALREADY HOLDS this token (cost {{costNear}} NEAR). Decide what to do with the position:
+- HOLD: keep it. SELL: exit now (coordination, creator extraction, a trap, or demand fading: buyers exiting, net selling). BUY_MORE is not available: treat it as HOLD

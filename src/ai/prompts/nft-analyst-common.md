@@ -1,0 +1,3 @@
+Rules: use only the supplied facts and numbers; never invent accounts, amounts or events; shares are fractions (0.05 = 5%); "money-linked" means
+the tracker found funding / transfers between the wallets (proof of common control only when one funded the other directly); "team" = the
+collection owner / deployer and whoever took the mint proceeds, plus wallets they funded. Shorten 64-hex accounts to their first 8 characters + "…".

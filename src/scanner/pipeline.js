@@ -5,7 +5,7 @@ import { flagRug } from '../collect/rugs.js';
 import { config } from '../config.js';
 import { info, warn, error } from '../log.js';
 import { syncTokenTrades } from '../collect/trades.js';
-import { aiEnabled } from '../ai/nearai.js';
+import { aiEnabled } from '../ai/tools/nearai.js';
 import { collectFeatures } from './features.js';
 import { applyRules } from './rules.js';
 import { analyse } from './analyst.js';
