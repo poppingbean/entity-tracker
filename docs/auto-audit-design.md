@@ -9,7 +9,7 @@ The audit (`src/audit/`, ported from the TrustFlow backend) runs **on demand** f
 | Part | What it does | Limit for other contract types |
 |---|---|---|
 | Access keys (`nearFactors`) | Full-access keys = can redeploy or drain; no full-access key = locked (trust) | Universal and correct. But "locked" says nothing about an owner *account* (`set_owner`, `upgrade` guarded by an owner check), which is how real protocols are run. |
-| Code (`staticAnalysis`) | WASM exports: fake NEP-145 `storage_*` (honeypot backdoor), privileged names, owner guards, non-standard methods | **Privileged-method detection only runs for tokens** (`isToken ? … : []`). The "standard" list is NEP-141 + storage only, so a DEX, staking or lending contract is entirely "non-standard". |
+| Code (`staticAnalysis`) | WASM exports: fake NEP-145 `storage_*` (honeypot backdoor), privileged names, owner guards, non-standard methods | **Privileged-method and fake-storage detection only run for tokens** (`isToken ? … : []`; read-only `storage_*` views such as a DEX's `storage_constants` are not fake storage). The "standard" list is NEP-141 + storage only, so a DEX, staking or lending contract is entirely "non-standard". |
 | Behaviour (`behaviourAnalysis`) | Do holders' sells into DEXs succeed; is a privileged account calling non-standard methods on holders' accounts | Token-only: it knows sells, nothing about withdrawals, unstaking, liquidations. |
 | Tax | Launchpad `get_tax` | Token-only. |
 | Scoring | One additive risk score + trust score | A flat score can't express "Ref Finance: the owner can upgrade, pause and take the protocol fee, but is a DAO; users can always withdraw". |

@@ -112,6 +112,25 @@ The answer the **Safety Check** page gives, for whatever a user pastes: a wallet
 
 `verdict` is `safe`, `caution`, `danger`, `unknown`, or `pending` (a contract seen for the first time is being audited: ask again in a minute). `points[].level` is `bad`, `warn`, `info` or `good`. Kinds: `wallet` (keys, connected apps, risky tokens held), `token`, `nft_collection`, `nft`, `contract`, `tx`, `unsigned_tx`, `website` (judged by its name, never fetched), `public_key`, `missing`, `secret`, `unknown`. Owner powers that are normal for a well-known contract (a stablecoin's freeze) give `caution`, not `danger`.
 
+Two more fields when they apply:
+
+- `incidents`: the hacks the input is linked to (from the incident tracer, see [incidents.md](incidents.md)). Each has `id`, `role`, `status`, `kind`, `attacker`, `target`, `stolen_usd`, `held_usd`, `when`, `headline`, `attack_type` and `exits` (USD per way the money left).
+  - `role` is `attack_tx`, `attacker`, `fake_token`, `sub_account`, `contract`, `intents_account`, `cash_out_wallet`, `funder` or `target`.
+  - A confirmed incident on the attacker's side makes the verdict `danger`.
+- `investigate`: on a transaction where one account paid another at least `INCIDENT_MIN_USD` (net), `{ q, payout }`. Passing `q` to the incident tracer investigates it as a hack.
+
+```json
+{ "kind": "tx", "verdict": "danger", "headline": "This transaction is part of a hack: veax.near lost ~$62,379.",
+  "incidents": [{ "id": "inc:realkingdom9695.near", "role": "attack_tx", "status": "confirmed", "target": "veax.near", "stolen_usd": 62379,
+    "attack_type": "fake-token pool exploit", "exits": { "swapped to Ethereum": 53371 } }] }
+```
+
+The accounts of a confirmed incident are also in `firewall_flags`, so `POST /api/v1/tx/check` and `GET /api/v1/account` flag any transaction or account that touches them.
+
+## `GET /api/v1/incidents`, `GET /api/v1/incident?id=<id>`
+
+Traced hacks, newest first, and one incident in full: attacker accounts, target, losses, victims, the money trail and the NEAR AI write-up. See [incidents.md](incidents.md).
+
 ## Integrating
 
 ### A dApp or wallet using wallet-selector
