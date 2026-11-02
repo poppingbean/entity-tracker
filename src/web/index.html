@@ -1742,10 +1742,18 @@ async function liveFeed() {
     return `<div class="lv" onclick="$('scInput').value='${esc(x.account)}';scCheck()" style="cursor:pointer"><span class="v ${x.level ? LIVE_LVL[x.level] || 'unrated' : 'unrated'}">${esc(x.level || (x.audited ? '–' : 'auditing'))}</span> New contract <span class="acct">${esc(short(x.account, 34))}</span>${x.label ? ` <span class="chip">${esc(x.label)}</span>` : ''}
       <div class="muted small">${esc(x.how)}${x.family_n > 1 ? ` (${x.family_n} accounts)` : ''} · by ${esc(short(x.by || '?', 24))}${x.control ? ` · ${esc(x.control)}` : ''}${x.headline ? ` · ${esc(short(x.headline, 110))}` : ''}</div></div>`;
   };
-  el.innerHTML = `<div class="card"><div class="bar"><h2 style="margin:0">Live</h2><span class="small">${status}</span></div>
-    <div class="tiles" style="margin:10px 0">${tile('Contracts deployed', C.deploys, 'last 24 h')}${tile('Audited', C.audited, `${C.risky} high risk`, C.risky ? 'a' : '')}${tile('Drains caught', C.drains, 'last 24 h', C.drains ? 'a' : '')}${tile('Hacks', C.hacks, `confirmed · ${C.moves || 0} moves of stolen funds`, C.hacks || C.moves ? 'r' : '')}</div>
+  // a refresh must not move what the reader is looking at: unchanged items only update the status and counts; new items keep the scroll
+  const sig = LIVE.only + '|' + JSON.stringify(j.items.map((x) => [x.type, x.ts, x.id || x.account || x.receiver, x.verdict, (x.tags || []).join(), x.level, x.status]));
+  const tiles = `${tile('Contracts deployed', C.deploys, 'last 24 h')}${tile('Audited', C.audited, `${C.risky} high risk`, C.risky ? 'a' : '')}${tile('Drains caught', C.drains, 'last 24 h', C.drains ? 'a' : '')}${tile('Hacks', C.hacks, `confirmed · ${C.moves || 0} moves of stolen funds`, C.hacks || C.moves ? 'r' : '')}`;
+  const list = $('liveList');
+  if (list && LIVE.sig === sig) { $('liveStatus').innerHTML = status; $('liveTiles').innerHTML = tiles; for (const t of list.querySelectorAll('.lvt')) if (t.dataset.ts) t.textContent = since(+t.dataset.ts).replace(' ago', ''); return; }
+  const keep = list && LIVE.sigOnly === LIVE.only ? { top: list.scrollTop, height: list.scrollHeight } : null;
+  LIVE.sig = sig; LIVE.sigOnly = LIVE.only;
+  el.innerHTML = `<div class="card"><div class="bar"><h2 style="margin:0">Live</h2><span class="small" id="liveStatus">${status}</span></div>
+    <div class="tiles" id="liveTiles" style="margin:10px 0">${tiles}</div>
     <div class="bar small" style="gap:6px">${tab('', 'Everything')}${tab('hacks', 'Hacks & drains')}${tab('risky', 'High-risk contracts')}${tab('contracts', 'New contracts')}<span class="spacer"></span><span class="muted">updates every 15 s</span></div>
-    <div style="max-height:720px;overflow:auto;margin-top:6px">${j.items.map((x) => `<div style="display:flex;gap:10px;padding:8px 2px;border-bottom:1px solid var(--line)"><span class="muted small" style="width:64px;flex:none" title="${esc(when(x.ts))}">${esc(since(x.ts).replace(' ago', ''))}</span><div style="flex:1;min-width:0">${item(x)}</div></div>`).join('') || '<p class="muted small">Nothing yet.</p>'}</div></div>`;
+    <div id="liveList" style="max-height:720px;overflow:auto;margin-top:6px">${j.items.map((x) => `<div style="display:flex;gap:10px;padding:8px 2px;border-bottom:1px solid var(--line)"><span class="muted small lvt" data-ts="${x.ts || ''}" style="width:64px;flex:none" title="${esc(when(x.ts))}">${esc(since(x.ts).replace(' ago', ''))}</span><div style="flex:1;min-width:0">${item(x)}</div></div>`).join('') || '<p class="muted small">Nothing yet.</p>'}</div></div>`;
+  if (keep && keep.top > 0) { const nl = $('liveList'); if (nl) nl.scrollTop = keep.top + Math.max(0, nl.scrollHeight - keep.height); }
 }
 let liveTimer = null;
 function liveStart() { clearInterval(liveTimer); liveFeed(); liveTimer = setInterval(() => { if (!$('liveFeed')) { clearInterval(liveTimer); return; } if (!document.hidden) liveFeed(); }, 15000); }
