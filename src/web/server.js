@@ -545,7 +545,7 @@ const routes = {
       ...incidents.map((i) => ({ type: 'hack', ts: i.started_ts || i.first_seen_ts, id: i._id, status: i.status, kind: i.kind, attacker: i.attacker?.account, target: i.drain?.exchange || i.target?.account || null, stolen_usd: i.stolen_usd, held_usd: i.held_usd, headline: i.ai?.headline || null, attack_type: { exchange_drain: 'Exchange hot-wallet drain', protocol_exploit: 'Protocol exploit', wallet_drainer: 'Wallet drainer' }[i.kind] || i.ai?.attack_type || null, exits: i.trail?.exit_usd || {}, caught_live: !!i.detected })),
     ].sort((a, b) => (b.ts || 0) - (a.ts || 0)).slice(0, 60);
     const [deploys24, audited24, risky24, drains24, hacks24, moves24, flagged] = counts;
-    return { now: Date.now(), watch, live: !!watch && Date.now() - watch.tick_ts < 120e3, last24h: { deploys: deploys24, audited: audited24, risky: risky24, drains: drains24, hacks: hacks24, moves: moves24 }, flagged, items };
+    return { now: Date.now(), watch, live: !!watch && Date.now() - watch.tick_ts < 120e3, last24h: { deploys: deploys24, audited: audited24, risky: risky24, drains: drains24, hacks: hacks24, moves: moves24 }, flagged, review_delay_min: config.incidents.reviewDelayMinutes, items };
   },
   /** Hacks and scams: traced incidents (newest first) and what the live detector raised. */
   '/api/incidents': async (u) => {

@@ -26,7 +26,7 @@ import { scanTick, followUpTick, blacklistCreator } from './scanner/pipeline.js'
 import { managePositions } from './sim/portfolio.js';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-export const runtime = { startedTs: Date.now(), cycles: 0, lastCycleTs: null, stopping: false, lastEvalTs: 0, lastPositionCheck: 0, lastRugCheck: 0, lastCreatorCheck: 0, reviewing: null, reviewed: 0, nft: null, nftLast: null, alerts: null, lastAlerts: 0, telegram: null, accuracy: null, lastAccuracy: 0, autoAudit: null, lastAutoAudit: 0, incident: null, registry: null, lastRegistry: 0, news: null, lastNews: 0 };
+export const runtime = { startedTs: Date.now(), cycles: 0, lastCycleTs: null, stopping: false, lastEvalTs: 0, lastPositionCheck: 0, lastRugCheck: 0, lastCreatorCheck: 0, reviewing: null, reviewed: 0, nft: null, nftLast: null, alerts: null, lastAlerts: 0, telegram: null, accuracy: null, lastAccuracy: 0, autoAudit: null, lastAutoAudit: 0, incident: null, lastIncident: 0, deepReview: null, lastDeepReview: 0, registry: null, lastRegistry: 0, news: null, lastNews: 0 };
 
 /** One pass of the pipeline. Returns what it did, so callers (the CLI) can loop until idle. */
 export async function cycle({ evaluate = true } = {}) {
@@ -76,12 +76,16 @@ export async function cycle({ evaluate = true } = {}) {
     runtime.news = pollNews().catch((e) => warn(`security news: ${e.message}`)).finally(() => { runtime.news = null; });
   }
   // hacks the detector (or anyone) queued: traced one at a time, beside the rest (a trace takes a minute or two); unchecked drain reports first
-  if (config.incidents.enabled && !runtime.incident) {
+  if (config.incidents.enabled && !runtime.incident && Date.now() - runtime.lastIncident > config.incidents.everyMs) {
+    runtime.lastIncident = Date.now();
     if (!runtime.reviewsBackfilled) { runtime.reviewsBackfilled = true; backfillReviews().catch(() => {}); } // findings from before the deep review
     runtime.incident = reviewDetections(3).catch((e) => warn(`drain review: ${e.message}`)).then(() => processIncidentQueue()).catch((e) => warn(`incident queue: ${e.message}`)).finally(() => { runtime.incident = null; });
   }
   // deep reviews on their own lane: a slow investigation in the queue must not hold them up
-  if (config.incidents.enabled && !runtime.deepReview) runtime.deepReview = processDeepReview().catch((e) => warn(`deep review: ${e.message}`)).finally(() => { runtime.deepReview = null; });
+  if (config.incidents.enabled && !runtime.deepReview && Date.now() - runtime.lastDeepReview > config.incidents.everyMs) {
+    runtime.lastDeepReview = Date.now();
+    runtime.deepReview = processDeepReview().catch((e) => warn(`deep review: ${e.message}`)).finally(() => { runtime.deepReview = null; });
+  }
   // measured accuracy: recomputed every hour beside the loop
   if (!runtime.accuracy && Date.now() - runtime.lastAccuracy > config.accuracy.everyMs) {
     runtime.lastAccuracy = Date.now();

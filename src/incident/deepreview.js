@@ -1,4 +1,4 @@
-// Deep review: a second, slower look at every finding, 10 minutes after it was raised (the first look is made in seconds, from one block's
+// Deep review: a second, slower look at every finding, a few minutes after it was raised (INCIDENT_REVIEW_DELAY_MINUTES, 3) (the first look is made in seconds, from one block's
 // worth of evidence). Findings are reviewed one at a time, in the order they were found:
 //   1. the full trace again (the money's path has had time to settle; upstream, own funds, the attacker signals)
 //   2. the receiver's past with whoever paid it: a wallet that has been receiving from the same accounts for months is consolidating,
@@ -19,7 +19,7 @@ import { valueOf } from './prices.js';
 import { packetOf } from './ai.js';
 
 import { prompt } from '../ai/prompts/index.js';
-const delay = () => (config.incidents.reviewDelayMinutes ?? 10) * 60e3;
+const delay = () => (config.incidents.reviewDelayMinutes ?? 3) * 60e3;
 
 /** Queue a finding for its deep review (once): `kind` is detection or incident, `foundTs` when it was found. */
 export async function scheduleReview(subject, kind, foundTs = Date.now()) {

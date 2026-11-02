@@ -39,7 +39,7 @@ Failed receipts move nothing.
 
 NEAR attached to a call (`deposit_and_stake`, `near_deposit`) counts as paid in, so withdrawing what you deposited nets to zero. An exchange paying a customer is a withdrawal, not a loss. The money trail never follows into a contract: a deposit into a protocol is a destination, and a protocol is never flagged.
 
-**Deep review.** Every finding (a drain report or a new case) gets a second, slower look `INCIDENT_REVIEW_DELAY_MINUTES` (10) after it was found. Findings are reviewed one at a time, in the order they were found (`deep_reviews`, `src/incident/deepreview.js`):
+**Deep review.** Every finding (a drain report or a new case) gets a second, slower look `INCIDENT_REVIEW_DELAY_MINUTES` (3) after it was found. Investigations and deep reviews each start at most once a minute (`INCIDENT_EVERY_SECONDS`, 60; the chain watch that spots drains keeps reading blocks every 15 s), and one investigation gets `INCIDENT_INVESTIGATE_TIMEOUT_MINUTES` (10) before the worker moves on. Findings are reviewed one at a time, in the order they were found (`deep_reviews`, `src/incident/deepreview.js`):
 1. The full trace again: by then the money's path has settled.
 2. The receiver's past with whoever paid it. Many earlier transfers from the same accounts, over months, mean a routine relationship (consolidation, treasury, OTC), not theft.
 3. The own-funds check.
