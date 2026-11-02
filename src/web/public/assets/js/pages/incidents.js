@@ -53,7 +53,7 @@ async function scInvestigate(q, force) {
 }
 
 // the live feed: what the chain watch saw, newest first, refreshed every 15 s while the page is open
-const LIVE = { only: '' };
+const LIVE = { only: '', delayMin: 3 }; // delayMin: minutes from a finding to its deep review (the server says)
 const LIVE_LVL = { critical: 'bad', high: 'bad', medium: 'neutral', low: 'good', info: 'unrated' };
 async function liveFeed() {
   const el = $('liveFeed');
@@ -62,6 +62,7 @@ async function liveFeed() {
   if (!$('liveFeed')) return;
   if (j.error) { el.innerHTML = `<div class="card err">${esc(j.error)}</div>`; return; }
   const W = j.watch, C = j.last24h;
+  if (j.review_delay_min != null) LIVE.delayMin = j.review_delay_min;
   const status = j.live ? `<span class="dot ok"></span> Watching NEAR live · block ${Number(W.height).toLocaleString('en-US')}${W.behind > 5 ? `, ${W.behind} behind` : ''} · checked ${since(W.tick_ts)}`
     : `<span class="dot bad"></span> ${W ? `The chain watch stopped ${since(W.tick_ts)} (the worker is not running)` : 'The chain watch has not run yet (it runs in the worker)'}`;
   const tab = (v, l) => `<button class="${LIVE.only === v ? 'on' : ''}" style="${LIVE.only === v ? 'border-color:var(--accent)' : ''}" onclick="LIVE.only='${v}';liveFeed()">${l}</button>`;
@@ -76,9 +77,11 @@ async function liveFeed() {
       <div class="muted small">reported by people; investigated from the chain</div></div>`; }
     if (x.type === 'drain') {
       const tags = x.tags?.length ? x.tags : x.verdict === 'own_funds' ? ['drain?', 'safe'] : ['drain?'];
-      const last = tags[tags.length - 1], due = (x.ts || 0) + 10 * 60e3;
-      const note = last === 'safe' ? `<b class="g">not a hack</b>: ${esc(x.own || x.why || '')}` : last === 'hack' ? `<b class="r">confirmed</b> ${x.incident ? ilink('/firewall/' + encodeURIComponent(x.incident), 'investigation →') : ''}`
-        : `${esc((x.reasons || []).slice(1).join('; '))}${Date.now() < due ? ` · deep review in ${Math.max(1, Math.round((due - Date.now()) / 60e3))} min` : x.why ? ` · ${esc(x.why)}` : ' · deep review pending'}`;
+      const last = tags[tags.length - 1], due = (x.ts || 0) + LIVE.delayMin * 60e3;
+      // the case behind a reviewed report stays one click away, whatever the verdict: its page has the trace and what NEAR AI said
+      const open = x.incident ? ` · ${ilink('/firewall/' + encodeURIComponent(x.incident), 'investigation →', 'the full investigation and the verdict of NEAR AI')}` : '';
+      const note = (last === 'safe' ? `<b class="g">not a hack</b>: ${esc(x.own || x.why || '')}` : last === 'hack' ? '<b class="r">confirmed</b>'
+        : `${esc((x.reasons || []).slice(1).join('; '))}${Date.now() < due ? ` · deep review in ${Math.max(1, Math.round((due - Date.now()) / 60e3))} min` : x.why ? ` · ${esc(x.why)}` : ' · deep review pending'}`) + open;
       return `<div class="lv" onclick="$('scInput').value='${esc(x.receiver)}';scCheck()" style="cursor:pointer">${tagTrail(tags)} <span class="acct">${esc(short(x.receiver, 26))}</span> took <b>${usd(x.usd)}</b> from ${x.kind === 'exchange' ? `<b>${esc(x.exchange || 'an exchange')}</b> hot wallet ` : ''}<span class="acct">${esc(short(x.protocol, 24))}</span>
       <div class="muted small">${note}</div></div>`;
     }
@@ -121,8 +124,8 @@ async function incidentPage(id) {
     <p><b>${esc(R.tag === 'safe' ? 'Not a hack' : R.tag === 'hack' ? 'Confirmed hack' : 'Not confirmed: still under review')}</b>: ${esc(R.why || '')}</p>
     ${R.ai?.reasons?.length ? `<ul class="small">${R.ai.reasons.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>` : ''}
     ${R.past?.length ? `<table class="small"><tr><th>Who paid it</th><th class="num">Earlier transfers</th><th class="num">USD</th><th>Since</th></tr>${R.past.map((p) => `<tr><td class="acct">${esc(short(p.account, 30))}</td><td class="num">${p.n}</td><td class="num">${usd(p.usd)}</td><td>${p.first_ts ? new Date(p.first_ts).toISOString().slice(0, 10) : '–'}</td></tr>`).join('')}</table>` : ''}
-    <p class="muted small" style="margin:6px 0 0">Run 10 minutes after the finding: the full trace again, the receiver's past with whoever paid it, then NEAR AI. A hack needs the rules' attacker signal; NEAR AI can clear an unconfirmed case.</p></div>`;
-  else if (!isHack) h += `<div class="card"><p class="small" style="margin:0">${tagChip(incTag(d))} This case is not a confirmed hack. Its deep review runs 10 minutes after it was found.</p></div>`;
+    <p class="muted small" style="margin:6px 0 0">Run ${LIVE.delayMin} minutes after the finding: the full trace again, the receiver's past with whoever paid it, then NEAR AI. A hack needs the rules' attacker signal; NEAR AI can clear an unconfirmed case.</p></div>`;
+  else if (!isHack) h += `<div class="card"><p class="small" style="margin:0">${tagChip(incTag(d))} This case is not a confirmed hack. Its deep review runs ${LIVE.delayMin} minutes after it was found.</p></div>`;
   if (A) h += `<div class="card"><div class="bar"><h2 style="margin:0">NEAR AI analyst</h2><span class="muted small">confidence ${esc(A.confidence)} · ${A.unverified_amounts?.length ? `<span class="r">unverified amounts: ${esc(A.unverified_amounts.join(', '))}</span>` : 'every amount checked against the evidence'}</span></div>
     <p>${esc(A.summary)}</p>
     <div class="grid2"><div><h3>How it worked</h3><ol class="small" style="padding-left:20px">${A.how_it_worked.map((s) => `<li style="margin:4px 0">${esc(s)}</li>`).join('')}</ol></div>
