@@ -25,9 +25,9 @@ const MAX_TXS = 800, HOP_TXS = 300;
 
 async function pool(items, n, f) { const out = new Array(items.length); let i = 0; await Promise.all(Array.from({ length: n }, async () => { while (i < items.length) { const k = i++; out[k] = await f(items[k], k); } })); return out; }
 /** Full transactions for hashes (20 per call). */
-export async function fetchTxs(hashes) {
+export async function fetchTxs(hashes, { concurrency = 4 } = {}) {
   const groups = []; for (let i = 0; i < hashes.length; i += 20) groups.push(hashes.slice(i, i + 20));
-  const res = await pool(groups, 4, (g) => txIndexer('/v0/transactions', { tx_hashes: g }).then((j) => j.transactions || []).catch(() => []));
+  const res = await pool(groups, concurrency, (g) => txIndexer('/v0/transactions', { tx_hashes: g }).then((j) => j.transactions || []).catch(() => []));
   return res.flat().sort((a, b) => (a.execution_outcome?.block_height || 0) - (b.execution_outcome?.block_height || 0));
 }
 /** Hashes of an account's transactions (newest first, paged), optionally within block heights. */
@@ -104,7 +104,7 @@ export async function traceIncident(input, { depth = 2, log = () => {} } = {}) {
   }
   if (input.target && !attacker) {
     suspects = await suspectsOfTarget(input.target, { hours: input.hours || 24 });
-    if (!suspects.length) return { _id: `target:${input.target}`, status: 'nothing_found', target: { account: input.target }, input, suspects, traced_ts: Date.now() };
+    if (!suspects.length) return { _id: `target:${input.target}`, status: 'nothing_found', target: { account: input.target }, input, suspects, scanned: suspects.scanned, capped: suspects.capped, traced_ts: Date.now() };
     attacker = suspects[0].account;
     hint = { target: input.target };
   }
@@ -283,18 +283,20 @@ async function heldBy(account) {
 }
 
 /** Receivers a contract paid the most (net of what they paid it) in the last `hours`: who to trace when a protocol was hit. */
-export async function suspectsOfTarget(target, { hours = 24, limit = 600 } = {}) {
+export async function suspectsOfTarget(target, { hours = 24, limit = 6000 } = {}) {
   const tip = (await txIndexer('/v0/account', { account_id: target, limit: 1, desc: true }).catch(() => null))?.account_txs?.[0]?.tx_block_height;
   if (!tip) return [];
   const { hashes } = await accountTxHashes(target, { limit, from: tip - Math.round(hours * 3600 * 1.0), to: tip });
-  const flows = (await fetchTxs(hashes)).flatMap(flowsOfTx);
+  const flows = (await fetchTxs(hashes, { concurrency: 8 })).flatMap(flowsOfTx);
   const per = new Map();
   for (const f of flows) {
     if (f.from === target && !isRouter(f.to)) { const x = per.get(f.to) || { got: [], paid: [] }; x.got.push(f); per.set(f.to, x); }
     if (f.to === target && !isRouter(f.from)) { const x = per.get(f.from) || { got: [], paid: [] }; x.paid.push(f); per.set(f.from, x); }
   }
   const rows = await Promise.all([...per].filter(([, x]) => x.got.length).map(async ([acc, x]) => { const g = usdSum(await valued(x.got)), p = usdSum(await valued(x.paid)); return { account: acc, got_usd: Math.round(g), paid_usd: Math.round(p), net_usd: Math.round(g - p), txs: [...new Set(x.got.map((f) => f.tx))].slice(0, 10) }; }));
-  return rows.filter((r) => r.net_usd > 100).sort((a, b) => b.net_usd - a.net_usd).slice(0, 10);
+  const out = rows.filter((r) => r.net_usd > 100).sort((a, b) => b.net_usd - a.net_usd).slice(0, 10);
+  out.scanned = hashes.length; out.capped = hashes.length >= limit;
+  return out;
 }
 
 export { IMPLICIT };

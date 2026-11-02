@@ -469,6 +469,33 @@ const routes = {
     const cur = auditJob(id);
     return { id, auto: doc?.auto || null, current: doc?.auto?.v === AUTO_AUDIT_V, job: cur ? { running: cur.running, started: cur.started, error: cur.error } : null };
   },
+  /** The live security feed: where the chain watch is, new contracts as they are audited, drains caught live and traced hacks. */
+  '/api/security/live': async (u) => {
+    const only = u.searchParams.get('only'); // '' | hacks | contracts | risky
+    const day = Date.now() - 86400e3;
+    const [watchMeta, cursor, deploys, detections, incidents, counts] = await Promise.all([
+      metaGet('security:watch'), col('meta').findOne({ _id: 'audit:deploy_cursor' }),
+      only === 'hacks' ? [] : col('contract_deploys').find({}, { projection: { account: 1, kind: 1, by: 1, signer: 1, ts: 1 } }).sort({ ts: -1 }).limit(only === 'risky' ? 400 : 60).toArray(),
+      only === 'contracts' || only === 'risky' ? [] : col('incident_detections').find({}).sort({ ts: -1 }).limit(20).toArray(),
+      only === 'contracts' || only === 'risky' ? [] : col('incidents').find({ status: { $in: ['confirmed', 'suspected'] } }, { projection: { status: 1, kind: 1, 'attacker.account': 1, 'target.account': 1, stolen_usd: 1, held_usd: 1, started_ts: 1, first_seen_ts: 1, 'ai.headline': 1, 'ai.attack_type': 1, 'trail.exit_usd': 1, detected: 1 } }).sort({ first_seen_ts: -1 }).limit(20).toArray(),
+      Promise.all([col('contract_deploys').countDocuments({ ts: { $gt: day } }), col('audits').countDocuments({ 'auto.ts': { $gt: day } }), col('audits').countDocuments({ 'auto.ts': { $gt: day }, 'auto.level': { $in: ['high', 'critical'] } }),
+        col('incident_detections').countDocuments({ ts: { $gt: day } }), col('incidents').countDocuments({ first_seen_ts: { $gt: day }, status: 'confirmed' })]),
+    ]);
+    // a worker from before the live feed only moves the deploy cursor: that is enough to tell the watch is running
+    const watch = watchMeta || (cursor ? { height: cursor.value, tick_ts: cursor.ts, behind: null } : null);
+    const latest = new Map(); for (const d of deploys) if (!latest.has(d.account)) latest.set(d.account, d);
+    const audits = new Map((await col('audits').find({ _id: { $in: [...latest.keys()] } }, { projection: { 'auto.label': 1, 'auto.level': 1, 'auto.control.summary': 1, 'auto.summary.headline': 1, 'auto.family_n': 1, 'auto.findings': { $slice: 3 } } }).toArray()).map((a) => [a._id, a.auto]));
+    let contracts = [...latest.values()].map((d) => { const a = audits.get(d.account); return { type: 'contract', ts: d.ts, account: d.account, by: d.signer || d.by, how: /Global/.test(d.kind) ? 'shared code' : 'own code',
+      label: a?.label || null, level: a?.level || null, control: a?.control?.summary || null, family_n: a?.family_n || null, headline: a?.summary?.headline || (a?.findings || []).find((f) => f.severity !== 'info')?.title || null, audited: !!a }; });
+    if (only === 'risky') contracts = contracts.filter((c) => ['high', 'critical'].includes(c.level));
+    const items = [
+      ...contracts.slice(0, 40),
+      ...detections.map((d) => ({ type: 'drain', ts: d.ts, receiver: d.receiver, protocol: d.protocol, usd: d.usd, reasons: d.reasons, txs: d.txs })),
+      ...incidents.map((i) => ({ type: 'hack', ts: i.started_ts || i.first_seen_ts, id: i._id, status: i.status, kind: i.kind, attacker: i.attacker?.account, target: i.target?.account || null, stolen_usd: i.stolen_usd, held_usd: i.held_usd, headline: i.ai?.headline || null, attack_type: i.ai?.attack_type || null, exits: i.trail?.exit_usd || {}, caught_live: !!i.detected })),
+    ].sort((a, b) => (b.ts || 0) - (a.ts || 0)).slice(0, 60);
+    const [deploys24, audited24, risky24, drains24, hacks24] = counts;
+    return { now: Date.now(), watch, live: !!watch && Date.now() - watch.tick_ts < 120e3, last24h: { deploys: deploys24, audited: audited24, risky: risky24, drains: drains24, hacks: hacks24 }, items };
+  },
   /** Hacks and scams: traced incidents (newest first) and what the live detector raised. */
   '/api/incidents': async (u) => {
     const f = {}, kind = u.searchParams.get('kind'); if (kind) f.kind = kind;

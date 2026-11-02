@@ -118,6 +118,7 @@
   .cta-row .cta-note { color:var(--muted); font-size:13px; max-width:520px; }
   .meta { color:var(--muted); font-size:12.5px; margin-top:5px; display:flex; flex-wrap:wrap; gap:6px 10px; align-items:center; }
   .banner { display:flex; align-items:center; gap:12px; padding:12px 14px; border-radius:12px; border:1px solid var(--line); background:var(--panel-2); margin-bottom:14px; flex-wrap:wrap; }
+  .lv { font-size:13.5px; line-height:1.45; } .lv .v { font-size:10.5px; padding:1px 6px; }
   .banner.good { border-color:color-mix(in srgb, var(--good) 40%, transparent); background:var(--good-soft); }
   .banner.bad, .banner.loss { border-color:color-mix(in srgb, var(--bad) 40%, transparent); background:var(--bad-soft); }
   .banner.win80, .banner.win50 { border-color:color-mix(in srgb, var(--good) 40%, transparent); background:var(--good-soft); }
@@ -342,7 +343,7 @@ const mixCell = (m, rug) => { const tot = mixTotal(m); if (!tot) return '<span c
 const wavg = (pairs) => { const w = pairs.reduce((s, [, x]) => s + (x || 0), 0); return w ? pairs.reduce((s, [r, x]) => s + r * (x || 0), 0) / w : null; };
 
 // ---- list state, filters, pager
-const ST = { scans: { kind: '', pass: '', bought: '', q: '', offset: 0 }, entities: { type: '', q: '', sort: 'funded', offset: 0 }, groups: { tag: '', q: '', sort: 'size', offset: 0 }, taggroups: { only: '', sort: 'pnl', offset: 0 }, nfts: { tab: '', q: '', sort: '', offset: 0 }, alerts: { tab: '', group: '', offset: 0 }, newContracts: { role: '', level: '', offset: 0 }, incidents: { kind: '', offset: 0 },
+const ST = { scans: { kind: '', pass: '', bought: '', q: '', offset: 0 }, entities: { type: '', q: '', sort: 'funded', offset: 0 }, groups: { tag: '', q: '', sort: 'size', offset: 0 }, taggroups: { only: '', sort: 'pnl', offset: 0 }, nfts: { tab: '', q: '', sort: '', offset: 0 }, alerts: { tab: '', group: '', offset: 0 }, newContracts: { role: '', level: '', offset: 0 }, 
   wallets: { q: '', tag: '', sort: 'tokens', offset: 0 }, creators: { q: '', filter: '', sort: '', offset: 0 }, tokens: { q: '', tab: '', status: '', launchpad: '', offset: 0 }, signals: { hours: 72 }, logs: { level: '' } };
 const setSt = (view, field, value, reset = true) => { ST[view][field] = value; if (reset && 'offset' in ST[view]) ST[view].offset = 0; render(); };
 const sel = (view, field, opts) => `<select onchange="setSt('${view}','${field}',this.value)">${opts.map(([v, l]) => `<option value="${esc(v)}" ${String(ST[view][field]) === String(v) ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select>`;
@@ -1487,6 +1488,7 @@ async function scCheck(q, { poll = 0 } = {}) {
     out.innerHTML = scBody({ kind: 'secret', verdict: 'danger', headline: 'This looks like a seed phrase or private key: never paste it anywhere.', points: [{ level: 'bad', text: 'Whoever sees it controls the wallet. It was cleared and not sent anywhere.' }, { level: 'warn', text: 'No real app, support agent or airdrop will ever ask for it.' }], actions: ['If you typed it into a website or sent it to someone, move your funds to a new wallet now.'] });
     return;
   }
+  if (/^target:/i.test(q)) { out.innerHTML = '<div class="card"><b>Looking for hacks on ' + esc(q.slice(7)) + '</b> <span class="small" id="scInv"></span></div>'; scInvestigate(q); return; }
   if (!poll) { history.replaceState(null, '', q.length > 200 ? '/firewall' : '/firewall?q=' + encodeURIComponent(q)); out.innerHTML = '<div class="card muted">Checking …</div>'; }
   const my = ++scSeq;
   const r = await get('/api/v1/inspect', { q }).catch((e) => ({ error: e.message }));
@@ -1519,7 +1521,7 @@ function scBody(r) {
         <div style="font-size:20px;font-weight:700;color:${cls === 'unknown' ? 'inherit' : color}">${label}</div><div style="font-size:15px;margin-top:2px">${esc(r.headline || '')}</div></div></div>
     ${pts ? `<ul style="padding:0;margin:14px 0 4px">${pts}</ul>` : ''}
     ${r.actions?.length ? `<div class="banner ${cls === 'bad' ? 'bad' : 'neutral'}" style="margin:12px 0 0"><div class="small"><b>What to do</b><ul style="margin:4px 0 0;padding-left:18px">${r.actions.map((a) => `<li>${esc(a)}</li>`).join('')}</ul></div></div>` : ''}
-    ${facts}${links ? `<p class="small" style="margin:12px 0 0">${links}</p>` : ''}
+    ${scIncidents(r)}${facts}${links ? `<p class="small" style="margin:12px 0 0">${links}</p>` : ''}
     ${r.pending ? '<p class="muted small" style="margin:8px 0 0">The full answer appears here when the audit finishes.</p>' : ''}</div>`;
 }
 function scExample(i) { $('scInput').value = SC_EXAMPLES[i][1]; scCheck(); }
@@ -1556,7 +1558,7 @@ async function fwCheck() {
 }
 views.firewall = async () => `<div class="grid2 main-l"><div><div class="card" style="padding:22px">
     <h2 style="font-size:20px;margin:0 0 4px">Is it safe?</h2>
-    <p class="muted" style="margin:0 0 12px">Paste anything from NEAR and get a plain answer: a wallet, a token or its name, an NFT, a contract, a transaction hash, a NearBlocks / Mintbase / Paras link, a website, a public key, or what your wallet asks you to sign.</p>
+    <p class="muted" style="margin:0 0 12px">Paste anything from NEAR and get a plain answer: a wallet, a token or its name, an NFT, a contract, a transaction hash, a NearBlocks / Mintbase / Paras link, a website, a public key, or what your wallet asks you to sign. Anything linked to a hack shows the investigation; <code>target:&lt;contract&gt;</code> looks for hacks on a contract.</p>
     <div class="bar" style="gap:8px;flex-wrap:nowrap"><textarea id="scInput" rows="1" placeholder="alice.near · BLACKDRAGON · a transaction hash · https://…" autocomplete="off" spellcheck="false"
       style="flex:1;font-size:16px;padding:12px 14px;border-radius:12px;resize:none;min-height:50px;max-height:180px;overflow:auto"
       oninput="this.style.height='auto';this.style.height=Math.min(180,this.scrollHeight)+'px'" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();scCheck()}"
@@ -1569,8 +1571,8 @@ views.firewall = async () => `<div class="grid2 main-l"><div><div class="card" s
     <div class="bar">${Object.keys(FW_EXAMPLES).map((k) => `<button onclick="fwExample('${esc(k)}')">${esc(k)}</button>`).join('')}</div>
     <textarea id="fwInput" rows="12" style="width:100%;font-family:var(--mono, monospace);font-size:12px" placeholder='{"signerId":"alice.near","receiverId":"wrap.near","actions":[{"type":"FunctionCall","params":{"methodName":"near_deposit","args":{},"gas":"30000000000000","deposit":"1000000000000000000000000"}}]}'></textarea>
     <div class="bar"><input id="fwSigner" placeholder="signer account (if not in the transaction)" style="flex:1"><label class="small"><input type="checkbox" id="fwExplain"> explain with AI</label><button class="cta" style="padding:9px 18px;font-size:14px" onclick="fwCheck()">Check</button></div>
-  </details><div id="fwOut"></div></div>
-  <div><div class="card"><h2>For wallets and dApps</h2>
+  </details><div id="fwOut"></div>
+  <details class="card"><summary><b>For wallets, dApps and developers:</b> the API and what it catches</summary><div class="card"><h2>For wallets and dApps</h2>
     <p class="small">Call the same check from your wallet or dApp right before the signing screen. It's free, works from any origin, and keeps nothing about the transaction.</p>
     <p class="small"><code>POST /api/v1/tx/check</code> with <code>{"transaction": …}</code>, <code>{"transactions": [ … ]}</code> or <code>{"transaction_base64": "…"}</code> → <code>verdict</code> (ok / caution / warn / block), the findings, and one plain line per action. Add <code>"explain": true</code> for an AI explanation.</p>
     <p class="small"><code>GET /api/v1/inspect?q=…</code> → the same answer as this page for anything pasted (wallet, contract, token, NFT, tx hash, link, website).</p>
@@ -1585,7 +1587,8 @@ views.firewall = async () => `<div class="grid2 main-l"><div><div class="card" s
     <li><b>Wallets:</b> extra full-access keys, apps connected to look-alike or flagged contracts, rugged and fake tokens held</li>
     <li><b>Contracts:</b> any type (tokens, NFTs, pools, lending …): who controls it and what its code lets them do</li>
     <li><b>Websites:</b> look-alike addresses of NEAR sites, "claim / airdrop / sync wallet" lures, punycode</li></ul>
-    <p class="muted small" style="margin:8px 0 0">The verdict comes from fixed rules and the automated contract audit; the AI only explains it and can never make something look safer.</p></div></div></div>`;
+    <p class="muted small" style="margin:8px 0 0">The verdict comes from fixed rules and the automated contract audit; the AI only explains it and can never make something look safer.</p></div></details></div>
+  <div id="liveFeed"><div class="card muted">Loading the live feed …</div></div></div>`;
 
 // ================================================================== HACKS & INCIDENTS (traced exploits and drainers, live detection)
 const INC_KIND = { protocol_exploit: 'Protocol exploit', wallet_drainer: 'Wallet drainer', suspicious_transfers: 'Suspicious transfers', none: '–' };
@@ -1606,42 +1609,63 @@ const chainLink = (chain, kind, v) => {
 };
 const incStatus = (s) => `<span class="v ${s === 'confirmed' ? 'bad' : s === 'suspected' ? 'neutral' : 'unknown'}">${esc(s || '–')}</span>`;
 
-views.incidents = async () => {
-  const S = ST.incidents, j = await get('/api/incidents', { kind: S.kind, offset: S.offset });
-  const q = new URLSearchParams(location.search).get('q') || '';
-  const det = (j.detections || []).map((d) => `<tr><td>${when(d.ts)}<br><span class="muted small">${since(d.ts)}</span></td><td>${nbAcc(d.receiver)}</td><td>${esc(d.protocol)}</td><td class="num">${usd(d.usd)}</td><td class="wrap small">${esc((d.reasons || []).join('; '))}</td><td>${ilink('/incidents?q=' + encodeURIComponent(d.receiver), 'Trace →')}</td></tr>`).join('');
-  return `<div class="card" style="padding:20px"><h2 style="margin:0 0 4px">Investigate a hack or scam</h2>
-      <p class="muted" style="margin:0 0 12px">Paste the attacker's account, one attack transaction (hash or NearBlocks / Pikespeak link), or <code>target:&lt;contract&gt;</code> for a contract that was hit. It rebuilds the attack from the chain: the attacker's accounts, the target, how much was taken and from whom, and where the money went, across chains, then the AI writes it up.</p>
-      <div class="bar" style="flex-wrap:nowrap;gap:8px"><input id="incQ" value="${esc(q)}" placeholder="realkingdom9695.near · a transaction hash · target:veax.near" style="flex:1;font-size:15px;padding:11px 13px" onkeydown="if(event.key==='Enter')incInvestigate()"><button class="cta" style="padding:11px 20px" onclick="incInvestigate()">Investigate</button></div>
-      <div id="incJob" class="small" style="margin-top:8px"></div></div>
-    <div class="card"><div class="bar"><h2 style="margin:0">Incidents <span class="muted">${j.total}</span></h2>${sel('incidents', 'kind', [['', 'every kind'], ['protocol_exploit', 'protocol exploits'], ['wallet_drainer', 'wallet drainers'], ['suspicious_transfers', 'suspicious transfers']])}<span class="spacer"></span><span class="muted small">trace queue: ${j.queue?.pending || 0} waiting · ${j.queue?.running || 0} running</span>${pager('incidents', j.total)}</div>
-      <table><tr><th>When</th><th>Target</th><th>Attacker</th><th>What</th><th class="num">Taken</th><th>Where it went</th><th class="num">Still held</th><th>Status</th></tr>
-      ${j.rows.map((r) => `<tr ${row('/incidents/' + encodeURIComponent(r._id))}><td>${when(r.started_ts || r.first_seen_ts)}<br><span class="muted small">${since(r.started_ts || r.first_seen_ts)}</span></td><td class="acct">${esc(short(r.target?.account || '–', 30))}</td><td class="acct">${esc(short(r.attacker?.account, 30))}</td>
-        <td class="wrap small"><b>${esc(r.ai?.attack_type || INC_KIND[r.kind] || '')}</b><div class="muted">${esc(short(r.ai?.headline || (r.signals || [])[0] || '', 140))}</div></td><td class="num r">${usd(r.stolen_usd)}</td>
-        <td class="small">${Object.entries(r.trail?.exit_usd || {}).map(([k, v]) => `${esc(k)}: ${usd(v)}`).join('<br>') || '<span class="muted">on NEAR</span>'}</td><td class="num">${usd(r.held_usd)}</td><td>${incStatus(r.status)}${r.detected ? '<div class="muted small">caught live</div>' : ''}</td></tr>`).join('') || empty(8, 'No incident traced yet. Investigate one above, or wait for the live detector.')}</table></div>
-    <div class="card"><h2>Caught live <span class="muted">money leaving a DeFi protocol for an account that looks like an attacker</span></h2>
-      <p class="muted small" style="margin-top:0">Every block is checked: a receiver that takes at least the threshold from one protocol within 30 minutes is a suspect when its account is new, it deployed token contracts of its own the day before, or it pulled several tokens at once. A suspect raises an alert at once and is traced automatically.</p>
-      <table><tr><th>When</th><th>Receiver</th><th>From</th><th class="num">Taken</th><th>Why</th><th></th></tr>${det || empty(6, 'Nothing caught yet.')}</table></div>`;
-};
-let incTimer = null;
-async function incInvestigate(force) {
-  const q = $('incQ').value.trim();
-  if (!q) return;
-  clearTimeout(incTimer);
-  history.replaceState(null, '', '/incidents?q=' + encodeURIComponent(q));
-  const tick = async (first) => {
-    if (!$('incJob')) return;
-    const r = await fetch('/api/incident/investigate?' + new URLSearchParams({ q, run: '1', ...(force ? { force: '1' } : {}) })).then((x) => x.json()).catch((e) => ({ error: e.message }));
-    if (r.error) { $('incJob').innerHTML = `<span class="r">${esc(r.error)}</span>`; return; }
-    if (r.job?.running) { $('incJob').innerHTML = `<span class="muted">Tracing … ${esc(r.job.step || '')} (started ${since(r.job.started)}; a full trace with the AI write-up takes 1-3 minutes)</span>`; incTimer = setTimeout(() => tick(false), 4000); return; }
-    if (r.job?.error) { $('incJob').innerHTML = `<span class="r">The trace failed: ${esc(r.job.error)}</span>`; return; }
-    const id = r.job?.id || r.existing;
-    if (id) { go('/incidents/' + encodeURIComponent(id)); return; }
-    $('incJob').innerHTML = '<span class="muted">Nothing found.</span>';
-  };
-  tick(true);
+// ---- one feature: the answer also shows the hacks it touches, can investigate one, and the live feed watches the chain
+const INC_ROLE_TXT = { attack_tx: 'one of the attack transactions', attacker: 'the attacker', fake_token: 'a fake token the attacker made', sub_account: "the attacker's sub-account", contract: 'a contract the attacker deployed',
+  cash_out_wallet: 'a wallet the stolen money went through', intents_account: "the attacker's NEAR Intents account", funder: 'the account that funded the attacker', target: 'the contract that was hit' };
+function scIncidents(r) {
+  let h = '';
+  if (r.incidents?.length) h += `<div class="banner bad" style="margin:12px 0 0;display:block"><b>Linked to ${r.incidents.length > 1 ? `${r.incidents.length} hacks` : 'a hack'}</b>${r.incidents.map((i) => `<div class="small" style="margin-top:6px">This is <b>${esc(INC_ROLE_TXT[i.role] || i.role)}</b>${i.when ? ` (${when(i.when).split(',')[0]})` : ''}: ${esc(i.headline || `~${usd(i.stolen_usd)} taken from ${i.target || 'wallets'}`)}
+      ${Object.keys(i.exits || {}).length ? `<div class="muted">Money went: ${Object.entries(i.exits).map(([k, v]) => `${esc(k)} ${usd(v)}`).join(', ')}${i.held_usd ? ` · ${usd(i.held_usd)} still on NEAR` : ''}</div>` : ''} ${ilink('/firewall/' + encodeURIComponent(i.id), 'Full investigation →')}</div>`).join('')}</div>`;
+  const q = r.investigate?.q || (['contract', 'token', 'nft_collection'].includes(r.kind) && r.account ? 'target:' + r.account : null);
+  if (q && !r.incidents?.some((i) => i.role === 'attack_tx' || i.role === 'target')) h += `<div class="bar" style="margin-top:12px"><button onclick="scInvestigate('${esc(q)}')">${r.investigate ? 'Investigate as a hack' : 'Look for hacks on this contract (last 24 h)'}</button><span class="muted small" id="scInv">${r.investigate ? 'Traces who got the money, where it went and who lost it (1-3 minutes).' : 'Finds who it paid the most and traces them.'}</span></div>`;
+  return h;
 }
-function go(path) { history.pushState(null, '', path); render(); }
+let scInvTimer = null;
+/** Investigate a hack from the check box (an account, a tx, or target:<contract>): runs the trace, then opens the investigation. */
+async function scInvestigate(q, force) {
+  clearTimeout(scInvTimer);
+  const el = () => $('scInv') || $('scOut');
+  const tick = async () => {
+    const r = await fetch('/api/incident/investigate?' + new URLSearchParams({ q, run: '1', ...(force ? { force: '1' } : {}) })).then((x) => x.json()).catch((e) => ({ error: e.message }));
+    if (!el()) return;
+    if (r.error) { el().innerHTML = `<span class="r">${esc(r.error)}</span>`; return; }
+    if (r.job?.running) { el().innerHTML = `<span class="muted">Tracing … ${esc(r.job.step || '')} (started ${since(r.job.started)})</span>`; scInvTimer = setTimeout(tick, 4000); return; }
+    if (r.job?.error) { el().innerHTML = `<span class="r">The trace failed: ${esc(r.job.error)}</span>`; return; }
+    const id = r.job?.id || r.existing;
+    if (id) { history.pushState(null, '', '/firewall/' + encodeURIComponent(id)); render(); return; }
+    el().innerHTML = '<span class="muted">No hack found: nobody took value from it for nothing in return.</span>';
+  };
+  tick();
+}
+
+// the live feed: what the chain watch saw, newest first, refreshed every 15 s while the page is open
+const LIVE = { only: '' };
+const LIVE_LVL = { critical: 'bad', high: 'bad', medium: 'neutral', low: 'good', info: 'unrated' };
+async function liveFeed() {
+  const el = $('liveFeed');
+  if (!el) return;
+  const j = await get('/api/security/live', { only: LIVE.only }).catch((e) => ({ error: e.message }));
+  if (!$('liveFeed')) return;
+  if (j.error) { el.innerHTML = `<div class="card err">${esc(j.error)}</div>`; return; }
+  const W = j.watch, C = j.last24h;
+  const status = j.live ? `<span class="dot ok"></span> Watching NEAR live · block ${Number(W.height).toLocaleString('en-US')}${W.behind > 5 ? `, ${W.behind} behind` : ''} · checked ${since(W.tick_ts)}`
+    : `<span class="dot bad"></span> ${W ? `The chain watch stopped ${since(W.tick_ts)} (the worker is not running)` : 'The chain watch has not run yet (it runs in the worker)'}`;
+  const tab = (v, l) => `<button class="${LIVE.only === v ? 'on' : ''}" style="${LIVE.only === v ? 'border-color:var(--accent)' : ''}" onclick="LIVE.only='${v}';liveFeed()">${l}</button>`;
+  const item = (x) => {
+    if (x.type === 'hack') return `<div class="lv" onclick="history.pushState(null,'','/firewall/${encodeURIComponent(x.id)}');render()" style="cursor:pointer"><span class="v bad">HACK</span> <b>${esc(x.attack_type || 'Exploit')}</b>${x.target ? ` on <span class="acct">${esc(short(x.target, 30))}</span>` : ''} · <b class="r">${usd(x.stolen_usd)}</b>${x.caught_live ? ' <span class="chip">caught live</span>' : ''}
+      <div class="muted small">${esc(short(x.headline || `by ${x.attacker}`, 160))}${Object.keys(x.exits || {}).length ? ` · ${Object.entries(x.exits).map(([k, v]) => `${esc(k)} ${usd(v)}`).join(', ')}` : ''}</div></div>`;
+    if (x.type === 'drain') return `<div class="lv" onclick="$('scInput').value='${esc(x.receiver)}';scCheck()" style="cursor:pointer"><span class="v neutral">DRAIN?</span> <span class="acct">${esc(short(x.receiver, 28))}</span> took <b>${usd(x.usd)}</b> from <span class="acct">${esc(short(x.protocol, 26))}</span>
+      <div class="muted small">${esc((x.reasons || []).slice(1).join('; '))}</div></div>`;
+    return `<div class="lv" onclick="$('scInput').value='${esc(x.account)}';scCheck()" style="cursor:pointer"><span class="v ${x.level ? LIVE_LVL[x.level] || 'unrated' : 'unrated'}">${esc(x.level || (x.audited ? '–' : 'auditing'))}</span> New contract <span class="acct">${esc(short(x.account, 34))}</span>${x.label ? ` <span class="chip">${esc(x.label)}</span>` : ''}
+      <div class="muted small">${esc(x.how)}${x.family_n > 1 ? ` (${x.family_n} accounts)` : ''} · by ${esc(short(x.by || '?', 24))}${x.control ? ` · ${esc(x.control)}` : ''}${x.headline ? ` · ${esc(short(x.headline, 110))}` : ''}</div></div>`;
+  };
+  el.innerHTML = `<div class="card"><div class="bar"><h2 style="margin:0">Live</h2><span class="small">${status}</span></div>
+    <div class="tiles" style="margin:10px 0">${tile('Contracts deployed', C.deploys, 'last 24 h')}${tile('Audited', C.audited, `${C.risky} high risk`, C.risky ? 'a' : '')}${tile('Drains caught', C.drains, 'last 24 h', C.drains ? 'a' : '')}${tile('Hacks', C.hacks, 'confirmed, 24 h', C.hacks ? 'r' : '')}</div>
+    <div class="bar small" style="gap:6px">${tab('', 'Everything')}${tab('hacks', 'Hacks & drains')}${tab('risky', 'High-risk contracts')}${tab('contracts', 'New contracts')}<span class="spacer"></span><span class="muted">updates every 15 s</span></div>
+    <div style="max-height:720px;overflow:auto;margin-top:6px">${j.items.map((x) => `<div style="display:flex;gap:10px;padding:8px 2px;border-bottom:1px solid var(--line)"><span class="muted small" style="width:64px;flex:none" title="${esc(when(x.ts))}">${esc(since(x.ts).replace(' ago', ''))}</span><div style="flex:1;min-width:0">${item(x)}</div></div>`).join('') || '<p class="muted small">Nothing yet.</p>'}</div></div>`;
+}
+let liveTimer = null;
+function liveStart() { clearInterval(liveTimer); liveFeed(); liveTimer = setInterval(() => { if (!$('liveFeed')) { clearInterval(liveTimer); return; } if (!document.hidden) liveFeed(); }, 15000); }
 
 async function incidentPage(id) {
   const { incident: d } = await get('/api/incident', { id });
@@ -1750,7 +1774,6 @@ const SECTIONS = [
   { label: 'Tokens & Scanner', views: [['tokens', 'Launches'], ['signals', 'Smart-money signals'], ...(SHOW_SIM ? [['sim', 'Simulated wallet']] : []), ['analysis', 'On-chain analysis'], ['scans', 'Evaluations'], ['audit', 'Contract audit']] },
   { label: 'Alerts', views: [['alerts', 'Alerts']] },
   { label: 'Safety Check', views: [['firewall', 'Is it safe?']] },
-  { label: 'Hacks', views: [['incidents', 'Incidents']] },
   { label: 'Accuracy', views: [['accuracy', 'Accuracy']] },
   { label: 'NFT Collectibles', views: [['nfts', 'Collections']] },
   { label: 'Wallets & Groups', views: [['groups', 'Linked groups'], ['taggroups', 'Tag groups'], ['wallets', 'Wallets'], ['creators', 'Creators'], ['entities', 'Funders & entities']] },
@@ -1760,7 +1783,7 @@ const TITLES = {
   signals: ['Smart-money signals', 'Recent tokens where winners (win80 / win50 / sniper) or loss wallets were among the early buyers'],
   groups: ['Linked groups', 'Wallets one owner controls, linked by money only: funding, transfers, shared funders and destinations (co-buy partners are marked apart)'],
   incidents: ['Hacks & incidents', 'Exploits and drainers traced from the chain: the attacker\'s accounts, the target, how much was taken and from whom, and where the money went, across chains'],
-  firewall: ['Safety check', 'Paste a wallet, token, NFT, contract, transaction, link or website: one plain answer on whether it is safe'],
+  firewall: ['Safety check', 'Is it safe? One answer for anything you paste, the hacks it is linked to, and a live watch of every new contract and every drain on NEAR'],
   accuracy: ['Measured accuracy', 'How often the gates, rule score, contract audit, AI analyst and group verdicts were right, scored against what happened afterwards'],
   alerts: ['Alerts', 'Rugs in progress, contract changes, ruggers launching again, NFT team selling and wash trades, and everything on your watchlist'],
   nfts: ['NFT Collectibles', 'NFT collections: who minted (and whether the team minted its own), minter groups linked by money, the secondary market with wash-trade checks, holders'],
@@ -1772,7 +1795,7 @@ const TITLES = {
   analysis: ['On-chain analysis', 'An investigation of any token: launch, creator, flows, who bought early and the groups behind them, who sold, who holds, risk notes'],
   logs: ['Log', 'Worker activity'], config: ['Settings', 'Read-only view of the configuration in use'],
 };
-const DETAIL = { incidents: incidentPage, nfts: nftPage, taggroups: tagGroupPage, creators: creatorPage, tokens: tokenPage, wallets: walletPage, groups: groupPage, entities: entityPage, scans: scanPage, sim: simPage, analysis: analysisPage };
+const DETAIL = { firewall: incidentPage, nfts: nftPage, taggroups: tagGroupPage, creators: creatorPage, tokens: tokenPage, wallets: walletPage, groups: groupPage, entities: entityPage, scans: scanPage, sim: simPage, analysis: analysisPage };
 function setUrl(path) { if (location.pathname !== path) history.pushState(null, '', path); }
 /** Link / tab click: change the path without reloading the page. */
 function nav(e, path) {
@@ -1792,6 +1815,7 @@ let seq = 0;
 async function render() {
   closeSearch();
   const seg = location.pathname.split('/').filter(Boolean).map(decodeURIComponent);
+  if (seg[0] === 'incidents') { history.replaceState(null, '', '/firewall' + (seg[1] ? '/' + encodeURIComponent(seg.slice(1).join('/')) : location.search)); return render(); } // Hacks is part of Safety Check
   let view = seg[0] === 'overview' ? 'explore' : seg[0] === 'monitor' ? 'tokens' : seg[0]; // the old Monitor page is part of /tokens now
   if (!views[view] || (view === 'sim' && !SHOW_SIM)) view = 'explore';
   if (!seg.length || seg[0] === 'overview' || seg[0] === 'monitor' || (seg[0] === 'sim' && !SHOW_SIM)) history.replaceState(null, '', '/' + view);
@@ -1807,7 +1831,7 @@ async function render() {
   $('main').classList.add('loading');
   try {
     const html = detail ? await DETAIL[view](id) : await views[view]();
-    if (my === seq) { $('main').innerHTML = html; if (view === 'audit' && id) runAudit(id); if (view === 'firewall') scFromUrl(); if (view === 'incidents' && !id && new URLSearchParams(location.search).get('q')) incInvestigate(); if (view === 'analysis' && id) anaPoll(id); if (view === 'nfts' && id) nftPoll(id); }
+    if (my === seq) { $('main').innerHTML = html; if (view === 'audit' && id) runAudit(id); if (view === 'firewall' && !id) { scFromUrl(); liveStart(); } if (view === 'analysis' && id) anaPoll(id); if (view === 'nfts' && id) nftPoll(id); }
   } catch (e) { if (my === seq) $('main').innerHTML = `<div class="card err">${esc(e.message)}</div>`; }
   if (my === seq) $('main').classList.remove('loading');
 }

@@ -65,7 +65,7 @@ export async function scanBlocks(blocks) {
     const detected = { ts: now, protocol: w.protocol, receiver: w.receiver, usd: Math.round(w.usd), txs: [...w.txs].slice(0, 10), tokens: [...w.tokens], reasons: s.reasons };
     await col('incident_detections').updateOne({ _id: `${w.receiver}|${w.protocol}|${Math.floor(w.first / 3600e3)}` }, { $set: detected }, { upsert: true });
     await raise(`drain:${w.receiver}:${w.protocol}:${Math.floor(w.first / 3600e3)}`, { type: 'drain_suspected', severity: 'high', title: `Possible exploit in progress: ${w.receiver} took ~$${Math.round(w.usd).toLocaleString('en-US')} from ${w.protocol}`,
-      text: `${s.reasons.join('; ')}. Tracing it now.`, url: `/incidents?q=${encodeURIComponent(w.receiver)}`, related: { wallets: [w.receiver] }, data: detected });
+      text: `${s.reasons.join('; ')}. Tracing it now.`, url: `/firewall?q=${encodeURIComponent(w.receiver)}`, related: { wallets: [w.receiver] }, data: detected });
     await enqueueIncident({ account: w.receiver }, { reason: 'detected', detected });
     info(`incident suspected: ${w.receiver} took $${Math.round(w.usd)} from ${w.protocol} (${s.reasons.join('; ')})`);
     raised.push(detected);

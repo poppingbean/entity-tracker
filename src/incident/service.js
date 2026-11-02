@@ -51,7 +51,7 @@ export async function investigate(input, { ai = true, detected = null, log = () 
     const exits = Object.entries(doc.trail?.exit_usd || {}).map(([k, v]) => `${k}: $${v.toLocaleString('en-US')}`).join(', ');
     await raise(`incident:${doc._id}`, { type: 'incident', severity: 'high', title: `${doc.kind === 'wallet_drainer' ? 'Wallet drainer' : 'Exploit'}: ~$${doc.stolen_usd.toLocaleString('en-US')} taken from ${t} by ${doc.attacker.account}`,
       text: `${doc.ai?.headline || doc.signals.join('; ')}${exits ? `. Money went to ${exits}` : ''}${doc.held_usd ? `. The attacker still holds ~$${doc.held_usd.toLocaleString('en-US')}` : ''}.`,
-      url: `/incidents/${encodeURIComponent(doc._id)}`, related: { wallets: [doc.attacker.account] }, data: { incident: doc._id, target: doc.target?.account, stolen_usd: doc.stolen_usd } });
+      url: `/firewall/${encodeURIComponent(doc._id)}`, related: { wallets: [doc.attacker.account] }, data: { incident: doc._id, target: doc.target?.account, stolen_usd: doc.stolen_usd } });
     await col('incidents').updateOne({ _id: doc._id }, { $set: { alerted: true } });
   }
   info(`incident ${doc._id}: ${doc.status} ${doc.kind} $${doc.stolen_usd} (${flagged} accounts flagged)`);

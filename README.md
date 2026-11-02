@@ -111,7 +111,20 @@ Where it shows: the **Contract audit** page (`/audit`) has the **New contracts**
 
 ## Hacks and incidents
 
-When a contract is drained or a drainer empties wallets, the **Hacks** page (`/incidents`) rebuilds the incident from the chain, the way an investigator would by hand. Paste the attacker's account, an attack transaction (or its NearBlocks / Pikespeak link), or `target:<contract>`:
+Hacks are part of **Safety Check** (`/firewall`), not a separate page. One box answers "is it safe?" for anything pasted, and the same answer shows the hacks it is linked to:
+- a transaction that was one of an attack's;
+- an account that is the attacker, one of its fake tokens or a cash-out wallet;
+- a contract that was hit.
+
+A transaction where a contract paid out a lot gets an "Investigate as a hack" button. Every contract gets "Look for hacks on this contract", which reads up to 6,000 of its recent transactions. Typing `target:<contract>` does the same.
+
+Beside the box, a **live feed** refreshes every 15 seconds. It shows:
+- where the chain watch is (block, lag);
+- every newly deployed contract as the automated audit checks it;
+- drains caught live, and traced hacks;
+- counts for the last 24 hours.
+
+Each investigation (`/firewall/<incident>`) rebuilds the incident from the chain, the way an investigator would by hand:
 
 - **Attacker:** the signer, the sub-accounts and fake tokens it deployed, the NEAR Intents accounts that withdrew to it, the cash-out wallets, and who created and funded the first account.
 - **Target and attack:** the contract that paid out for nothing in return, and the attack transactions with their calls.
