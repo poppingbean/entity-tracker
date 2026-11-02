@@ -109,6 +109,34 @@ Every contract deployed on NEAR is audited automatically, and the audit understa
 
 Where it shows: the **Contract audit** page (`/audit`) has the **New contracts** feed (filter by type and level, queue status) and the automated audit above the token checks for any account; NFT collection pages get a **Contract safety** card; alerts `contract_risk` (a new contract that is critical, or deployed / owned by a flagged account) and `contract_power_added` (a redeploy that adds powers); the transaction firewall turns strong findings into flags and queues contracts it hasn't seen; and `GET /api/v1/contract?id=` gives the audit to wallets and dApps. Settings: `AUTO_AUDIT_*`, `GITHUB_TOKEN` (optional). Design and measurements: [docs/auto-audit-design.md](docs/auto-audit-design.md).
 
+## Hacks and incidents
+
+When a contract is drained or a drainer empties wallets, the **Hacks** page (`/incidents`) rebuilds the incident from the chain, the way an investigator would by hand. Paste the attacker's account, an attack transaction (or its NearBlocks / Pikespeak link), or `target:<contract>`:
+
+- **Attacker:** the signer, the sub-accounts and fake tokens it deployed, the NEAR Intents accounts that withdrew to it, the cash-out wallets, and who created and funded the first account.
+- **Target and attack:** the contract that paid out for nothing in return, and the attack transactions with their calls.
+- **Losses and victims:** per token in USD at today's prices; every account whose value ended up with the attacker.
+- **Money trail:** hop by hop, through NEAR Intents **1Click** swaps (the destination chain, recipient address and destination transaction come from 1Click's public status), exchanges and bridges.
+- **What's left:** what the attacker still holds, and which of it an issuer can freeze (USDT, USDC).
+
+The **AI analyst** (Sonnet) writes the report: how the attack worked, impact, money trail, what can still be done, recommendations and open questions. Every dollar amount it quotes is checked against the evidence.
+
+Confirmed incidents raise a `incident` alert and flag the attacker's accounts for the transaction firewall and Safety Check. An exploited contract shows the incident on Safety Check.
+
+**Live detection** runs on the blocks the deploy watcher already reads:
+- It sums every flow out of a DeFi protocol per receiver over 30 minutes.
+- A receiver that took at least `INCIDENT_MIN_USD` is a suspect when either:
+  - its account is new (`INCIDENT_FRESH_HOURS`), or it deployed token contracts of its own the day before (the fake-token pattern behind the Veax and Rhea exploits); or
+  - it pulled several tokens at once.
+- A suspect raises a `drain_suspected` alert at once and is traced automatically.
+
+Replaying the Veax blocks, the attacker stands out at $62.8k in 5 tokens across 3 transactions; the next-largest receiver took $767.
+
+More access:
+- CLI: `node src/cli.js incident <account | tx hash | target:<contract>>`.
+- API: `GET /api/v1/incidents`, `GET /api/v1/incident?id=`.
+- Collections: `incidents`, `incident_queue`, `incident_detections`.
+
 ## On-chain analysis
 
 The **On-chain analysis** page (`/analysis`, `/analysis/<token>`, linked from every token page) writes up a token the way the hand-made investigations in `../reports` do, from what the tracker already stores: launch mechanics and the contract audit; the creator (wallet age, funders, earlier launches, pool sales, balance now); price and flows in the first 15 min / 1 h / 24 h; who bought early (delay, NEAR, share of supply, wallet age, funder, tag, group, notes); the **linked groups** among the early buyers with their share of the early NEAR and their record elsewhere; funders shared by several early buyers (strong when a personal wallet, weak when an exchange); **repeat actors** seen early in other launches; the biggest sellers; the largest holders with balances read live (`ft_balance_of`, the creator always included); and rule-based risk notes. It is cached for 15 min in `analyses` (Rebuild forces it). **Ask NEAR AI** adds a written summary, key findings and a conclusion from the same figures, written by Claude Sonnet 5.5 through NEAR AI (`NEAR_AI_ANALYSIS_MODEL`, default `anthropic/claude-sonnet-5-5`; runs in the background and streams the answer, usually under a minute; `NEAR_AI_ANALYSIS_TIMEOUT_SECONDS`, default 600; rate-limited per IP). On a public dashboard the groups' rule tags are removed.

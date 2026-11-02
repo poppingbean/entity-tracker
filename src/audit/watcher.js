@@ -8,6 +8,7 @@ import { info, warn } from '../log.js';
 import { autoAudit } from './auto.js';
 import { raise } from '../alerts/store.js';
 import { STRONG_FINDINGS } from './service.js';
+import { scanBlocks } from '../incident/detect.js';
 
 const AUTH = () => (config.fastnearApiKey ? { authorization: `Bearer ${config.fastnearApiKey}` } : {});
 const NEARDATA = () => config.autoAudit.neardataUrl;
@@ -55,11 +56,11 @@ export async function watchDeploys() {
   await Promise.all(Array.from({ length: A.fetchConcurrency }, async () => {
     while (i < heights.length) { const k = i++; try { results[k] = { b: await block(heights[k]) }; } catch (e) { results[k] = { err: e.message }; } }
   }));
-  let last = cursor, found = [];
+  let last = cursor, found = [], blocks = [];
   for (let k = 0; k < heights.length; k++) {
     if (results[k].err) break;
     last = heights[k];
-    if (results[k].b) found.push(...deploysInBlock(results[k].b));
+    if (results[k].b) { found.push(...deploysInBlock(results[k].b)); blocks.push(results[k].b); }
   }
   if (found.length) {
     await col('contract_deploys').bulkWrite(found.map((d) => ({ replaceOne: { filter: { _id: d._id }, replacement: d, upsert: true } })), { ordered: false });
@@ -68,6 +69,8 @@ export async function watchDeploys() {
         priority: /^DeployContract|^DeployGlobal/.test(d.kind) ? 2 : 1 } }, upsert: true } })), { ordered: false });
   }
   await metaSet('audit:deploy_cursor', last);
+  // the same blocks feed the live hack detector (protocol drains)
+  await scanBlocks(blocks).catch((e) => warn(`incident detector: ${e.message}`));
   return { blocks: last - cursor, deploys: found.length, behind: top - last };
 }
 

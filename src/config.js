@@ -77,6 +77,13 @@ export const config = {
     aiDailyBudget: num(process.env.AUTO_AUDIT_AI_PER_DAY, 200),            // AI calls per day for the audit stages
     writeUp: process.env.AUTO_AUDIT_WRITE_UP !== 'false',                  // a plain-language AI summary with every audit
   },
+  // hacks and scams: live detection of protocol drains (beside the deploy watcher) and the incident tracer
+  incidents: {
+    enabled: process.env.INCIDENTS_ENABLED !== 'false',
+    minUsd: num(process.env.INCIDENT_MIN_USD, 5000),           // a receiver must take at least this from one protocol within 30 min
+    alwaysUsd: num(process.env.INCIDENT_ALWAYS_USD, 250000),   // ... and is traced whatever it looks like above this
+    freshHours: num(process.env.INCIDENT_FRESH_HOURS, 72),      // an account younger than this is a suspect
+  },
   // transaction firewall (POST /api/v1/tx/check): open to any wallet / dApp, cross-origin
   firewall: {
     maxBodyBytes: num(process.env.FIREWALL_MAX_BODY_BYTES, 2_000_000),  // a DeployContract carries the code

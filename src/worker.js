@@ -14,6 +14,7 @@ import { deliverPending } from './alerts/deliver.js';
 import { pollTelegram } from './alerts/telegram.js';
 import { evaluateAccuracy } from './accuracy/run.js';
 import { watchDeploys, processAuditQueue } from './audit/watcher.js';
+import { processIncidentQueue } from './incident/service.js';
 import { evaluateGroups, reviewPending } from './evaluate/run.js';
 import { profileCreators } from './evaluate/creators.js';
 import { checkAi, aiEnabled, aiStatus } from './ai/nearai.js';
@@ -21,7 +22,7 @@ import { scanTick, followUpTick, blacklistCreator } from './scanner/pipeline.js'
 import { managePositions } from './sim/portfolio.js';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-export const runtime = { startedTs: Date.now(), cycles: 0, lastCycleTs: null, stopping: false, lastEvalTs: 0, lastPositionCheck: 0, lastRugCheck: 0, lastCreatorCheck: 0, reviewing: null, reviewed: 0, nft: null, nftLast: null, alerts: null, lastAlerts: 0, telegram: null, accuracy: null, lastAccuracy: 0, autoAudit: null, lastAutoAudit: 0 };
+export const runtime = { startedTs: Date.now(), cycles: 0, lastCycleTs: null, stopping: false, lastEvalTs: 0, lastPositionCheck: 0, lastRugCheck: 0, lastCreatorCheck: 0, reviewing: null, reviewed: 0, nft: null, nftLast: null, alerts: null, lastAlerts: 0, telegram: null, accuracy: null, lastAccuracy: 0, autoAudit: null, lastAutoAudit: 0, incident: null };
 
 /** One pass of the pipeline. Returns what it did, so callers (the CLI) can loop until idle. */
 export async function cycle({ evaluate = true } = {}) {
@@ -59,6 +60,10 @@ export async function cycle({ evaluate = true } = {}) {
   if (config.autoAudit.enabled && !runtime.autoAudit && Date.now() - runtime.lastAutoAudit > config.autoAudit.everyMs) {
     runtime.lastAutoAudit = Date.now();
     runtime.autoAudit = watchDeploys().catch((e) => warn(`deploy watcher: ${e.message}`)).then(() => processAuditQueue()).catch((e) => warn(`audit queue: ${e.message}`)).finally(() => { runtime.autoAudit = null; });
+  }
+  // hacks the detector (or anyone) queued: traced one at a time, beside the rest (a trace takes a minute or two)
+  if (config.incidents.enabled && !runtime.incident) {
+    runtime.incident = processIncidentQueue().catch((e) => warn(`incident queue: ${e.message}`)).finally(() => { runtime.incident = null; });
   }
   // measured accuracy: recomputed every hour beside the loop
   if (!runtime.accuracy && Date.now() - runtime.lastAccuracy > config.accuracy.everyMs) {

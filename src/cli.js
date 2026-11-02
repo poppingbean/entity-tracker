@@ -19,6 +19,7 @@
 //   node src/cli.js check-ai                           test the NEAR AI key / model
 //   node src/cli.js flag <account> critical|high|medium "<reason>"   report an account to the transaction firewall (unflag <account> to undo)
 //   node src/cli.js check-tx '<json>'                    run the transaction firewall on a request body
+//   node src/cli.js incident <account|tx hash|target:<contract>> [--no-ai]   trace a hack: attacker accounts, target, losses, victims, money trail
 //   node src/cli.js accuracy                           score gates, rule score, audit risk, AI and group verdicts against what happened
 //   node src/cli.js backtest KEY=VALUE ...             replay the gates on every stored check with config.rules changed (e.g. minBuyers=8)
 //   node src/cli.js truth <kind> <id> bad|good|clear [note]   hand label (kind: token|group|wallet|collection)
@@ -177,6 +178,10 @@ try {
     info(`firewall: ${args[0]} flagged ${args[1]} (${args[2] || 'reported'})`);
   } else if (cmd === 'unflag') {
     await unflagAccount(args[0]); info(`firewall: ${args[0]} unflagged`);
+  } else if (cmd === 'incident') {
+    const { investigate, parseInvestigation } = await import('./incident/service.js');
+    const d = await investigate(parseInvestigation(args[0]), { ai: !args.includes('--no-ai'), log: (m) => info(m) });
+    console.log(JSON.stringify({ id: d._id, status: d.status, kind: d.kind, target: d.target?.account, stolen_usd: d.stolen_usd, held_usd: d.held_usd, exits: d.trail.exit_usd, signals: d.signals, ai: d.ai?.headline }, null, 1));
   } else if (cmd === 'check-tx') {
     // node src/cli.js check-tx '<json body>' : what the firewall API answers
     console.log(JSON.stringify(await checkRequest(JSON.parse(args[0])), null, 1));
