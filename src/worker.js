@@ -16,6 +16,7 @@ import { evaluateAccuracy } from './accuracy/run.js';
 import { watchDeploys, processAuditQueue } from './audit/watcher.js';
 import { processIncidentQueue } from './incident/service.js';
 import { refreshExchangeRegistry } from './incident/exchanges.js';
+import { reviewDetections } from './incident/detect.js';
 import { pollNews } from './incident/signals.js';
 import { evaluateGroups, reviewPending } from './evaluate/run.js';
 import { profileCreators } from './evaluate/creators.js';
@@ -73,9 +74,9 @@ export async function cycle({ evaluate = true } = {}) {
     runtime.lastNews = Date.now();
     runtime.news = pollNews().catch((e) => warn(`security news: ${e.message}`)).finally(() => { runtime.news = null; });
   }
-  // hacks the detector (or anyone) queued: traced one at a time, beside the rest (a trace takes a minute or two)
+  // hacks the detector (or anyone) queued: traced one at a time, beside the rest (a trace takes a minute or two); unchecked drain reports first
   if (config.incidents.enabled && !runtime.incident) {
-    runtime.incident = processIncidentQueue().catch((e) => warn(`incident queue: ${e.message}`)).finally(() => { runtime.incident = null; });
+    runtime.incident = reviewDetections(3).catch((e) => warn(`drain review: ${e.message}`)).then(() => processIncidentQueue()).catch((e) => warn(`incident queue: ${e.message}`)).finally(() => { runtime.incident = null; });
   }
   // measured accuracy: recomputed every hour beside the loop
   if (!runtime.accuracy && Date.now() - runtime.lastAccuracy > config.accuracy.everyMs) {

@@ -14,6 +14,7 @@ import { flowsOfReceipt, NEAR } from './flows.js';
 import { valueOf } from './prices.js';
 import { enqueueIncident } from './service.js';
 import { exchangeWalletMap, unusualOutflow } from './exchanges.js';
+import { ownFunds } from './ownfunds.js';
 import { oneClickSwap } from './oneclick.js';
 import { viewAccount } from '../audit/rpc.js';
 import { builtinLabel } from '../labels.js';
@@ -193,8 +194,12 @@ export async function scanBlocks(blocks) {
     const s = await suspicion(w);
     if (!s.suspect) { w.raised = 'checked'; w.checked_usd = w.usd; continue; }
     w.raised = true;
-    const detected = { ts: now, protocol: w.protocol, receiver: w.receiver, usd: Math.round(w.usd), txs: [...w.txs].slice(0, 10), tokens: [...w.tokens], reasons: s.reasons };
+    // its own money? (deposits into this protocol at least a day before): shown on the feed as a withdrawal, no alert, no trace
+    const own = await ownFunds(w.receiver, w.protocol, { beforeTs: w.first, withdrawnUsd: w.usd }).catch(() => null);
+    const detected = { ts: now, event_ts: w.first, protocol: w.protocol, receiver: w.receiver, usd: Math.round(w.usd), txs: [...w.txs].slice(0, 10), tokens: [...w.tokens], reasons: s.reasons,
+      verdict: own?.own_funds ? 'own_funds' : 'suspect', own: own ? { explanation: own.explanation, deposited_usd: own.deposited_usd, first_ts: own.first_ts, last_ts: own.last_ts, txs: own.txs } : null, reviewed_ts: Date.now() };
     await col('incident_detections').updateOne({ _id: `${w.receiver}|${w.protocol}|${Math.floor(w.first / 3600e3)}` }, { $set: detected }, { upsert: true });
+    if (own?.own_funds) { info(`large withdrawal of own funds: ${w.receiver} took $${Math.round(w.usd)} from ${w.protocol} (${own.explanation})`); continue; }
     await raise(`drain:${w.receiver}:${w.protocol}:${Math.floor(w.first / 3600e3)}`, { type: 'drain_suspected', severity: 'high', title: `Possible exploit in progress: ${w.receiver} took ~$${Math.round(w.usd).toLocaleString('en-US')} from ${w.protocol}`,
       text: `${s.reasons.join('; ')}. Tracing it now.`, url: `/firewall?q=${encodeURIComponent(w.receiver)}`, related: { wallets: [w.receiver] }, data: detected });
     await enqueueIncident({ account: w.receiver }, { reason: 'detected', detected });
@@ -202,6 +207,21 @@ export async function scanBlocks(blocks) {
     raised.push(detected);
   }
   return [...xraised, ...raised];
+}
+
+/** Re-check detections that were never checked for own funds (older ones, or after a rule change): relabel them and their alerts. */
+export async function reviewDetections(limit = 10) {
+  const rows = await col('incident_detections').find({ kind: { $ne: 'exchange' }, verdict: { $exists: false } }).limit(limit).toArray();
+  for (const d of rows) {
+    const own = await ownFunds(d.receiver, d.protocol, { beforeTs: d.event_ts || d.ts, withdrawnUsd: d.usd }).catch(() => null);
+    if (!own) continue;
+    await col('incident_detections').updateOne({ _id: d._id }, { $set: { verdict: own.own_funds ? 'own_funds' : 'suspect', own: { explanation: own.explanation, deposited_usd: own.deposited_usd, first_ts: own.first_ts, last_ts: own.last_ts, txs: own.txs }, reviewed_ts: Date.now() } });
+    if (own.own_funds) {
+      await col('alerts').updateMany({ type: { $in: ['drain_suspected', 'incident'] }, 'related.wallets': d.receiver, title: { $not: /^(Not a hack|Retracted)/ } }, [{ $set: { title: { $concat: ['Not a hack (own funds): ', '$title'] }, severity: 'info' } }]);
+      info(`detection ${d._id}: own funds (${own.explanation})`);
+    }
+  }
+  return rows.length;
 }
 
 /** Does this receiver look like an attacker? (account age, own fresh token contracts, many tokens in one go) */

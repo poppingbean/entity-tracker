@@ -426,7 +426,9 @@ views.explore = async () => {
   const W = live?.watch;
   const watchLine = live?.live ? `<span class="dot ok"></span> Watching NEAR live · block ${Number(W.height).toLocaleString('en-US')} · checked ${since(W.tick_ts)}` : `<span class="dot bad"></span> The chain watch is not running`;
   const lvl = (l, audited) => `<span class="v ${l ? LIVE_LVL[l] || 'unrated' : 'unrated'}">${esc(l || (audited ? '–' : 'auditing'))}</span>`;
-  const hackRow = (x) => x.type === 'moved'
+  const hackRow = (x) => x.type === 'drain' && x.verdict === 'own_funds'
+    ? `<tr ${row('/firewall?q=' + encodeURIComponent(x.receiver))}><td>${since(x.ts)}</td><td><span class="v good">withdrawal</span></td><td class="wrap"><b>${esc(short(x.protocol, 28))}</b><div class="muted small">not a hack: ${esc(short(x.own || '', 110))}</div></td><td class="num">${usd(x.usd)}</td></tr>`
+    : x.type === 'moved'
     ? `<tr ${row('/firewall/' + encodeURIComponent(x.incident))}><td>${since(x.ts)}</td><td><span class="v bad">moved</span></td><td class="wrap"><b>${amt(x.amount)} ${esc(x.symbol)} of stolen funds</b><div class="muted small">from ${esc(short(x.from, 22))}${x.idle_h >= 24 ? `, idle ${x.idle_h >= 48 ? Math.round(x.idle_h / 24) + ' days' : x.idle_h + ' h'}` : ''}${x.swap ? ` → ${esc(x.swap.asset)} on ${esc(x.swap.chain)}` : ''}</div></td><td class="num r">${usd(x.usd)}</td></tr>`
     : x.type === 'hack'
     ? `<tr ${row('/firewall/' + encodeURIComponent(x.id))}><td>${since(x.ts)}</td><td><span class="v bad">hack</span></td><td class="wrap"><b>${esc(x.target || 'wallets')}</b><div class="muted small">${esc(short(x.attack_type || x.headline || '', 90))}</div></td><td class="num r">${usd(x.stolen_usd)}</td></tr>`
@@ -1697,6 +1699,8 @@ async function liveFeed() {
       <div class="muted small">${esc(x.source)}${x.exchange ? ` · mentions ${esc(x.exchange)}` : ''}${(x.accounts || []).length ? ` · names ${x.accounts.map((a) => esc(short(a, 20))).join(', ')} (investigating)` : ''}</div></div>`;
     if (x.type === 'report') { const q = x.input?.account || x.input?.tx || (x.input?.target ? 'target:' + x.input.target : ''); return `<div class="lv" onclick="$('scInput').value='${esc(q)}';scCheck()" style="cursor:pointer"><span class="v unrated">REPORT</span> <span class="acct">${esc(short(q, 34))}</span>${x.count > 1 ? ` <span class="muted">· ${x.count} reports</span>` : ''}
       <div class="muted small">reported by people; investigated from the chain</div></div>`; }
+    if (x.type === 'drain' && x.verdict === 'own_funds') return `<div class="lv" onclick="$('scInput').value='${esc(x.receiver)}';scCheck()" style="cursor:pointer"><span class="v good">WITHDRAWAL</span> <span class="acct">${esc(short(x.receiver, 28))}</span> took <b>${usd(x.usd)}</b> out of <span class="acct">${esc(short(x.protocol, 26))}</span>: <b>not a hack</b>
+      <div class="muted small">${esc(x.own || '')}</div></div>`;
     if (x.type === 'drain') return `<div class="lv" onclick="$('scInput').value='${esc(x.receiver)}';scCheck()" style="cursor:pointer"><span class="v neutral">DRAIN?</span> <span class="acct">${esc(short(x.receiver, 28))}</span> took <b>${usd(x.usd)}</b> from ${x.kind === 'exchange' ? `<b>${esc(x.exchange || 'an exchange')}</b> hot wallet ` : ''}<span class="acct">${esc(short(x.protocol, 26))}</span>
       <div class="muted small">${esc((x.reasons || []).slice(1).join('; '))}</div></div>`;
     return `<div class="lv" onclick="$('scInput').value='${esc(x.account)}';scCheck()" style="cursor:pointer"><span class="v ${x.level ? LIVE_LVL[x.level] || 'unrated' : 'unrated'}">${esc(x.level || (x.audited ? '–' : 'auditing'))}</span> New contract <span class="acct">${esc(short(x.account, 34))}</span>${x.label ? ` <span class="chip">${esc(x.label)}</span>` : ''}
@@ -1718,7 +1722,7 @@ async function incidentPage(id) {
   const pasted = moved_from || d.pasted;
   let h = pasted && pasted !== d.attacker.account ? `<div class="banner neutral" style="display:block"><b>${esc(short(pasted, 40))}</b> is part of this incident: ${esc(INC_ROLE_TXT[(d.accounts || []).find((a) => a.account === pasted)?.role] || 'one of its wallets')}. The investigation follows the money from where it first arrived.</div>` : '';
   h += `<div class="card"><div class="bar"><h2 style="margin:0">${esc(drain ? INC_KIND[d.kind] : A?.attack_type || INC_KIND[d.kind] || 'Incident')}${drain ? ` from ${esc(d.drain?.exchange || 'an exchange')}` : d.target?.account ? ` on ${esc(d.target.account)}` : ''}</h2>${incStatus(d.status)}${d.detected ? '<span class="chip">caught live</span>' : ''}<span class="spacer"></span>
-      <span class="muted small">traced ${since(d.traced_ts)} · ${d.stats?.txs || 0} transactions read</span><button onclick="incRetrace('${esc(d.attacker.account)}')">Trace again</button></div>
+      <span class="muted small">traced ${since(d.traced_ts)} · ${d.stats?.txs || 0} transactions read</span><button onclick="incRetrace('${esc(d.attacker.account)}', this)" ${retracing ? 'disabled' : ''}>${retracing ? 'Tracing …' : 'Trace again'}</button></div>
     <p style="font-size:16px;margin:10px 0"><b>${esc(A?.headline || d.signals?.[0] || '')}</b></p>
     <div class="tiles">${tile('Taken', usd(d.stolen_usd), esc(d.prices_note || ''), 'r')}${tile('Victims', (d.victims || []).length, (d.victims || []).filter((v) => !v.contract).length ? `${(d.victims || []).filter((v) => !v.contract).length} wallets` : 'contracts')}${tile('Attacker accounts', (d.accounts || []).length, `${(d.accounts || []).filter((a) => a.role === 'fake_token').length} fake tokens`)}
       ${tile('Sent off NEAR', usd(offNear), [...new Set(ex.filter((e) => e.chain && e.chain !== 'NEAR').map((e) => e.chain))].join(', ') || 'nothing yet', offNear ? 'r' : '')}${tile('Still held', usd(d.held_usd), 'on the attacker\'s NEAR accounts')}${tile('Freezable', usd(freezeUsd), freezeUsd ? 'an issuer can freeze it' : 'nothing an issuer can freeze', freezeUsd ? 'g' : '')}</div>
@@ -1762,7 +1766,27 @@ async function incidentPage(id) {
     <div class="card"><h2>Timeline</h2><table class="small">${(d.timeline || []).map((e) => `<tr><td style="white-space:nowrap">${when(e.ts)}</td><td><span class="chip">${esc(e.kind.replace('_', ' '))}</span></td><td class="wrap">${esc(e.text)}</td><td>${e.tx ? nbTx(e.tx) : ''}</td></tr>`).join('')}</table></div>`;
   return h;
 }
-function incRetrace(account) { $('main').insertAdjacentHTML('afterbegin', '<div class="card muted" id="incRe">Tracing again (1-3 minutes) …</div>'); fetch('/api/incident/investigate?' + new URLSearchParams({ q: account, run: '1', force: '1' })).then(() => { const t = setInterval(async () => { const r = await fetch('/api/incident/investigate?' + new URLSearchParams({ q: account })).then((x) => x.json()); if (!r.job?.running) { clearInterval(t); render(); } }, 5000); }); }
+let retracing = null;
+async function incRetrace(account, btn) {
+  if (retracing) return; // one trace at a time
+  retracing = account;
+  if (btn) { btn.disabled = true; btn.textContent = 'Tracing …'; }
+  const status = (t) => { const el = $('incRe') || ($('main').insertAdjacentHTML('afterbegin', '<div class="card muted" id="incRe"></div>'), $('incRe')); el.textContent = t; };
+  status('Tracing again (1-3 minutes) …');
+  const q = new URLSearchParams({ q: account });
+  try {
+    let r = await fetch('/api/incident/investigate?' + new URLSearchParams({ q: account, run: '1', force: '1' })).then((x) => x.json());
+    if (r.error) { status(r.error); return; }
+    while (true) {
+      await new Promise((res) => setTimeout(res, 4000));
+      r = await fetch('/api/incident/investigate?' + q).then((x) => x.json());
+      if (!r.job?.running) break;
+      status(`Tracing again … ${r.job.step || ''} (started ${since(r.job.started)})`);
+    }
+    if (r.job?.error) { status(`The trace failed: ${r.job.error}`); return; }
+    render();
+  } finally { retracing = null; }
+}
 
 // ================================================================== AUTOMATED CONTRACT AUDIT (any kind of contract; new deploys found automatically)
 const LVL = { critical: 'bad', high: 'bad', medium: 'neutral', low: 'good', info: 'unrated' };

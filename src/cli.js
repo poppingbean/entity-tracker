@@ -19,6 +19,7 @@
 //   node src/cli.js check-ai                           test the NEAR AI key / model
 //   node src/cli.js flag <account> critical|high|medium "<reason>"   report an account to the transaction firewall (unflag <account> to undo)
 //   node src/cli.js check-tx '<json>'                    run the transaction firewall on a request body
+//   node src/cli.js review-drains                      check past drain reports for withdrawals of the wallet's own deposits
 //   node src/cli.js exchanges                          rediscover exchange hot wallets and their withdrawal baselines (drain detection)
 //   node src/cli.js exchange-wallet <account> <exchange> [hot|cold]   add an exchange wallet by hand
 //   node src/cli.js incident <account|tx hash|target:<contract>> [--no-ai]   trace a hack: attacker accounts, target, losses, victims, money trail
@@ -180,6 +181,9 @@ try {
     info(`firewall: ${args[0]} flagged ${args[1]} (${args[2] || 'reported'})`);
   } else if (cmd === 'unflag') {
     await unflagAccount(args[0]); info(`firewall: ${args[0]} unflagged`);
+  } else if (cmd === 'review-drains') {
+    const { reviewDetections } = await import('./incident/detect.js');
+    info(`drain reports reviewed: ${await reviewDetections(200)}`);
   } else if (cmd === 'exchanges') {
     const { refreshExchangeRegistry } = await import('./incident/exchanges.js');
     console.log(JSON.stringify(await refreshExchangeRegistry({ log: (m) => info(m) })));

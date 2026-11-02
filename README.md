@@ -152,6 +152,7 @@ Replaying the Veax blocks, the attacker stands out at $62.8k in 5 tokens across 
 
 **Early warning for off-chain crimes** (an exchange's keys or withdrawal system compromised: the chain only sees the exchange's own wallets paying out):
 - **Exchange wallet watch:** a registry of exchange hot wallets, discovered by behaviour and named from the cold wallets they sweep to, with each one's normal withdrawal size. A drain is flagged when a transfer is far above that, or most of the balance, goes to a brand-new account, or when several hot wallets pay one account. A full-access key change on a hot wallet raises an alert.
+- **Own funds are not a hack:** before a large protocol withdrawal is called a drain, the wallet's history is checked for its own earlier deposits into that protocol (staking, collateral). A whale unstaking stays on the feed as "withdrawal, not a hack" with the proof.
 - **Live follow:** every account of a confirmed incident is watched. Each move of stolen funds alerts at once ("woke up after 3 days"), 1Click swaps are resolved, the receiver is flagged and followed, and the trace is redone.
 - **Blocklist feed** for swap services, bridges, exchanges and wallets: `GET /api/v1/flags?since=`, `GET /api/v1/flags/check?ids=`.
 - **On the bot:** `/hack <wallet | tx>` on @safenear_bot gives the case summary (where the money came from and went, what is still held, the attacker's wallets) and attaches the evidence pack to forward to the victim, SEAL 911, 1Click, bridges and exchanges; `/hacks` lists the latest.

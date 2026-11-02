@@ -39,6 +39,16 @@ Failed receipts move nothing.
 
 NEAR attached to a call (`deposit_and_stake`, `near_deposit`) counts as paid in, so withdrawing what you deposited nets to zero. An exchange paying a customer is a withdrawal, not a loss. The money trail never follows into a contract: a deposit into a protocol is a destination, and a protocol is never flagged.
 
+**Withdrawals of a wallet's own funds.** A whale unstaking from LiNEAR or taking its collateral out of Burrow is the biggest outflow a protocol ever sees, and looks just like a drain. The difference is in the wallet's past, so before anything is called a drain, Safe Near looks back through the transactions the wallet signed (oldest first, up to 4,000). It counts what the wallet paid into that same protocol at least a day before the withdrawal: NEAR attached to `deposit_and_stake` and similar calls, and tokens sent in. An exploit deposits and takes in one go, so same-day deposits don't count.
+
+When those deposits are worth at least half of what came out (staking rewards and price moves account for the rest):
+- it is a **withdrawal of its own funds**;
+- it stays on the live feed and Explore as **WITHDRAWAL … not a hack**, with the proof ("it put 3.13M NEAR into linear-protocol.near between 2023-06-11 and 2023-10-28");
+- it raises no alert and starts no trace;
+- the tracer never confirms it.
+
+Past reports are checked by the worker, a few per pass, and by `node src/cli.js review-drains`; their alerts are relabelled.
+
 **Re-traces keep flags in sync.** When an incident is re-traced, accounts no longer in the attacker's set lose its flag. An incident that is no longer confirmed loses all its flags, and its alert is marked "Retracted (not a hack)".
 
 A confirmed incident:
