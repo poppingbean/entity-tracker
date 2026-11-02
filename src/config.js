@@ -83,6 +83,11 @@ export const config = {
     minUsd: num(process.env.INCIDENT_MIN_USD, 5000),           // a receiver must take at least this from one protocol within 30 min
     alwaysUsd: num(process.env.INCIDENT_ALWAYS_USD, 250000),   // ... and is traced whatever it looks like above this
     freshHours: num(process.env.INCIDENT_FRESH_HOURS, 72),      // an account younger than this is a suspect
+    exchangeMinUsd: num(process.env.INCIDENT_EXCHANGE_MIN_USD, 50000), // an exchange hot-wallet outflow worth checking for a drain
+    followMinUsd: num(process.env.INCIDENT_FOLLOW_MIN_USD, 500),  // a move of stolen funds worth an alert
+    registryEveryHours: num(process.env.EXCHANGE_REGISTRY_EVERY_HOURS, 24), // rediscover exchange wallets and their baselines
+    newsEveryMinutes: num(process.env.NEWS_EVERY_MINUTES, 15),     // security news feeds (0 = off)
+    newsFeeds: (process.env.NEWS_FEEDS || 'https://cointelegraph.com/rss,https://www.theblock.co/rss.xml,https://decrypt.co/feed,https://rekt.news/rss/feed.xml,https://cryptoslate.com/feed/').split(',').map((s) => s.trim()).filter(Boolean),
   },
   // transaction firewall (POST /api/v1/tx/check): open to any wallet / dApp, cross-origin
   firewall: {

@@ -19,6 +19,8 @@
 //   node src/cli.js check-ai                           test the NEAR AI key / model
 //   node src/cli.js flag <account> critical|high|medium "<reason>"   report an account to the transaction firewall (unflag <account> to undo)
 //   node src/cli.js check-tx '<json>'                    run the transaction firewall on a request body
+//   node src/cli.js exchanges                          rediscover exchange hot wallets and their withdrawal baselines (drain detection)
+//   node src/cli.js exchange-wallet <account> <exchange> [hot|cold]   add an exchange wallet by hand
 //   node src/cli.js incident <account|tx hash|target:<contract>> [--no-ai]   trace a hack: attacker accounts, target, losses, victims, money trail
 //   node src/cli.js accuracy                           score gates, rule score, audit risk, AI and group verdicts against what happened
 //   node src/cli.js backtest KEY=VALUE ...             replay the gates on every stored check with config.rules changed (e.g. minBuyers=8)
@@ -178,6 +180,13 @@ try {
     info(`firewall: ${args[0]} flagged ${args[1]} (${args[2] || 'reported'})`);
   } else if (cmd === 'unflag') {
     await unflagAccount(args[0]); info(`firewall: ${args[0]} unflagged`);
+  } else if (cmd === 'exchanges') {
+    const { refreshExchangeRegistry } = await import('./incident/exchanges.js');
+    console.log(JSON.stringify(await refreshExchangeRegistry({ log: (m) => info(m) })));
+  } else if (cmd === 'exchange-wallet') {
+    const { addExchangeWallet } = await import('./incident/exchanges.js');
+    if (!args[0] || !args[1]) throw new Error('usage: exchange-wallet <account> <exchange> [hot|cold]');
+    await addExchangeWallet(args[0], args[1], args[2] === 'cold' ? 'cold' : 'hot'); info(`exchange wallet ${args[0]}: ${args[1]}`);
   } else if (cmd === 'incident') {
     const { investigate, parseInvestigation } = await import('./incident/service.js');
     const d = await investigate(parseInvestigation(args[0]), { ai: !args.includes('--no-ai'), log: (m) => info(m) });

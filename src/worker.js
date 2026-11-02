@@ -15,6 +15,8 @@ import { pollTelegram } from './alerts/telegram.js';
 import { evaluateAccuracy } from './accuracy/run.js';
 import { watchDeploys, processAuditQueue } from './audit/watcher.js';
 import { processIncidentQueue } from './incident/service.js';
+import { refreshExchangeRegistry } from './incident/exchanges.js';
+import { pollNews } from './incident/signals.js';
 import { evaluateGroups, reviewPending } from './evaluate/run.js';
 import { profileCreators } from './evaluate/creators.js';
 import { checkAi, aiEnabled, aiStatus } from './ai/nearai.js';
@@ -22,7 +24,7 @@ import { scanTick, followUpTick, blacklistCreator } from './scanner/pipeline.js'
 import { managePositions } from './sim/portfolio.js';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-export const runtime = { startedTs: Date.now(), cycles: 0, lastCycleTs: null, stopping: false, lastEvalTs: 0, lastPositionCheck: 0, lastRugCheck: 0, lastCreatorCheck: 0, reviewing: null, reviewed: 0, nft: null, nftLast: null, alerts: null, lastAlerts: 0, telegram: null, accuracy: null, lastAccuracy: 0, autoAudit: null, lastAutoAudit: 0, incident: null };
+export const runtime = { startedTs: Date.now(), cycles: 0, lastCycleTs: null, stopping: false, lastEvalTs: 0, lastPositionCheck: 0, lastRugCheck: 0, lastCreatorCheck: 0, reviewing: null, reviewed: 0, nft: null, nftLast: null, alerts: null, lastAlerts: 0, telegram: null, accuracy: null, lastAccuracy: 0, autoAudit: null, lastAutoAudit: 0, incident: null, registry: null, lastRegistry: 0, news: null, lastNews: 0 };
 
 /** One pass of the pipeline. Returns what it did, so callers (the CLI) can loop until idle. */
 export async function cycle({ evaluate = true } = {}) {
@@ -60,6 +62,16 @@ export async function cycle({ evaluate = true } = {}) {
   if (config.autoAudit.enabled && !runtime.autoAudit && Date.now() - runtime.lastAutoAudit > config.autoAudit.everyMs) {
     runtime.lastAutoAudit = Date.now();
     runtime.autoAudit = watchDeploys().catch((e) => warn(`deploy watcher: ${e.message}`)).then(() => processAuditQueue()).catch((e) => warn(`audit queue: ${e.message}`)).finally(() => { runtime.autoAudit = null; });
+  }
+  // exchange wallets and what is normal for them (drain detection), rediscovered once a day
+  if (config.incidents.enabled && !runtime.registry && Date.now() - runtime.lastRegistry > config.incidents.registryEveryHours * 3600e3) {
+    runtime.lastRegistry = Date.now();
+    runtime.registry = refreshExchangeRegistry().catch((e) => warn(`exchange registry: ${e.message}`)).finally(() => { runtime.registry = null; });
+  }
+  // security news about NEAR (off-chain signals): stories naming accounts or transactions are investigated
+  if (config.incidents.enabled && config.incidents.newsEveryMinutes > 0 && !runtime.news && Date.now() - runtime.lastNews > config.incidents.newsEveryMinutes * 60e3) {
+    runtime.lastNews = Date.now();
+    runtime.news = pollNews().catch((e) => warn(`security news: ${e.message}`)).finally(() => { runtime.news = null; });
   }
   // hacks the detector (or anyone) queued: traced one at a time, beside the rest (a trace takes a minute or two)
   if (config.incidents.enabled && !runtime.incident) {

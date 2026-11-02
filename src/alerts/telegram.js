@@ -7,6 +7,7 @@ import { resolveTarget, findWatched, setWatch, getWatchlist, alertsFor, KINDS, M
 import { sendTelegram, alertMessage } from './deliver.js';
 import { getAnalysis } from '../analysis/token.js';
 import { getNftAnalysis } from '../nft/analysis.js';
+import { report } from '../incident/signals.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
 const HELP = `<b>Safe Near alerts</b>
@@ -15,6 +16,7 @@ const HELP = `<b>Safe Near alerts</b>
 /list – what this chat watches
 /alerts – the latest alerts for this chat's watchlist
 /check &lt;token | NFT collection&gt; – its current risk notes
+/report &lt;account | transaction hash&gt; [what happened] – report a hack, drainer or stolen funds: it is investigated from the chain
 Kinds are detected from the id (c_… is a group); force one with e.g. <code>/watch alice.near creator</code>. Up to ${MAX_ITEMS} items per chat.`;
 
 const hits = new Map(); // chat -> [ts] (30 commands / 10 min)
@@ -42,6 +44,14 @@ async function handle(msg) {
     if (!t) return sendTelegram(chat, `<code>${esc(arg.slice(0, 64))}</code> is not in the system. Watch a token the tracker follows (contract or symbol), a wallet, a creator, an NFT collection or a c_… group id.`);
     const r = await setWatch(owner, t, cmd === '/watch');
     return sendTelegram(chat, r.ok ? `${cmd === '/watch' ? 'Watching' : 'Stopped watching'} ${t.kind} <code>${esc(t.id)}</code>.` : esc(r.error));
+  }
+  if (cmd === '/report') {
+    if (!arg) return sendTelegram(chat, 'Usage: /report &lt;account | transaction hash&gt; [what happened]');
+    const r = await report(arg, { via: 'telegram', who: owner, note: text.split(/\s+/).slice(2).join(' ') });
+    if (r.error) return sendTelegram(chat, esc(r.error));
+    const url = config.alerts.siteUrl ? `${config.alerts.siteUrl}/firewall?q=${encodeURIComponent(arg)}` : null;
+    return sendTelegram(chat, `Thanks. <code>${esc(arg.slice(0, 70))}</code> is being investigated from the chain (a few minutes). Nothing is flagged on a report alone: only what the trace confirms.${url ? `
+<a href="${esc(url)}">Follow it on Safety Check</a>` : ''}`);
   }
   if (cmd === '/check') {
     if (!arg) return sendTelegram(chat, 'Usage: /check &lt;token or NFT collection&gt;');

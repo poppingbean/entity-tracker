@@ -129,6 +129,7 @@ Beside the box, a **live feed** refreshes every 15 seconds. It shows:
 
 Each investigation (`/firewall/<incident>`) rebuilds the incident from the chain, the way an investigator would by hand:
 
+- **Where the money came from:** followed back hop by hop to an exchange, a contract or an older wallet. Exchange hot wallets are recognised even without a name; one that sweeps to `binancecold3.near` is Binance's. An exchange hot wallet emptied into a just-created account is an **exchange hot-wallet drain**: the exchange is the victim, and the case is re-rooted at the account that got the money first, so every wallet it paid out to is followed.
 - **Attacker:** the signer, the sub-accounts and fake tokens it deployed, the NEAR Intents accounts that withdrew to it, the cash-out wallets, and who created and funded the first account.
 - **Target and attack:** the contract that paid out for nothing in return, and the attack transactions with their calls.
 - **Losses and victims:** per token in USD at today's prices; every account whose value ended up with the attacker.
@@ -144,14 +145,21 @@ Confirmed incidents raise an `incident` alert and flag the attacker's accounts f
 - A receiver that took at least `INCIDENT_MIN_USD` is a suspect when either:
   - its account is new (`INCIDENT_FRESH_HOURS`), or it deployed token contracts of its own the day before (the fake-token pattern behind the Veax and Rhea exploits); or
   - it pulled several tokens at once.
+- An exchange hot wallet sending `INCIDENT_ALWAYS_USD` or more to an account created moments before is a suspect too (an exchange drain).
 - A suspect raises a `drain_suspected` alert at once and is traced automatically.
 
 Replaying the Veax blocks, the attacker stands out at $62.8k in 5 tokens across 3 transactions; the next-largest receiver took $767.
 
+**Early warning for off-chain crimes** (an exchange's keys or withdrawal system compromised: the chain only sees the exchange's own wallets paying out):
+- **Exchange wallet watch:** a registry of exchange hot wallets, discovered by behaviour and named from the cold wallets they sweep to, with each one's normal withdrawal size. A drain is flagged when a transfer is far above that, or most of the balance, goes to a brand-new account, or when several hot wallets pay one account. A full-access key change on a hot wallet raises an alert.
+- **Live follow:** every account of a confirmed incident is watched. Each move of stolen funds alerts at once ("woke up after 3 days"), 1Click swaps are resolved, the receiver is flagged and followed, and the trace is redone.
+- **Blocklist feed** for swap services, bridges, exchanges and wallets: `GET /api/v1/flags?since=`, `GET /api/v1/flags/check?ids=`.
+- **Off-chain signals:** `/report` to @safenear_bot or the form on Safety Check starts an investigation (it never flags on its own), and security news about NEAR (`NEWS_FEEDS`) is read every 15 minutes. Stories naming accounts or transactions are investigated.
+
 More access:
-- CLI: `node src/cli.js incident <account | tx hash | target:<contract>>`.
+- CLI: `node src/cli.js incident <account | tx hash | target:<contract>>`; `node src/cli.js exchanges` rediscovers exchange wallets; `node src/cli.js exchange-wallet <account> <exchange>` adds one.
 - API: `GET /api/v1/incidents`, `GET /api/v1/incident?id=`.
-- Collections: `incidents`, `incident_queue`, `incident_detections`.
+- Collections: `incidents`, `incident_queue`, `incident_detections`, `incident_moves`, `exchange_wallets`, `security_news`, `reports`.
 
 How the tracer and the detector work, with the Veax exploit as the worked example: [docs/incidents.md](docs/incidents.md).
 

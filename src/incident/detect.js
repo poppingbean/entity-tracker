@@ -13,6 +13,10 @@ import { txIndexer } from '../near/rpc.js';
 import { flowsOfReceipt, NEAR } from './flows.js';
 import { valueOf } from './prices.js';
 import { enqueueIncident } from './service.js';
+import { exchangeWalletMap, unusualOutflow } from './exchanges.js';
+import { oneClickSwap } from './oneclick.js';
+import { viewAccount } from '../audit/rpc.js';
+import { builtinLabel } from '../labels.js';
 
 // well-known protocols (the audit adds every contract it types as one of PROTOCOL_ROLES)
 export const PROTOCOLS = new Set(['veax.near', 'v2.ref-finance.near', 'dclv2.ref-labs.near', 'contract.main.burrow.near', 'meta-pool.near', 'linear-protocol.near', 'lst.rhealab.near',
@@ -42,6 +46,131 @@ export function protocolOutflows(b, protos) {
   return out;
 }
 
+// ---- exchanges: drains of hot wallets, and key changes on them (the registry and baselines are in exchanges.js)
+/** NEAR and token flows out of exchange wallets in one neardata block, and key changes on them (pure apart from the registry). */
+export function exchangeEvents(b, wallets) {
+  const flows = [], keys = [], ts = Number(b.block.header.timestamp_nanosec) / 1e6, height = b.block.header.height;
+  for (const s of b.shards || []) for (const ro of s.receipt_execution_outcomes || []) {
+    const rc = ro.receipt, act = rc?.receipt?.Action;
+    if (act && wallets.has(rc.receiver_id) && !ro.execution_outcome?.outcome?.status?.Failure) for (const a of act.actions || []) {
+      if (a?.AddKey || a?.DeleteKey) keys.push({ wallet: rc.receiver_id, kind: a.AddKey ? 'added' : 'removed', full: a.AddKey ? a.AddKey.access_key?.permission === 'FullAccess' : null, key: (a.AddKey || a.DeleteKey).public_key, tx: ro.tx_hash || null, ts, height, signer: act.signer_id });
+    }
+    for (const f of flowsOfReceipt(ro, { tx: ro.tx_hash || null, height, ts })) {
+      const w = wallets.get(f.from);
+      if (w?.kind === 'hot' && !wallets.has(f.to) && !ROUTERS.has(f.to) && !/^(nft|intents|mint|burn):/.test(f.token) && builtinLabel(f.to)?.type !== 'exchange') flows.push({ ...f, exchange: f.from, exchange_name: w.exchange || null });
+    }
+  }
+  return { flows, keys };
+}
+/** Kept for tests and old callers: just the flows, from a set of hot wallets. */
+export const exchangeOutflows = (b, hubs) => exchangeEvents(b, new Map([...hubs].map((h) => [h, { kind: 'hot' }]))).flows;
+
+const recentX = new Map(); // receiver -> [{ wallet, exchange, usd, ts }] in the last hour: several hot wallets paying one account
+async function scanExchanges(blocks) {
+  const C = config.incidents, wallets = await exchangeWalletMap();
+  if (!wallets.size) return [];
+  const raised = [];
+  for (const b of blocks) {
+    const { flows, keys } = exchangeEvents(b, wallets);
+    for (const k of keys) {
+      const w = wallets.get(k.wallet);
+      if (k.kind === 'added' && k.full === false) continue; // an app key: routine
+      await raise(`xkey:${k.wallet}:${k.key}:${k.kind}`, { type: 'exchange_key_change', severity: k.full ? 'high' : 'medium', title: `${w?.exchange || 'Exchange'} hot wallet ${k.wallet.slice(0, 12)}…: a ${k.full ? 'full-access ' : ''}key was ${k.kind}`,
+        text: `Signed by ${k.signer}. Exchanges rotate keys, but an unexpected full-access key on a hot wallet is how a takeover starts: watch where its money goes next.`, url: `/firewall?q=${encodeURIComponent(k.wallet)}`, related: { wallets: [k.wallet] }, data: k, ts: k.ts });
+    }
+    for (const f of flows) {
+      const v = await valueOf(f.token, f.raw);
+      const usd = v.usd || 0;
+      if (usd < C.exchangeMinUsd) continue;
+      const w = wallets.get(f.exchange);
+      // several hot wallets of one exchange paying the same account within an hour
+      const list = (recentX.get(f.to) || []).filter((x) => f.ts - x.ts < 3600e3);
+      if (!list.some((x) => x.wallet === f.exchange)) list.push({ wallet: f.exchange, exchange: w?.exchange, usd, ts: f.ts });
+      recentX.set(f.to, list);
+      const [first, state] = await Promise.all([txIndexer('/v0/account', { account_id: f.to, limit: 1, desc: false }).then((j) => j?.account_txs?.[0]).catch(() => null),
+        f.token === NEAR ? viewAccount(f.exchange).catch(() => null) : null]);
+      const ageH = first ? (f.ts - Number(first.tx_block_timestamp) / 1e6) / 3600e3 : 0; // not indexed yet: created by this transfer
+      const fresh = ageH <= C.freshHours;
+      const unusual = f.token === NEAR ? unusualOutflow(w, v.amount, state ? Number(BigInt(state.amount) / 10n ** 21n) / 1e3 : null) : [];
+      const correlated = list.length >= 2;
+      if (!((fresh && unusual.length) || (fresh && usd >= C.alwaysUsd) || (correlated && list.reduce((s, x) => s + x.usd, 0) >= C.exchangeMinUsd * 2))) continue;
+      const name = w?.exchange || 'an exchange';
+      const reasons = [`${name} hot wallet ${f.exchange.slice(0, 12)}… sent ~$${Math.round(usd).toLocaleString('en-US')} (${Math.round(v.amount).toLocaleString('en-US')} ${v.symbol})`,
+        ageH < 0.02 ? 'to an account created by this transfer' : `to an account ${ageH < 48 ? ageH.toFixed(1) + ' hours' : Math.round(ageH / 24) + ' days'} old`, ...unusual,
+        ...(correlated ? [`${list.length} hot wallets${list.every((x) => x.exchange && x.exchange === list[0].exchange) ? ` of ${list[0].exchange}` : ''} paid this account within an hour (~$${Math.round(list.reduce((s, x) => s + x.usd, 0)).toLocaleString('en-US')})`] : [])];
+      const detected = { ts: Date.now(), event_ts: f.ts, protocol: f.exchange, exchange: w?.exchange || null, receiver: f.to, usd: Math.round(usd), txs: [f.tx], tokens: [f.token], reasons, kind: 'exchange', correlated: list.length };
+      const key = `xdrain:${f.to}:${Math.floor(f.ts / 3600e3)}`;
+      await col('incident_detections').updateOne({ _id: key }, { $set: detected }, { upsert: true });
+      const sev = correlated || usd >= C.alwaysUsd ? 'high' : 'medium';
+      if (await raise(key, { type: 'drain_suspected', severity: sev, title: `Possible ${name === 'an exchange' ? 'exchange' : name} hot-wallet drain: ~$${Math.round(usd).toLocaleString('en-US')} to a new account ${f.to.slice(0, 16)}…`,
+        text: `${reasons.join('; ')}. Tracing it now.`, url: `/firewall?q=${encodeURIComponent(f.to)}`, related: { wallets: [f.to] }, data: detected, ts: f.ts })) {
+        await enqueueIncident({ account: f.to }, { reason: 'detected', detected });
+        raised.push(detected);
+      }
+    }
+  }
+  for (const [k, l] of recentX) if (!l.some((x) => Date.now() - x.ts < 3600e3)) recentX.delete(k);
+  return raised;
+}
+
+// ---- stolen money on the move: every transfer out of a confirmed incident's accounts, as it happens
+const FOLLOW_ROLES = new Set(['attacker', 'sub_account', 'intents_account', 'cash_out_wallet']);
+let followCache = { ts: 0, map: new Map() };
+/** account -> { incident, role, last_out_ts } for every confirmed incident (cached 5 minutes). */
+async function followed() {
+  if (Date.now() - followCache.ts < 300e3) return followCache.map;
+  const docs = await col('incidents').find({ status: 'confirmed' }, { projection: { accounts: 1, 'trail.moves': 1, 'attacker.account': 1, drain: 1 } }).limit(500).toArray().catch(() => []);
+  const map = new Map();
+  for (const d of docs) {
+    const last = new Map(); for (const m of d.trail?.moves || []) last.set(m.from, Math.max(last.get(m.from) || 0, m.ts || 0));
+    for (const a of d.accounts || []) if (FOLLOW_ROLES.has(a.role) && !map.has(a.account)) map.set(a.account, { incident: d._id, role: a.role, root: d.attacker?.account, last_out_ts: last.get(a.account) || null });
+  }
+  const moves = await col('incident_moves').aggregate([{ $group: { _id: '$from', ts: { $max: '$ts' } } }]).toArray().catch(() => []);
+  for (const m of moves) if (map.has(m._id)) map.get(m._id).last_out_ts = Math.max(map.get(m._id).last_out_ts || 0, m.ts);
+  followCache = { ts: Date.now(), map };
+  return map;
+}
+async function followStolen(blocks) {
+  const C = config.incidents, map = await followed();
+  if (!map.size) return [];
+  const out = [], retrace = new Set();
+  for (const b of blocks) for (const s of b.shards || []) for (const ro of s.receipt_execution_outcomes || []) {
+    for (const f of flowsOfReceipt(ro, { tx: ro.tx_hash || null, height: b.block.header.height, ts: Number(b.block.header.timestamp_nanosec) / 1e6 })) {
+      const src = map.get(f.from);
+      if (!src || map.has(f.to) || /^(nft|mint|burn):/.test(f.token)) continue;
+      const v = await valueOf(f.token, f.raw);
+      if ((v.usd || 0) < C.followMinUsd) continue;
+      const idleH = src.last_out_ts && f.ts > src.last_out_ts ? (f.ts - src.last_out_ts) / 3600e3 : null; // how long the money sat still
+      const swap = /^[0-9a-f]{64}$/.test(f.to) ? await oneClickSwap(f.to).catch(() => null) : null;
+      const where = swap ? `a 1Click swap to ${swap.asset} on ${swap.chain}${swap.recipient ? ` (${swap.recipient})` : ''}` : builtinLabel(f.to)?.label || (ROUTERS.has(f.to) ? f.to : `${f.to.slice(0, 16)}…`);
+      const move = { _id: `${f.tx}:${f.receipt}:${f.to}:${f.token}`, incident: src.incident, from: f.from, role: src.role, to: f.to, token: f.token, symbol: v.symbol, amount: v.amount, usd: Math.round(v.usd || 0), tx: f.tx, ts: f.ts, idle_h: idleH != null ? Math.round(idleH) : null, swap: swap || null };
+      const r = await col('incident_moves').updateOne({ _id: move._id }, { $setOnInsert: move }, { upsert: true });
+      if (!r.upsertedCount) continue;
+      src.last_out_ts = Math.max(src.last_out_ts || 0, f.ts);
+      const woke = idleH != null && idleH >= 24;
+      await raise(`moved:${move._id}`, { type: 'stolen_funds_moved', severity: v.usd >= C.alwaysUsd || woke ? 'high' : 'medium',
+        title: `${woke ? `Stolen funds woke up after ${idleH >= 48 ? Math.round(idleH / 24) + ' days' : Math.round(idleH) + ' hours'}: ` : 'Stolen funds moved: '}${Math.round(v.amount).toLocaleString('en-US')} ${v.symbol} (~$${Math.round(v.usd).toLocaleString('en-US')}) from ${f.from.slice(0, 14)}…`,
+        text: `From the ${src.role.replace(/_/g, ' ')} of incident ${src.incident.replace(/^inc:/, '').slice(0, 16)}… to ${where}.`, url: `/firewall/${encodeURIComponent(src.incident)}`, related: { wallets: [f.from, f.to] }, data: move, ts: f.ts });
+      // the receiver joins the incident (flagged, followed from now on) unless it is a router or a swap service
+      const toState = !ROUTERS.has(f.to) && !swap && !builtinLabel(f.to) ? await viewAccount(f.to).catch(() => null) : null;
+      const toContract = !!toState && (toState.code_hash !== '11111111111111111111111111111111' || !!toState.global_contract_hash || !!toState.global_contract_account_id);
+      if (!ROUTERS.has(f.to) && !swap && !builtinLabel(f.to) && !toContract) { // a protocol deposit is a destination, never flagged
+        await col('incidents').updateOne({ _id: src.incident, 'accounts.account': { $ne: f.to } }, { $push: { accounts: { account: f.to, role: 'cash_out_wallet', ts: f.ts, live: true } } });
+        await col('firewall_flags').updateOne({ _id: f.to }, { $setOnInsert: { _id: f.to, severity: 'high', reason: 'received stolen funds', detail: `Received ${Math.round(v.amount).toLocaleString('en-US')} ${v.symbol} from an account of incident ${src.incident}.`, ts: Date.now(), source: 'incident', incident: src.incident } }, { upsert: true });
+        map.set(f.to, { incident: src.incident, role: 'cash_out_wallet', root: src.root, last_out_ts: null });
+      }
+      retrace.add(src.incident);
+      out.push(move);
+    }
+  }
+  // the trail grows: re-trace each incident that moved (the queue skips one traced in the last hour)
+  for (const id of retrace) {
+    const d = await col('incidents').findOne({ _id: id }, { projection: { 'attacker.account': 1, updated_ts: 1 } });
+    if (d && Date.now() - (d.updated_ts || 0) > 3600e3) await enqueueIncident({ account: d.attacker.account }, { reason: 'funds moved' });
+  }
+  return out;
+}
+
 const WINDOW_MS = 30 * 60e3;
 const win = new Map(); // receiver|protocol -> { receiver, protocol, flows: [], usd, first, last, txs:Set, tokens:Set, raised }
 /** Add a batch of blocks' outflows to the window and raise / queue what crossed the line. Returns the suspects raised. */
@@ -49,6 +178,8 @@ export async function scanBlocks(blocks) {
   const C = config.incidents;
   if (!C.enabled || !blocks.length) return [];
   const protos = await protocols();
+  const xraised = await scanExchanges(blocks).catch((e) => { info(`exchange scan: ${e.message}`); return []; });
+  await followStolen(blocks).catch((e) => info(`stolen funds follow: ${e.message}`));
   for (const b of blocks) for (const f of protocolOutflows(b, protos)) {
     const k = `${f.to}|${f.protocol}`, w = win.get(k) || { receiver: f.to, protocol: f.protocol, flows: [], usd: 0, first: f.ts, last: f.ts, txs: new Set(), tokens: new Set(), raised: false };
     const v = await valueOf(f.token, f.raw);
@@ -70,7 +201,7 @@ export async function scanBlocks(blocks) {
     info(`incident suspected: ${w.receiver} took $${Math.round(w.usd)} from ${w.protocol} (${s.reasons.join('; ')})`);
     raised.push(detected);
   }
-  return raised;
+  return [...xraised, ...raised];
 }
 
 /** Does this receiver look like an attacker? (account age, own fresh token contracts, many tokens in one go) */
@@ -87,7 +218,9 @@ async function suspicion(w) {
   const multi = [...w.tokens].length >= 3 && w.txs.size <= 3;
   if (multi) reasons.push(`${w.tokens.size} different tokens pulled in ${w.txs.size} transaction${w.txs.size > 1 ? 's' : ''}`);
   reasons.unshift(`took ~$${Math.round(w.usd).toLocaleString('en-US')} from ${w.protocol} within ${Math.max(1, Math.round((w.last - w.first) / 60e3))} min`);
-  const suspect = (ageH != null && ageH < C.freshHours) || ownTokens.length > 0 || (multi && w.usd >= C.minUsd * 3) || w.usd >= C.alwaysUsd;
+  // size alone is never enough: a whale withdrawing its own stake is the biggest outflow a protocol sees. An attacker signal is needed
+  const young = ageH != null && ageH < 30 * 24;
+  const suspect = (ageH != null && ageH < C.freshHours) || ownTokens.length > 0 || (multi && young && w.usd >= C.minUsd * 3) || (young && w.usd >= C.alwaysUsd);
   return { suspect, reasons };
 }
 export { NEAR };

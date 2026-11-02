@@ -24,13 +24,15 @@ export function parseInvestigation(q) {
 /** Flag the attacker's own accounts (not 1Click deposit addresses or the target) so every check that touches them warns. */
 async function flagAccounts(inc) {
   if (inc.status !== 'confirmed') return 0;
-  const what = `${inc.kind === 'wallet_drainer' ? 'drained wallets' : `exploited ${inc.target?.account || 'a contract'}`}${inc.started_ts ? ` on ${new Date(inc.started_ts).toISOString().slice(0, 10)}` : ''} (~$${Math.round(inc.stolen_usd).toLocaleString('en-US')} taken)`;
+  const what = `${inc.kind === 'wallet_drainer' ? 'drained wallets' : inc.kind === 'exchange_drain' ? `received the money drained from ${inc.drain?.exchange || 'an exchange'}'s hot wallets` : `exploited ${inc.target?.account || 'a contract'}`}${inc.started_ts ? ` on ${new Date(inc.started_ts).toISOString().slice(0, 10)}` : ''} (~$${Math.round(inc.stolen_usd).toLocaleString('en-US')} taken)`;
   const reason = what;
   const DETAIL = { attacker: `This account ${what}. Do not send anything to it or trade with it.`, sub_account: `A sub-account of the attacker that ${what}.`, contract: `A contract deployed by the attacker that ${what}.`,
     fake_token: `A fake token made by the attacker that ${what}. It has no value.`, intents_account: `A NEAR Intents account of the attacker that ${what}.`, cash_out_wallet: `Received money from an attacker that ${what}.`, funder: `Funded the account that ${what}.` };
   const sev = { attacker: 'critical', fake_token: 'critical', sub_account: 'critical', intents_account: 'high', cash_out_wallet: 'high', funder: 'medium' };
   const swapAddrs = new Set((inc.trail?.moves || []).filter((m) => m.swap).map((m) => m.to));
   const rows = (inc.accounts || []).filter((a) => sev[a.role] && !swapAddrs.has(a.account) && a.account !== inc.target?.account);
+  // the flags follow the latest trace: an account no longer in the attacker's set loses this incident's flag
+  await col('firewall_flags').deleteMany({ source: 'incident', incident: inc._id, _id: { $nin: rows.map((a) => a.account) } });
   for (const a of rows) {
     await col('firewall_flags').updateOne({ _id: a.account }, { $setOnInsert: { _id: a.account, severity: sev[a.role], reason: `${a.role === 'funder' ? 'funded an attacker that ' : ''}${reason}`.slice(0, 120),
       detail: DETAIL[a.role], ts: Date.now(), source: 'incident', incident: inc._id } }, { upsert: true });
@@ -43,13 +45,22 @@ export async function investigate(input, { ai = true, detected = null, log = () 
   const inc = await traceIncident(input, { log });
   const prev = await col('incidents').findOne({ _id: inc._id }, { projection: { first_seen_ts: 1, detected: 1, ai: 1, alerted: 1 } });
   const report = ai && inc.status !== 'nothing_found' ? await aiIncidentReport(inc).catch((e) => { warn(`incident AI: ${e.message}`); return null; }) : null;
-  const doc = { ...inc, v: INCIDENT_V, ai: report || prev?.ai || null, detected: detected || prev?.detected || null, first_seen_ts: prev?.first_seen_ts || Date.now(), updated_ts: Date.now() };
+  const doc = { ...inc, v: INCIDENT_V, ai: report || prev?.ai || null, detected: detected || prev?.detected || null, first_seen_ts: prev?.first_seen_ts || Date.now(), updated_ts: Date.now(), ...(prev?.alerted ? { alerted: true } : {}) };
   await col('incidents').replaceOne({ _id: doc._id }, doc, { upsert: true });
+  // traced from one of its wallets and re-rooted: an earlier empty investigation of that wallet now points here
+  if (doc.pasted && doc.pasted !== doc.attacker.account) await col('incidents').deleteOne({ _id: `inc:${doc.pasted}`, status: 'nothing_found' }).catch(() => {});
   const flagged = await flagAccounts(doc).catch(() => 0);
+  // no longer confirmed (a re-trace with better evidence): its flags go, and its alert says it was retracted
+  if (doc.status !== 'confirmed') {
+    const r = await col('firewall_flags').deleteMany({ source: 'incident', incident: doc._id });
+    if (prev?.alerted) await col('alerts').updateOne({ _id: `incident:${doc._id}`, title: { $not: /^Retracted/ } }, [{ $set: { title: { $concat: ['Retracted (not a hack): ', '$title'] }, severity: 'info' } }]).catch(() => {});
+    if (r.deletedCount) info(`incident ${doc._id}: no longer confirmed, ${r.deletedCount} flags removed`);
+  }
   if (doc.status === 'confirmed' && !prev?.alerted) {
     const t = doc.target?.account || 'wallets';
     const exits = Object.entries(doc.trail?.exit_usd || {}).map(([k, v]) => `${k}: $${v.toLocaleString('en-US')}`).join(', ');
-    await raise(`incident:${doc._id}`, { type: 'incident', severity: 'high', title: `${doc.kind === 'wallet_drainer' ? 'Wallet drainer' : 'Exploit'}: ~$${doc.stolen_usd.toLocaleString('en-US')} taken from ${t} by ${doc.attacker.account}`,
+    const from = doc.kind === 'exchange_drain' ? `${doc.drain?.exchange || 'an exchange'} (${doc.victims.filter((v) => v.exchange).length} hot wallets)` : t;
+    await raise(`incident:${doc._id}`, { type: 'incident', severity: 'high', title: `${{ wallet_drainer: 'Wallet drainer', exchange_drain: 'Exchange hot-wallet drain' }[doc.kind] || 'Exploit'}: ~$${doc.stolen_usd.toLocaleString('en-US')} taken from ${from} by ${doc.attacker.account}`,
       text: `${doc.ai?.headline || doc.signals.join('; ')}${exits ? `. Money went to ${exits}` : ''}${doc.held_usd ? `. The attacker still holds ~$${doc.held_usd.toLocaleString('en-US')}` : ''}.`,
       url: `/firewall/${encodeURIComponent(doc._id)}`, related: { wallets: [doc.attacker.account] }, data: { incident: doc._id, target: doc.target?.account, stolen_usd: doc.stolen_usd } });
     await col('incidents').updateOne({ _id: doc._id }, { $set: { alerted: true } });

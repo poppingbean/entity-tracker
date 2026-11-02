@@ -18,7 +18,11 @@ export function flowsOfReceipt(r, { tx = null, height = null, ts = null } = {}) 
   const out = [], at = { tx, height: height ?? r.execution_outcome?.block_height ?? null, ts, receipt: rc.receipt_id };
   const add = (f) => { if (f.raw > 0n && f.from !== f.to) out.push({ ...at, ...f, raw: f.raw.toString() }); };
   const act = rc.receipt?.Action;
-  if (act && rc.predecessor_id !== 'system') for (const a of act.actions || []) if (a?.Transfer) add({ token: NEAR, from: rc.predecessor_id, to: rc.receiver_id, raw: big(a.Transfer.deposit), kind: 'transfer' });
+  if (act && rc.predecessor_id !== 'system') for (const a of act.actions || []) {
+    if (a?.Transfer) add({ token: NEAR, from: rc.predecessor_id, to: rc.receiver_id, raw: big(a.Transfer.deposit), kind: 'transfer' });
+    // NEAR attached to a call is paid in too (deposit_and_stake, near_deposit, a swap paying in NEAR); 1-yocto security deposits are not
+    else if (a?.FunctionCall && big(a.FunctionCall.deposit) >= 10n ** 21n) add({ token: NEAR, from: rc.predecessor_id, to: rc.receiver_id, raw: big(a.FunctionCall.deposit), kind: 'call_deposit' });
+  }
   const token = rc.receiver_id;
   for (const log of o.logs || []) {
     const m = log.match(LEGACY);

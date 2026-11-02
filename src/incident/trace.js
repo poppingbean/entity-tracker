@@ -14,6 +14,10 @@ import { builtinLabel } from '../labels.js';
 import { flowsOfTx, NEAR } from './flows.js';
 import { valueOf, baseToken } from './prices.js';
 import { oneClickSwap } from './oneclick.js';
+import { upstream } from './origin.js';
+import { exchangeWalletMap } from './exchanges.js';
+import { view } from '../near/rpc.js';
+import { config } from '../config.js';
 
 const IMPLICIT = /^[0-9a-f]{64}$|^0x[0-9a-f]{40}$/;
 // accounts that pass value through rather than own it: wrapping, swapping, intents, launch routers
@@ -88,7 +92,7 @@ function originOf(account, txs, flows) {
  * Trace an incident. `input`: { account } (the attacker), { tx } (an attack transaction) or { target, hours } (a contract that was hit:
  * the receivers it paid most in the window become the suspects). Returns the incident document (not saved).
  */
-export async function traceIncident(input, { depth = 2, log = () => {} } = {}) {
+export async function traceIncident(input, { depth = 2, log = () => {}, upstreamDone = null } = {}) {
   let attacker = input.account || null, hint = null, suspects = [];
   if (input.tx) {
     const [t] = await fetchTxs([input.tx]);
@@ -122,7 +126,21 @@ export async function traceIncident(input, { depth = 2, log = () => {} } = {}) {
   // NEAR Intents accounts that withdrew to the attacker are the attacker's (only the owner can sign an intents withdrawal)
   for (const f of flows) if (f.kind === 'intents_out' && own.has(f.to) && !own.has(f.from)) own.set(f.from, { account: f.from, role: 'intents_account' });
   const origin = originOf(attacker, txs, flows);
-  const funderSet = new Set(origin.funders.map((f) => f.from));
+
+  // ---- 1b. where the money came from. An exchange hot wallet that paid a large amount to an account created just before is an exchange
+  // drain: its first receiver is the attacker's real wallet (re-rooted there), the pasted one is one of the wallets it paid out to
+  log('following the money in');
+  const history = async (id) => fetchTxs((await accountTxHashes(id, { limit: HOP_TXS })).hashes);
+  const up = upstreamDone || await upstream(attacker, txs, history).catch(() => ({ sources: [], path: [], drain: null }));
+  if (up.drain && up.drain.root !== attacker) {
+    log(`the money came from ${up.drain.exchange}: re-rooting at ${up.drain.root}`);
+    const inc = await traceIncident({ account: up.drain.root, from: input }, { depth, log, upstreamDone: { ...up, sources: up.sources } });
+    if (!inc.accounts.some((a) => a.account === attacker)) inc.accounts.push({ account: attacker, role: 'cash_out_wallet' });
+    return { ...inc, input, pasted: attacker };
+  }
+  const drained = new Set((up.drain?.victims || []).map((v) => v.account));
+  const funderSet = new Set(origin.funders.map((f) => f.from).filter((a) => !drained.has(a)));
+  origin.funders = origin.funders.filter((f) => !drained.has(f.from));
 
   // ---- 2. who paid the attacker's accounts for nothing: the target and the victims
   const ownSet = new Set(own.keys()), fake = new Set([...own.values()].filter((o) => o.role === 'fake_token').map((o) => o.account));
@@ -141,24 +159,31 @@ export async function traceIncident(input, { depth = 2, log = () => {} } = {}) {
     return { account: cp, got, paid, got_usd: usdSum(got), paid_usd: usdSum(paid), net_usd: usdSum(got) - usdSum(paid), txs: [...new Set(x.in.map((f) => f.tx))] };
   }));
   // a victim lost value to us; a large paid-out amount to an account that sent nothing back is cash-out, handled in the trail
-  const losers = counter.filter((c) => c.net_usd > 1 && c.got_usd > 0 && !funderSet.has(c.account)).sort((a, b) => b.net_usd - a.net_usd);
+  const xmap = await exchangeWalletMap().catch(() => new Map());
+  const losers = counter.filter((c) => c.net_usd > 1 && c.got_usd > 0 && !funderSet.has(c.account) && (drained.has(c.account) || !xmap.has(c.account))).sort((a, b) => b.net_usd - a.net_usd);
   const states = await pool(losers.slice(0, 30), 6, (c) => viewAccount(c.account).catch(() => null));
   const victims = losers.slice(0, 30).map((c, i) => ({ account: c.account, contract: !!states[i] && (states[i].code_hash !== '11111111111111111111111111111111' || !!states[i].global_contract_hash || !!states[i].global_contract_account_id),
     label: builtinLabel(c.account)?.name || null, lost_usd: Math.round(c.net_usd), tokens: c.got.map((g) => ({ token: g.token, symbol: g.symbol, amount: g.amount, usd: g.usd != null ? Math.round(g.usd) : null })), returned_usd: Math.round(c.paid_usd), txs: c.txs.slice(0, 20) }));
-  const target = hint?.target ? victims.find((v) => v.account === hint.target) || { account: hint.target } : victims.find((v) => v.contract) || null;
-  const attackTxs = target?.txs || [];
+  // an exchange drain: the exchange's hot wallets are the victims (named by the upstream trace), the biggest one is the target
+  if (up.drain) for (const v of victims) { const d = up.drain.victims.find((x) => x.account === v.account); if (d) Object.assign(v, { exchange: true, label: d.name, how: d.how }); }
+  const target = up.drain ? victims.find((v) => v.exchange) || null : hint?.target ? victims.find((v) => v.account === hint.target) || { account: hint.target } : victims.find((v) => v.contract) || null;
+  const attackTxsAll = up.drain ? [...new Set(victims.filter((v) => v.exchange).flatMap((v) => v.txs))] : null;
+  const attackTxs = attackTxsAll || target?.txs || [];
   const firstAttack = Math.min(...txs.filter((t) => attackTxs.includes(t.transaction.hash)).map(tsOf).filter(Boolean), Infinity);
 
   // ---- 3. the loot's trail out of the attacker's accounts
   log('following the money');
   const trail = await followMoney(ownSet, flows, { since: Number.isFinite(firstAttack) ? firstAttack - 60e3 : 0, depth, own, fake });
-  for (const w of trail.wallets) if (!own.has(w.account)) own.set(w.account, { account: w.account, role: 'cash_out_wallet' });
+  // a "wallet" whose money only went on to bridge-mng.near is a 1Click deposit address whose status could not be read: a service, not the attacker's
+  const oneClickAddr = new Set(trail.wallets.filter((w) => { const outs = trail.moves.filter((m) => m.from === w.account); return outs.length && outs.every((m) => m.to === 'bridge-mng.near'); }).map((w) => w.account));
+  for (const w of trail.wallets) if (!own.has(w.account) && !oneClickAddr.has(w.account)) own.set(w.account, { account: w.account, role: 'cash_out_wallet' });
   // an intents account fed by a 1Click deposit address (run by bridge-mng.near) is 1Click's own swap account sending a refund back,
   // not one of the attacker's: listed apart, never flagged
   const service = [];
   const intentsAccs = [...own.values()].filter((o) => o.role === 'intents_account').slice(0, 10);
   const isOneClick = await pool(intentsAccs, 4, async (o) => { const { hashes } = await accountTxHashes(o.account, { limit: 30 }); return (await fetchTxs(hashes)).some((t) => t.transaction.signer_id === 'bridge-mng.near'); });
   intentsAccs.forEach((o, i) => { if (isOneClick[i]) { own.delete(o.account); service.push({ account: o.account, role: '1Click swap account (refund)' }); } });
+  for (const a of oneClickAddr) service.push({ account: a, role: '1Click deposit address (status not readable)' });
   for (const f of origin.funders) if (!own.has(f.from)) own.set(f.from, { account: f.from, role: 'funder' });
 
   // ---- 4. what is still held, and what can be frozen
@@ -176,27 +201,53 @@ export async function traceIncident(input, { depth = 2, log = () => {} } = {}) {
     ...(origin.created_ts ? [{ ts: origin.created_ts, kind: 'created', text: `${attacker} created${origin.creator ? ` by ${origin.creator.by}${origin.creator.signer !== origin.creator.by ? ` (signed by ${origin.creator.signer})` : ''}` : ''}`, tx: origin.creator?.tx }] : []),
     ...origin.funders.map((f) => ({ ts: f.ts, kind: 'funded', text: `funded with NEAR by ${f.from}`, tx: f.tx, raw: f.raw })),
     ...setup.map((s) => ({ ts: s.ts, kind: 'setup', text: s.what, tx: s.tx })),
-    ...attackRows.map((a) => ({ ts: a.ts, kind: 'attack', text: `${a.methods.join(', ')} on ${a.receiver}`, tx: a.tx })),
+    ...(up.drain ? up.drain.victims.flatMap((v) => v.txs.slice(0, 3).map((h) => ({ ts: v.first_ts, kind: 'attack', text: `${v.name} ${v.account} sent ${v.tokens.map((t) => `${fmt(t.amount)} ${t.symbol}`).join(', ')} (${fmtUsd(v.usd)}) to ${attacker}`, tx: h })))
+      : attackRows.map((a) => ({ ts: a.ts, kind: 'attack', text: `${a.methods.join(', ')} on ${a.receiver}`, tx: a.tx }))),
     ...trail.moves.slice(0, 25).map((m) => ({ ts: m.ts, kind: 'cash_out', text: `${m.symbol} ${fmt(m.amount)} from ${m.from} to ${m.to}${m.dest_kind ? ` (${m.dest_kind})` : ''}`, tx: m.tx })),
   ].filter((e) => e.ts).sort((a, b) => a.ts - b.ts).slice(0, 80);
 
   // ---- 6. what kind of incident this is (rules; the AI explains, never decides)
   const stolen = victims.reduce((s, v) => s + v.lost_usd, 0);
   const walletVictims = victims.filter((v) => !v.contract);
+  const emptied = [];
+  for (const v of walletVictims.filter((x) => !x.exchange).slice(0, 10)) {
+    const t = v.tokens[0]; if (!t) continue;
+    const left = t.token === NEAR ? await viewAccount(v.account).then((a) => Number(BigInt(a.amount) / 10n ** 21n) / 1e3).catch(() => null)
+      : await view(t.token, 'ft_balance_of', { account_id: v.account }).then(async (b) => (await valueOf(t.token, String(b))).amount).catch(() => null);
+    if (left != null && left < 0.1 * (t.amount || 0)) emptied.push(v.account);
+  }
+  for (const v of victims) if (emptied.includes(v.account)) v.emptied = true;
+  // a drainer's fingerprint is in who signed: one key moving several victims' money (the attacker's key added to each), or the attacker itself
+  // signing the move (an approval). Wallets sweeping into a fund or an OTC desk sign with their own, different keys
+  const byHash = new Map(txs.map((t) => [t.transaction.hash, t]));
+  const keyUse = new Map(); let attackerSigned = 0;
+  for (const v of victims.filter((x) => x.emptied)) for (const h of v.txs) {
+    const t = byHash.get(h); if (!t) continue;
+    if (t.transaction.signer_id === attacker) attackerSigned++;
+    else if (t.transaction.signer_id === v.account) { const k = t.transaction.public_key; keyUse.set(k, new Set([...(keyUse.get(k) || []), v.account])); }
+  }
+  const sharedKey = [...keyUse.values()].some((set) => set.size >= 2);
+  const youngAttacker = origin.created_ts && Number.isFinite(firstAttack) ? firstAttack - origin.created_ts < 30 * 86400e3 : false;
+  const drainerSign = sharedKey || attackerSigned > 0 || youngAttacker;
   const usedFake = attackRows.some((a) => JSON.stringify(a.args || []).match(new RegExp([...fake].map((x) => x.replace(/\./g, '\\.')).join('|') || '^$')));
-  const kind = target?.contract !== false && target && (fake.size || usedFake) ? 'protocol_exploit' : walletVictims.length >= 3 ? 'wallet_drainer' : target?.contract ? 'protocol_exploit' : stolen > 0 ? 'suspicious_transfers' : 'none';
+  const kind = up.drain ? 'exchange_drain' : target?.contract !== false && target && (fake.size || usedFake) ? 'protocol_exploit' : walletVictims.length >= 3 ? 'wallet_drainer' : target?.contract ? 'protocol_exploit' : stolen > 0 ? 'suspicious_transfers' : 'none';
+  // "confirmed" (flags, a hack alert) needs an attacker signal, not just value received: fake tokens used against the target, an account that
+  // was new when it took the money, an exchange drain, or several wallets emptied. A whale withdrawing its own stake has none of these
+  const freshAtAttack = origin.created_ts && Number.isFinite(firstAttack) && firstAttack - origin.created_ts < config.incidents.freshHours * 3600e3;
+  const evidence = kind === 'exchange_drain' || (kind === 'protocol_exploit' && (fake.size > 0 || usedFake || freshAtAttack)) || (kind === 'wallet_drainer' && emptied.length >= 3 && drainerSign);
   const signals = [
+    up.drain ? `${up.drain.victims.length} ${up.drain.exchange.split(', ')[0]} hot wallet${up.drain.victims.length > 1 ? 's' : ''} sent ${fmtUsd(up.drain.usd)} to ${attacker}, ${Math.min(...up.drain.victims.map((v) => v.first_ts)) - up.drain.root_created_ts < 60e3 ? 'an account created by the first of these transfers' : `${hoursBetween(up.drain.root_created_ts, Math.min(...up.drain.victims.map((v) => v.first_ts)))} after it was created`}${up.drain.victims[0].how ? ` (identified as such because it ${up.drain.victims[0].how})` : ''}` : null,
     fake.size ? `deployed ${fake.size} token contract${fake.size > 1 ? 's' : ''} of its own (${[...fake].slice(0, 6).join(', ')})${usedFake ? ' and used them in the attack transactions' : ''}` : null,
     origin.created_ts && Number.isFinite(firstAttack) ? `the account was ${hoursBetween(origin.created_ts, firstAttack)} old when the attack started` : null,
-    target ? `${target.account} paid out ${fmtUsd(target.lost_usd)} and got ${fmtUsd(target.returned_usd || 0)} back` : null,
-    walletVictims.length ? `${walletVictims.length} wallet${walletVictims.length > 1 ? 's' : ''} lost value to it` : null,
+    target && !up.drain ? `${target.account} paid out ${fmtUsd(target.lost_usd)} and got ${fmtUsd(target.returned_usd || 0)} back` : null,
+    emptied.length ? `${emptied.length} wallet${emptied.length > 1 ? 's were' : ' was'} emptied into it${sharedKey ? ', one key signing for several of them' : attackerSigned ? ', moved by the attacker itself' : youngAttacker ? '' : ' (each signed with its own key: consistent with a wallet consolidating its own funds)'}` : null,
     trail.exits.length ? `the loot left: ${Object.entries(trail.exit_usd).map(([k, v]) => `${k} (~$${v.toLocaleString('en-US')})`).join(', ')}` : null,
   ].filter(Boolean);
 
   return {
-    _id: `inc:${attacker}`, status: stolen >= 1000 && (kind === 'protocol_exploit' || kind === 'wallet_drainer') ? 'confirmed' : stolen > 0 ? 'suspected' : 'nothing_found', kind, input,
+    _id: `inc:${attacker}`, status: stolen >= 1000 && evidence ? 'confirmed' : stolen > 0 ? 'suspected' : 'nothing_found', kind, input,
     attacker: { account: attacker, ...origin, created_ts: origin.created_ts, funders: origin.funders.map((f) => ({ account: f.from, tx: f.tx, ts: f.ts, raw: f.raw })) },
-    accounts: [...own.values()], service_accounts: service, target, victims, attack_txs: attackRows, stolen_usd: Math.round(stolen), losses: target?.tokens || [],
+    accounts: [...own.values()], service_accounts: service, target, victims, sources: up.sources, source_path: up.path, drain: up.drain ? { exchange: up.drain.exchange, usd: up.drain.usd, root: up.drain.root } : null, attack_txs: attackRows, stolen_usd: Math.round(stolen), losses: target?.tokens || [],
     trail, held, held_usd: Math.round(held.reduce((s, h) => s + (h.usd || 0), 0)), freezable: held.flatMap((h) => h.tokens.filter((t) => t.freeze).map((t) => ({ holder: h.account, ...t }))),
     timeline, signals, suspects, started_ts: Number.isFinite(firstAttack) ? firstAttack : null, last_ts: Math.max(...txs.map(tsOf).filter(Boolean), 0) || null,
     stats: { txs: txs.length, flows: flows.length }, prices_note: 'USD at current prices', traced_ts: Date.now(),
@@ -207,8 +258,19 @@ const fmt = (x) => (x == null ? '?' : x >= 1e9 ? (x / 1e9).toFixed(2) + 'B' : x 
 const fmtUsd = (x) => '$' + Math.round(x || 0).toLocaleString('en-US');
 const hoursBetween = (a, b) => { const h = (b - a) / 3600e3; return h < 1 ? `${Math.round(h * 60)} minutes` : h < 48 ? `${h.toFixed(1)} hours` : `${Math.round(h / 24)} days`; };
 
+const contractCache = new Map();
+/** Has this account code (a protocol, a token, any contract)? Cached. */
+async function isContract(id) {
+  if (contractCache.has(id)) return contractCache.get(id);
+  const a = await viewAccount(id).catch(() => null);
+  const v = !!a && (a.code_hash !== '11111111111111111111111111111111' || !!a.global_contract_hash || !!a.global_contract_account_id);
+  contractCache.set(id, v);
+  return v;
+}
+
 /** Where a destination account sits: exchange, bridge, NEAR Intents, another chain, a DEX, or a wallet to follow. */
 function destKind(id) {
+  if (id === 'bridge-mng.near') return 'NEAR Intents 1Click'; // the operator of 1Click deposit addresses
   if (id.startsWith('chain:')) return 'withdrawn to another chain';
   if (id === 'intents.near') return 'NEAR Intents';
   const l = builtinLabel(id);
@@ -229,22 +291,23 @@ async function followMoney(ownSet, flows, { since, depth, own, fake }) {
     const big = rows.filter((r) => (r.usd ?? 0) >= 50 || (r.usd == null && r.token === NEAR));
     const next = new Map();
     // a one-time 1Click deposit address is a cross-chain swap: its status says the chain, the recipient and the destination tx
-    const swaps = await Promise.all(big.map((r) => (!destKind(r.to) && /^[0-9a-f]{64}$/.test(r.to) ? oneClickSwap(r.to) : null)));
+    const swaps = await pool(big, 3, (r) => (!destKind(r.to) && /^[0-9a-f]{64}$/.test(r.to) ? oneClickSwap(r.to) : null)); // three at a time: the status API rate-limits
     for (const [i, r] of big.entries()) {
       const sw = swaps[i];
       if (sw) {
-        const refunded = sw.status === 'REFUNDED';
+        const refunded = sw.status === 'REFUNDED' || sw.status === 'FAILED';
         moves.push({ tx: r.tx, ts: r.ts, from: r.from, to: r.to, token: baseToken(r.token), symbol: r.symbol, amount: r.amount, usd: r.usd != null ? Math.round(r.usd) : null, hop,
-          dest_kind: refunded ? '1Click swap, refunded' : `1Click swap to ${sw.asset} on ${sw.chain}`, swap: sw });
+          dest_kind: refunded ? `1Click swap, ${sw.status === 'FAILED' ? 'failed' : 'refunded'}` : `1Click swap to ${sw.asset} on ${sw.chain}`, swap: sw });
         seen.add(r.to);
         if (!refunded) { exits.push({ to: sw.recipient ? `${sw.chain}:${sw.recipient}` : r.to, kind: sw.chain === 'NEAR' ? '1Click swap on NEAR' : `swapped to ${sw.chain}`, chain: sw.chain, asset: sw.asset, recipient: sw.recipient,
           amount_out: sw.amount_out, status: sw.status, dest_txs: sw.dest_txs, deposit_address: r.to, usd: r.usd, token: baseToken(r.token), symbol: r.symbol, amount: r.amount, tx: r.tx, ts: r.ts });
           if (sw.chain === 'NEAR' && sw.recipient && !seen.has(sw.recipient)) next.set(sw.recipient, (next.get(sw.recipient) || 0) + (r.usd || 0)); }
         continue;
       }
-      const k = destKind(r.to);
+      let k = destKind(r.to);
+      if (!k && !PSEUDO.test(r.to) && !/^[0-9a-f]{64}$|^0x[0-9a-f]{40}$/.test(r.to)) { const st = await isContract(r.to); if (st) k = 'contract'; }
       moves.push({ tx: r.tx, ts: r.ts, from: r.from, to: r.to, token: baseToken(r.token), symbol: r.symbol, amount: r.amount, usd: r.usd != null ? Math.round(r.usd) : null, hop, dest_kind: k || 'wallet' });
-      if (k && k !== 'DEX') exits.push({ to: r.to, kind: k.startsWith('exchange') ? 'an exchange' : k, label: k, usd: r.usd, token: baseToken(r.token), symbol: r.symbol, amount: r.amount, tx: r.tx, ts: r.ts });
+      if (k && k !== 'DEX' && k !== 'contract') exits.push({ to: r.to, kind: k.startsWith('exchange') ? 'an exchange' : k, label: k, usd: r.usd, token: baseToken(r.token), symbol: r.symbol, amount: r.amount, tx: r.tx, ts: r.ts });
       else if (!k && !PSEUDO.test(r.to) && !seen.has(r.to) && (r.usd ?? 0) >= 200) next.set(r.to, (next.get(r.to) || 0) + (r.usd || 0));
     }
     if (hop === depth) break;
@@ -263,8 +326,8 @@ async function followMoney(ownSet, flows, { since, depth, own, fake }) {
   }
   // the attacker's own intents withdrawals to other chains
   for (const f of flows) if (f.kind === 'intents_out' && ownSet.has(f.from) && f.to.startsWith('chain:') && keep(f)) { const v = await valueOf(f.token, f.raw); exits.push({ to: f.to, kind: 'withdrawn to another chain', usd: v.usd, token: baseToken(f.token), symbol: v.symbol, amount: v.amount, tx: f.tx, ts: f.ts }); }
-  const per = new Map(); // kind|token -> largest single exit amount (round trips repeat the same tokens)
-  for (const e of exits) { const k = `${e.kind}|${e.token}`; const c = per.get(k); if (!c || (e.usd || 0) > (c.usd || 0)) per.set(k, e); }
+  const per = new Map(); // each transfer once (the same move can be seen from two hops)
+  for (const e of exits) per.set(`${e.tx}|${e.to}|${e.token}`, e);
   const byKind = {};
   for (const e of per.values()) byKind[e.kind] = Math.round((byKind[e.kind] || 0) + (e.usd || 0));
   return { moves: moves.sort((a, b) => a.ts - b.ts).slice(0, 200), exits, wallets, exit_usd: byKind };

@@ -62,3 +62,51 @@ test('AI write-up: thousands and millions read as such', () => {
   assert.deepEqual(unverifiedAmounts({ s: 'about $63k was taken, $51k went to Ethereum' }, p), []);
   assert.deepEqual(unverifiedAmounts({ s: 'about $3 million was taken' }, p), ['$3 million']);
 });
+
+test('detector: large transfers out of exchange hot wallets, not to other exchange accounts', async () => {
+  const { exchangeOutflows } = await import('../src/incident/detect.js');
+  const nearTx = (from, to, tx) => ({ ...receipt(from, to, [], [{ Transfer: { deposit: '8091108600000000000000000000000' } }]), tx_hash: tx });
+  const b = { block: { header: { height: 7, timestamp_nanosec: '1000000000' } }, shards: [{ receipt_execution_outcomes: [nearTx('hot1', 'fresh', 'T1'), nearTx('hot1', 'binancecold3.near', 'T2'), nearTx('alice.near', 'fresh', 'T3')] }] };
+  assert.deepEqual(exchangeOutflows(b, new Set(['hot1'])).map((f) => [f.exchange, f.to, f.tx]), [['hot1', 'fresh', 'T1']]);
+});
+
+test('exchange baselines: a drain is unusual, a customer withdrawal is not', async () => {
+  const { unusualOutflow } = await import('../src/incident/exchanges.js');
+  const w = { baseline: { n: 175, median_near: 1058, p98_near: 86926 } };
+  assert.equal(unusualOutflow(w, 1500, 400000).length, 0);
+  assert.equal(unusualOutflow(w, 90000, 5000000).length, 0, 'a large but normal withdrawal');
+  const r = unusualOutflow(w, 8091108, 3);
+  assert.equal(r.length, 2);
+  assert.match(r[0], /93x its usual large withdrawal/);
+  assert.match(r[1], /100% of its balance/);
+  assert.equal(unusualOutflow({ baseline: { n: 5 } }, 8091108, null).length, 0, 'no baseline, no balance: nothing to compare with');
+});
+
+test('exchange events: key changes on a hot wallet are seen, app keys are not', async () => {
+  const { exchangeEvents } = await import('../src/incident/detect.js');
+  const keyRc = (perm) => ({ receipt: { receipt_id: 'k', predecessor_id: 'hot1', receiver_id: 'hot1', receipt: { Action: { signer_id: 'hot1', actions: [{ AddKey: { public_key: 'ed25519:X', access_key: { permission: perm } } }] } } }, execution_outcome: { outcome: { logs: [], status: { SuccessValue: '' } } }, tx_hash: 'K' });
+  const b = { block: { header: { height: 1, timestamp_nanosec: '1000000000' } }, shards: [{ receipt_execution_outcomes: [keyRc('FullAccess'), keyRc({ FunctionCall: { receiver_id: 'x' } })] }] };
+  const { keys } = exchangeEvents(b, new Map([['hot1', { kind: 'hot', exchange: 'Binance' }]]));
+  assert.deepEqual(keys.map((k) => [k.kind, k.full]), [['added', true], ['added', false]]);
+});
+
+test('news: NEAR crime stories and the accounts they name', async () => {
+  const { parseFeed, newsSignal } = await import('../src/incident/signals.js');
+  const xml = `<rss><channel><item><title>Binance hot wallets on NEAR drained</title><link>https://x.test/a</link><description><![CDATA[Funds moved to efd224256518a7cacd209867963276efed302a8e222c013c43f4b1bd369ae5af and to evil.near]]></description><pubDate>Thu, 29 Oct 2026 21:00:00 GMT</pubDate></item>
+    <item><title>Bitcoin hits a high</title><link>https://x.test/b</link><description>near the top</description></item></channel></rss>`;
+  const items = parseFeed(xml);
+  assert.equal(items.length, 2);
+  const s = newsSignal(items[0]);
+  assert.deepEqual(s.accounts.sort(), ['efd224256518a7cacd209867963276efed302a8e222c013c43f4b1bd369ae5af', 'evil.near'].sort());
+  assert.equal(s.exchange, 'Binance');
+  assert.equal(newsSignal(items[1]), null, 'lower-case "near" is not NEAR, and no crime');
+});
+
+test('flows: NEAR attached to a call is paid in (a staked deposit nets out its withdrawal), 1 yocto is not', () => {
+  const stake = receipt('whale.near', 'linear-protocol.near', [], [{ FunctionCall: { method_name: 'deposit_and_stake', deposit: '1430000000000000000000000000000' } }]);
+  const sec = receipt('whale.near', 'usdt.tether-token.near', [], [{ FunctionCall: { method_name: 'ft_transfer', deposit: '1' } }]);
+  assert.deepEqual(flowsOfReceipt(stake).map((f) => [f.kind, f.from, f.to]), [['call_deposit', 'whale.near', 'linear-protocol.near']]);
+  assert.equal(flowsOfReceipt(sec).length, 0);
+  const back = receipt('linear-protocol.near', 'whale.near', [], [{ Transfer: { deposit: '1430000000000000000000000000000' } }]);
+  assert.equal(netOf('whale.near', [...flowsOfReceipt(stake), ...flowsOfReceipt(back)]).near.net, '0');
+});
