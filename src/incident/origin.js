@@ -33,8 +33,10 @@ export async function identify(id) {
   if (reg) out = { kind: 'exchange', name: `${reg.exchange || 'Unnamed exchange'} ${reg.kind === 'cold' ? 'cold' : 'hot'} wallet`, how: reg.how || 'in the exchange wallet registry' };
   else if (lab?.label) out = { kind: lab.type === 'exchange' ? 'exchange' : 'wallet', name: lab.label, how: 'named by hand' };
   else if (b?.type === 'exchange') out = { kind: 'exchange', name: b.label, how: 'account name' };
+  const contract = !!state && (state.code_hash !== '11111111111111111111111111111111' || !!state.global_contract_hash || !!state.global_contract_account_id);
   if (!out) {
-    const busy = (first?.total || 0) >= 20000 || ent?.kind === 'hub';
+    // busy wallets are exchange hot wallets; a busy contract (a DEX, a pool) is not, however many transactions it has
+    const busy = !contract && ((first?.total || 0) >= 20000 || ent?.kind === 'hub');
     if (busy) {
       // a busy wallet: whose exchange is it? the exchange-named accounts it sends its reserves to say so
       const sweep = await sweepTarget(id);
@@ -42,7 +44,6 @@ export async function identify(id) {
     }
   }
   if (!out) {
-    const contract = state && (state.code_hash !== '11111111111111111111111111111111' || state.global_contract_hash || state.global_contract_account_id);
     out = contract ? { kind: 'contract', name: b?.label || null, how: 'has code' } : { kind: 'wallet', name: b?.label || null, how: null };
   }
   out = { ...out, tx_count: first?.total ?? null, first_ts: first?.ts ?? null };

@@ -123,6 +123,15 @@ The parties who can still stop stolen money are the services that convert it: NE
 
 ### 4. Off-chain signals (`src/incident/signals.js`)
 
+- **On the bot.** `/hack <wallet | tx | link>` on @safenear_bot answers in the chat with what Safe Near knows about the case:
+  - the summary, and the part the pasted wallet plays in it;
+  - where the money came from and where it left NEAR (chains and addresses);
+  - what is still on NEAR, wallet by wallet;
+  - the latest move.
+
+  It then attaches the evidence pack as a Markdown file, ready to forward to whoever can act: the victim, SEAL 911, NEAR Intents / 1Click, bridges, exchanges. The pack lists the sources with transactions, every attacker wallet with its holdings (the "please refuse" list), the cross-chain recipients with destination transactions, and how the source was identified.
+
+  Only confirmed cases are shown. A wallet that was looked at and not confirmed gets "no hack is confirmed", never an accusation. An unknown wallet is investigated: ask again in a few minutes. `/hacks` lists the latest confirmed cases.
 - **Reports.** `/report <account | tx> [what happened]` to @safenear_bot, or the form on Safety Check, starts an investigation and shows in the live feed. A report never flags anything by itself; flags come only from what the trace confirms.
 - **News.** Public feeds (`NEWS_FEEDS`: Cointelegraph, The Block, Decrypt, rekt.news, CryptoSlate) are read every `NEWS_EVERY_MINUTES` (15). A story that mentions NEAR and a crime word raises `security_news`; any NEAR accounts or transaction hashes it names are investigated.
 
