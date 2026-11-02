@@ -154,6 +154,7 @@ Replaying the Veax blocks, the attacker stands out at $62.8k in 5 tokens across 
 - **Exchange wallet watch:** a registry of exchange hot wallets, discovered by behaviour and named from the cold wallets they sweep to, with each one's normal withdrawal size. A drain is flagged when a transfer is far above that, or most of the balance, goes to a brand-new account, or when several hot wallets pay one account. A full-access key change on a hot wallet raises an alert.
 - **Live follow:** every account of a confirmed incident is watched. Each move of stolen funds alerts at once ("woke up after 3 days"), 1Click swaps are resolved, the receiver is flagged and followed, and the trace is redone.
 - **Blocklist feed** for swap services, bridges, exchanges and wallets: `GET /api/v1/flags?since=`, `GET /api/v1/flags/check?ids=`.
+- **On the bot:** `/hack <wallet | tx>` on @safenear_bot gives the case summary (where the money came from and went, what is still held, the attacker's wallets) and attaches the evidence pack to forward to the victim, SEAL 911, 1Click, bridges and exchanges; `/hacks` lists the latest.
 - **Off-chain signals:** `/report` to @safenear_bot or the form on Safety Check starts an investigation (it never flags on its own), and security news about NEAR (`NEWS_FEEDS`) is read every 15 minutes. Stories naming accounts or transactions are investigated.
 
 More access:

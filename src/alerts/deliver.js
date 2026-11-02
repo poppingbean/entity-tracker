@@ -60,6 +60,16 @@ export const alertMessage = (a) => {
   const links = [a.url && config.alerts.siteUrl ? `<a href="${escHtml(config.alerts.siteUrl + a.url)}">Open on Safe Near</a>` : null, txUrl(a) ? `<a href="${escHtml(txUrl(a))}">Transaction on NearBlocks</a>` : null].filter(Boolean);
   return `${ICON[a.severity] || ''} <b>${escHtml(a.title)}</b>\n${escHtml(a.text)}${at}${links.length ? '\n' + links.join(' · ') : ''}`;
 };
+/** A file to a chat (the evidence pack), with an optional caption. */
+export async function sendTelegramDocument(chatId, name, text, caption = '') {
+  if (!config.alerts.telegramToken) return;
+  const form = new FormData();
+  form.append('chat_id', String(chatId));
+  form.append('document', new Blob([text], { type: 'text/markdown' }), name);
+  if (caption) { form.append('caption', caption.slice(0, 1000)); form.append('parse_mode', 'HTML'); }
+  const r = await fetch(`https://api.telegram.org/bot${config.alerts.telegramToken}/sendDocument`, { method: 'POST', body: form, signal: AbortSignal.timeout(20000) }).then((x) => x.json());
+  if (!r.ok) throw new Error(`Telegram: ${r.description || 'send failed'}`);
+}
 export async function sendTelegram(chatId, text) {
   if (!config.alerts.telegramToken) return;
   const r = await tg('sendMessage', { chat_id: chatId, text, parse_mode: 'HTML', disable_web_page_preview: true });

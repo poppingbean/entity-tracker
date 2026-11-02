@@ -1,10 +1,11 @@
 // The Telegram bot: anyone can keep a watchlist from a chat (private or group) and get its alerts there. Long polling (getUpdates), so
-// no public endpoint is needed. Commands: /watch, /unwatch, /list, /alerts, /check, /help.
+// no public endpoint is needed. Commands: /watch, /unwatch, /list, /alerts, /check, /hack, /hacks, /report, /help.
 import { config } from '../config.js';
 import { metaGet, metaSet } from '../db.js';
 import { warn } from '../log.js';
 import { resolveTarget, findWatched, setWatch, getWatchlist, alertsFor, KINDS, MAX_ITEMS } from './watch.js';
-import { sendTelegram, alertMessage } from './deliver.js';
+import { sendTelegram, sendTelegramDocument, alertMessage } from './deliver.js';
+import { findIncident, incidentMessage, evidenceFile, latestMessage } from '../incident/botinfo.js';
 import { getAnalysis } from '../analysis/token.js';
 import { getNftAnalysis } from '../nft/analysis.js';
 import { report } from '../incident/signals.js';
@@ -16,6 +17,8 @@ const HELP = `<b>Safe Near alerts</b>
 /list – what this chat watches
 /alerts – the latest alerts for this chat's watchlist
 /check &lt;token | NFT collection&gt; – its current risk notes
+/hack &lt;wallet | transaction | link&gt; – is it part of a hack? Where the money came from and went, what is still held, and an evidence file to forward
+/hacks – the latest hacks on NEAR
 /report &lt;account | transaction hash&gt; [what happened] – report a hack, drainer or stolen funds: it is investigated from the chain
 Kinds are detected from the id (c_… is a group); force one with e.g. <code>/watch alice.near creator</code>. Up to ${MAX_ITEMS} items per chat.`;
 
@@ -44,6 +47,20 @@ async function handle(msg) {
     if (!t) return sendTelegram(chat, `<code>${esc(arg.slice(0, 64))}</code> is not in the system. Watch a token the tracker follows (contract or symbol), a wallet, a creator, an NFT collection or a c_… group id.`);
     const r = await setWatch(owner, t, cmd === '/watch');
     return sendTelegram(chat, r.ok ? `${cmd === '/watch' ? 'Watching' : 'Stopped watching'} ${t.kind} <code>${esc(t.id)}</code>.` : esc(r.error));
+  }
+  if (cmd === '/hacks') return sendTelegram(chat, await latestMessage());
+  if (cmd === '/hack') {
+    if (!arg) return sendTelegram(chat, 'Usage: /hack &lt;wallet | transaction hash | NearBlocks link&gt;');
+    const f = await findIncident(arg);
+    if (f?.checked) return sendTelegram(chat, `Safe Near has looked at <code>${esc(arg.slice(0, 70))}</code>: no hack is confirmed. That is not a guarantee: send /report with what you saw if you think it is one.`);
+    if (!f) {
+      // nothing known yet: investigate it (a report: nothing is flagged on it alone) and say when to ask again
+      const r = await report(arg, { via: 'telegram', who: owner, note: '/hack' });
+      return sendTelegram(chat, r.error ? esc(r.error) : `No hack is linked to <code>${esc(arg.slice(0, 70))}</code> yet. It is being investigated from the chain now: send /hack again in a few minutes.`);
+    }
+    await sendTelegram(chat, await incidentMessage(f.inc, { role: f.role, id: f.id }));
+    const file = evidenceFile(f.inc);
+    return sendTelegramDocument(chat, file.name, file.text, 'Evidence pack (Markdown): forward it as is.');
   }
   if (cmd === '/report') {
     if (!arg) return sendTelegram(chat, 'Usage: /report &lt;account | transaction hash&gt; [what happened]');
