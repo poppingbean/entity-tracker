@@ -14,11 +14,12 @@ import { powerInventory, unknownWrites, powerSeverity, POWERS, SEV } from './pow
 import { controlOf, reputationOf } from './control.js';
 import { typeChecks, recentBehaviour } from './checks.js';
 import { auditFindings, controlSummary } from './findings.js';
-import { codeCapabilities, DANGEROUS } from './wasm.js';
+import { codeCapabilities, codeEffects, DANGEROUS } from './wasm.js';
+import { describeFunctions, aiFunctionReview, mergeFunctions } from './functions.js';
 import { reviewSource } from './source.js';
 import { aiCodeReview, aiDeepReview, aiExplainChange, aiWriteUp } from './ai.js';
 
-export const AUTO_AUDIT_V = 3; // bump when the audit logic changes: older code audits are redone
+export const AUTO_AUDIT_V = 4; // bump when the audit logic changes: older code audits are redone
 const STANDARD_METHODS = new Set([...STANDARD, 'nft_transfer', 'nft_transfer_call', 'nft_token', 'nft_approve', 'nft_revoke', 'nft_revoke_all', 'nft_is_approved', 'nft_resolve_transfer',
   'nft_payout', 'nft_transfer_payout', 'mt_transfer', 'mt_transfer_call', 'mt_batch_transfer', 'mt_batch_transfer_call', 'deposit', 'deposit_and_stake', 'stake', 'unstake', 'unstake_all',
   'withdraw', 'withdraw_all', 'stake_all', 'swap', 'add_liquidity', 'remove_liquidity', 'execute', 'add_proposal', 'act_proposal', 'confirm', 'add_request', 'delegate', 'undelegate', 'vote', 'ping']);
@@ -52,7 +53,8 @@ export async function auditCode(account, acc = null, { force = false, ai = true 
   const src = exports?.includes('contract_source_metadata') ? await viewFunction(account, 'contract_source_metadata') : null;
   let powers = powerInventory(exports, cls.role, { fakeStorage: stat?.fakeStorage || [] });
   let unknown = unknownWrites(exports, powers, STANDARD_METHODS).slice(0, 40);
-  const prev = await col('code_audits').findOne({ _id: key }, { projection: { ai: 1, ai_deep: 1, first_seen_ts: 1, source_review: 1 } });
+  const prev = await col('code_audits').findOne({ _id: key }, { projection: { ai: 1, ai_deep: 1, ai_functions: 1, first_seen_ts: 1, source_review: 1 } });
+  const effects = code ? await codeEffects(code) : null;
   const doc = {
     _id: key, v: AUTO_AUDIT_V, first_account: account, kb: code ? Math.round(code.length / 1024) : null, exports_n: exports?.length ?? null, exports: exports?.slice(0, 400) || null,
     role: cls.role, label: cls.label, standards: cls.standards, confidence: cls.confidence, candidates: cls.candidates || [], why: cls.why || null, role_source: 'rules',
@@ -91,6 +93,15 @@ export async function auditCode(account, acc = null, { force = false, ai = true 
     if (sr) doc.source_review = { link: sr.link, ref: sr.ref || null, files_read: sr.files_read || 0, missing: sr.missing || [], error: sr.error || null, excerpts: (sr.excerpts || []).slice(0, 8) };
   }
   if (prev?.ai_deep) doc.ai_deep = prev.ai_deep;
+  // the function review: what each method does (rules from the code), and NEAR AI's reading of each one for contracts the rules
+  // could not place (or when someone asks for a fresh audit); once per code
+  if (exports?.length) {
+    const rules = describeFunctions(exports.slice(0, 200), effects);
+    let aiFn = !force && prev?.ai_functions ? prev.ai_functions : null;
+    if (ai && !aiFn && exports.length <= 200 && (force || doc.role === 'unknown' || doc.confidence === 'low')) aiFn = await aiFunctionReview(doc, rules, strings).catch((e) => { warn(`audit AI function review ${key}: ${e.message}`); return null; });
+    if (aiFn) doc.ai_functions = aiFn;
+    doc.functions = mergeFunctions(rules, aiFn);
+  }
   await col('code_audits').replaceOne({ _id: key }, { ...doc, first_seen_ts: prev?.first_seen_ts || Date.now() }, { upsert: true });
   return doc;
 }
@@ -132,7 +143,7 @@ export async function autoAudit(account, { deploy = null, force = false, ai = tr
   const auto = {
     v: AUTO_AUDIT_V, ts: Date.now(), code_key: code._id, family_n: family + 1, role: code.role, label: ROLE_LABEL(code.role), role_source: code.role_source, standards: code.standards, confidence: code.confidence,
     powers: code.powers, control: { ...control, summary: controlSummary(control) }, facts: { ...tc.facts, behaviour: beh.facts }, deploy: dep, level, findings,
-    source: code.source, source_review: sr ? { link: sr.link, ref: sr.ref, files_read: sr.files_read, missing: sr.missing, error: sr.error } : null, ai_code: code.ai ? { role: code.ai.role, role_reason: code.ai.role_reason, model: code.ai.model } : null,
+    source: code.source, source_review: sr ? { link: sr.link, ref: sr.ref, files_read: sr.files_read, missing: sr.missing, error: sr.error } : null, ai_code: code.ai ? { role: code.ai.role, role_reason: code.ai.role_reason, model: code.ai.model } : null, functions: code.functions || null, ai_contract: code.ai_functions?.contract || null,
   };
   // what changed since the account's previous code (stage 5)
   if (before?.auto?.code_key && before.auto.code_key !== code._id) {

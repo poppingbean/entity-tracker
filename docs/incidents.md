@@ -39,6 +39,30 @@ Failed receipts move nothing.
 
 NEAR attached to a call (`deposit_and_stake`, `near_deposit`) counts as paid in, so withdrawing what you deposited nets to zero. An exchange paying a customer is a withdrawal, not a loss. The money trail never follows into a contract: a deposit into a protocol is a destination, and a protocol is never flagged.
 
+**Deep review.** Every finding (a drain report or a new case) gets a second, slower look `INCIDENT_REVIEW_DELAY_MINUTES` (10) after it was found. Findings are reviewed one at a time, in the order they were found (`deep_reviews`, `src/incident/deepreview.js`):
+1. The full trace again: by then the money's path has settled.
+2. The receiver's past with whoever paid it. Many earlier transfers from the same accounts, over months, mean a routine relationship (consolidation, treasury, OTC), not theft.
+3. The own-funds check.
+4. NEAR AI (`NEAR_AI_ANALYSIS_MODEL`) reads it all and answers hack / not a hack / unclear, with its confidence and reasons.
+
+The tag then follows the verdict, and the page shows how it changed, e.g. **Drain? → Safe**, **Drain? → Hack**, or **Hack → Under review**:
+- **Hack** needs the rules' attacker signal; NEAR AI never confirms one alone.
+- A case the rules did not confirm is cleared (**Safe**) on a routine relationship, or on NEAR AI's "not a hack" with medium or high confidence. Its alerts are relabelled "Safe after review".
+- A confirmed case that NEAR AI calls "not a hack" with high confidence goes back to **Under review**.
+- An unconfirmed case is never shown as a hack: it reads **Unconfirmed** until its review.
+
+Each case page has a Deep review card with the verdict, NEAR AI's reasons and the receiver's past with its payers. `node src/cli.js deep-review [--now]` runs the reviews by hand.
+
+**Withdrawals of a wallet's own funds.** A whale unstaking from LiNEAR or taking its collateral out of Burrow is the biggest outflow a protocol ever sees, and looks just like a drain. The difference is in the wallet's past, so before anything is called a drain, Safe Near looks back through the transactions the wallet signed (oldest first, up to 4,000). It counts what the wallet paid into that same protocol at least a day before the withdrawal: NEAR attached to `deposit_and_stake` and similar calls, and tokens sent in. An exploit deposits and takes in one go, so same-day deposits don't count.
+
+When those deposits are worth at least half of what came out (staking rewards and price moves account for the rest):
+- it is a **withdrawal of its own funds**;
+- it stays on the live feed and Explore as **WITHDRAWAL … not a hack**, with the proof ("it put 3.13M NEAR into linear-protocol.near between 2023-06-11 and 2023-10-28");
+- it raises no alert and starts no trace;
+- the tracer never confirms it.
+
+Past reports are checked by the worker, a few per pass, and by `node src/cli.js review-drains`; their alerts are relabelled.
+
 **Re-traces keep flags in sync.** When an incident is re-traced, accounts no longer in the attacker's set lose its flag. An incident that is no longer confirmed loses all its flags, and its alert is marked "Retracted (not a hack)".
 
 A confirmed incident:

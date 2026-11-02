@@ -33,6 +33,7 @@ import { contractReport, startAutoAudit, auditJob } from '../audit/report.js';
 import { inspect } from '../firewall/inspect.js';
 import { parseInvestigation, startInvestigation, investigationJob } from '../incident/service.js';
 import { report } from '../incident/signals.js';
+import { walletView } from '../near/walletview.js';
 
 const page = fs.readFileSync(new URL('./index.html', import.meta.url), 'utf8');
 // Google Search Console ownership file for app.safe-near.org, served as is at /<name>.html (before the password check, so Google can read it).
@@ -152,7 +153,7 @@ async function firewallApi(req, res, u) {
     return;
   }
   if (u.pathname === '/api/v1/incidents' && req.method === 'GET') {
-    const rows = await col('incidents').find({ status: { $ne: 'nothing_found' } }, { projection: { status: 1, kind: 1, 'attacker.account': 1, 'target.account': 1, stolen_usd: 1, held_usd: 1, started_ts: 1, 'ai.headline': 1, 'trail.exit_usd': 1 } }).sort({ started_ts: -1 }).limit(100).toArray();
+    const rows = await col('incidents').find({ status: 'confirmed' }, { projection: { status: 1, kind: 1, 'attacker.account': 1, 'target.account': 1, stolen_usd: 1, held_usd: 1, started_ts: 1, 'ai.headline': 1, 'trail.exit_usd': 1 } }).sort({ started_ts: -1 }).limit(100).toArray();
     send(200, { incidents: rows }); return;
   }
   if (u.pathname === '/api/v1/incident' && req.method === 'GET') {
@@ -509,7 +510,7 @@ const routes = {
       metaGet('security:watch'), col('meta').findOne({ _id: 'audit:deploy_cursor' }),
       only === 'hacks' ? [] : col('contract_deploys').find({}, { projection: { account: 1, kind: 1, by: 1, signer: 1, ts: 1 } }).sort({ ts: -1 }).limit(only === 'risky' ? 400 : 60).toArray(),
       only === 'contracts' || only === 'risky' ? [] : col('incident_detections').find({}).sort({ ts: -1 }).limit(20).toArray(),
-      only === 'contracts' || only === 'risky' ? [] : col('incidents').find({ status: { $in: ['confirmed', 'suspected'] } }, { projection: { status: 1, kind: 1, 'attacker.account': 1, 'target.account': 1, stolen_usd: 1, held_usd: 1, started_ts: 1, first_seen_ts: 1, 'ai.headline': 1, 'ai.attack_type': 1, 'trail.exit_usd': 1, detected: 1 } }).sort({ first_seen_ts: -1 }).limit(20).toArray(),
+      only === 'contracts' || only === 'risky' ? [] : col('incidents').find({ status: 'confirmed' }, { projection: { status: 1, kind: 1, 'attacker.account': 1, 'target.account': 1, drain: 1, stolen_usd: 1, held_usd: 1, started_ts: 1, first_seen_ts: 1, 'ai.headline': 1, 'ai.attack_type': 1, 'trail.exit_usd': 1, detected: 1 } }).sort({ first_seen_ts: -1 }).limit(20).toArray(),
       Promise.all([col('contract_deploys').countDocuments({ ts: { $gt: day } }), col('audits').countDocuments({ 'auto.ts': { $gt: day } }), col('audits').countDocuments({ 'auto.ts': { $gt: day }, 'auto.level': { $in: ['high', 'critical'] } }),
         col('incident_detections').countDocuments({ ts: { $gt: day } }), col('incidents').countDocuments({ first_seen_ts: { $gt: day }, status: 'confirmed' }), col('incident_moves').countDocuments({ ts: { $gt: day } }), col('firewall_flags').estimatedDocumentCount()]),
     ]);
@@ -522,11 +523,11 @@ const routes = {
     if (only === 'risky') contracts = contracts.filter((c) => ['high', 'critical'].includes(c.level));
     const items = [
       ...contracts.slice(0, 40),
-      ...detections.map((d) => ({ type: 'drain', ts: d.event_ts || d.ts, receiver: d.receiver, protocol: d.protocol, exchange: d.exchange || null, kind: d.kind || 'protocol', usd: d.usd, reasons: d.reasons, txs: d.txs })),
+      ...detections.map((d) => ({ type: 'drain', ts: d.event_ts || d.ts, receiver: d.receiver, protocol: d.protocol, verdict: d.verdict || null, own: d.own?.explanation || null, tags: (d.tags || []).map((t) => t.tag), why: d.review?.why || null, incident: d.review?.incident || null, exchange: d.exchange || null, kind: d.kind || 'protocol', usd: d.usd, reasons: d.reasons, txs: d.txs })),
       ...moves.map((m) => ({ type: 'moved', ts: m.ts, incident: m.incident, from: m.from, to: m.to, symbol: m.symbol, amount: m.amount, usd: m.usd, idle_h: m.idle_h, swap: m.swap ? { chain: m.swap.chain, asset: m.swap.asset, recipient: m.swap.recipient } : null, tx: m.tx })),
       ...news.map((n) => ({ type: 'news', ts: n.ts, title: n.title, link: n.link, source: n.source, accounts: n.accounts, exchange: n.exchange })),
       ...reports.map((r) => ({ type: 'report', ts: r.last_ts, input: r.input, count: r.count })),
-      ...incidents.map((i) => ({ type: 'hack', ts: i.started_ts || i.first_seen_ts, id: i._id, status: i.status, kind: i.kind, attacker: i.attacker?.account, target: i.target?.account || null, stolen_usd: i.stolen_usd, held_usd: i.held_usd, headline: i.ai?.headline || null, attack_type: i.ai?.attack_type || null, exits: i.trail?.exit_usd || {}, caught_live: !!i.detected })),
+      ...incidents.map((i) => ({ type: 'hack', ts: i.started_ts || i.first_seen_ts, id: i._id, status: i.status, kind: i.kind, attacker: i.attacker?.account, target: i.drain?.exchange || i.target?.account || null, stolen_usd: i.stolen_usd, held_usd: i.held_usd, headline: i.ai?.headline || null, attack_type: { exchange_drain: 'Exchange hot-wallet drain', protocol_exploit: 'Protocol exploit', wallet_drainer: 'Wallet drainer' }[i.kind] || i.ai?.attack_type || null, exits: i.trail?.exit_usd || {}, caught_live: !!i.detected })),
     ].sort((a, b) => (b.ts || 0) - (a.ts || 0)).slice(0, 60);
     const [deploys24, audited24, risky24, drains24, hacks24, moves24, flagged] = counts;
     return { now: Date.now(), watch, live: !!watch && Date.now() - watch.tick_ts < 120e3, last24h: { deploys: deploys24, audited: audited24, risky: risky24, drains: drains24, hacks: hacks24, moves: moves24 }, flagged, items };
@@ -536,9 +537,9 @@ const routes = {
     const f = {}, kind = u.searchParams.get('kind'); if (kind) f.kind = kind;
     const offset = Math.max(0, Number(u.searchParams.get('offset')) || 0);
     const [rows, total, detections, queue] = await Promise.all([
-      col('incidents').find({ ...f, status: { $ne: 'nothing_found' } }, { projection: { status: 1, kind: 1, 'attacker.account': 1, 'target.account': 1, stolen_usd: 1, held_usd: 1, started_ts: 1, first_seen_ts: 1, updated_ts: 1, 'ai.headline': 1, 'ai.attack_type': 1, 'trail.exit_usd': 1, victims: { $slice: 3 }, signals: 1, detected: 1 } })
+      col('incidents').find({ ...f, status: 'confirmed' }, { projection: { status: 1, kind: 1, 'attacker.account': 1, 'target.account': 1, stolen_usd: 1, held_usd: 1, started_ts: 1, first_seen_ts: 1, updated_ts: 1, 'ai.headline': 1, 'ai.attack_type': 1, 'trail.exit_usd': 1, victims: { $slice: 3 }, signals: 1, detected: 1 } })
         .sort({ started_ts: -1, first_seen_ts: -1 }).skip(offset).limit(50).toArray(),
-      col('incidents').countDocuments({ ...f, status: { $ne: 'nothing_found' } }),
+      col('incidents').countDocuments({ ...f, status: 'confirmed' }),
       col('incident_detections').find({}).sort({ ts: -1 }).limit(20).toArray(),
       col('incident_queue').aggregate([{ $group: { _id: '$status', n: { $sum: 1 } } }]).toArray(),
     ]);
@@ -601,7 +602,8 @@ const routes = {
   '/api/wallet': async (u) => {
     const id = u.searchParams.get('id');
     const w = await col('wallets').findOne({ _id: id });
-    if (!w) return { error: 'not found' };
+    // not an early launch buyer, so not profiled: the wallet as the chain shows it
+    if (!w) { const v = validNearAddress(String(id || '').toLowerCase()) ? await walletView(String(id).toLowerCase()).catch(() => null) : null; return v ? { id: v.id, onchain: v } : { error: 'No NEAR account with this name.' }; }
     const entries = await col('entries').find({ wallet: id }).sort({ first_buy_ts: -1 }).limit(100).toArray();
     const toks = await col('tokens').find({ _id: { $in: entries.map((e) => e.token) } }, { projection: { symbol: 1, launchpad: 1, status: 1, 'outcome.rugged': 1, 'outcome.peak_multiple': 1, 'ledger.synced_to_ts': 1, creator: 1 } }).toArray();
     const tmap = new Map(toks.map((t) => [t._id, t]));

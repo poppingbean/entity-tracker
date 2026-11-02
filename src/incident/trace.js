@@ -15,6 +15,7 @@ import { flowsOfTx, NEAR } from './flows.js';
 import { valueOf, baseToken } from './prices.js';
 import { oneClickSwap } from './oneclick.js';
 import { upstream } from './origin.js';
+import { ownFunds } from './ownfunds.js';
 import { exchangeWalletMap } from './exchanges.js';
 import { view } from '../near/rpc.js';
 import { config } from '../config.js';
@@ -234,8 +235,10 @@ export async function traceIncident(input, { depth = 2, log = () => {}, upstream
   // "confirmed" (flags, a hack alert) needs an attacker signal, not just value received: fake tokens used against the target, an account that
   // was new when it took the money, an exchange drain, or several wallets emptied. A whale withdrawing its own stake has none of these
   const freshAtAttack = origin.created_ts && Number.isFinite(firstAttack) && firstAttack - origin.created_ts < config.incidents.freshHours * 3600e3;
-  const evidence = kind === 'exchange_drain' || (kind === 'protocol_exploit' && (fake.size > 0 || usedFake || freshAtAttack)) || (kind === 'wallet_drainer' && emptied.length >= 3 && drainerSign);
+  const ownCheck = kind === 'protocol_exploit' && target?.account && !fake.size ? await ownFunds(attacker, target.account, { beforeTs: Number.isFinite(firstAttack) ? firstAttack : Date.now(), withdrawnUsd: target.lost_usd || stolen }).catch(() => null) : null;
+  const evidence = !ownCheck?.own_funds && (kind === 'exchange_drain' || (kind === 'protocol_exploit' && (fake.size > 0 || usedFake || freshAtAttack)) || (kind === 'wallet_drainer' && emptied.length >= 3 && drainerSign));
   const signals = [
+    ownCheck?.own_funds ? `not a hack: ${ownCheck.explanation}` : null,
     up.drain ? `${up.drain.victims.length} ${up.drain.exchange.split(', ')[0]} hot wallet${up.drain.victims.length > 1 ? 's' : ''} sent ${fmtUsd(up.drain.usd)} to ${attacker}, ${Math.min(...up.drain.victims.map((v) => v.first_ts)) - up.drain.root_created_ts < 60e3 ? 'an account created by the first of these transfers' : `${hoursBetween(up.drain.root_created_ts, Math.min(...up.drain.victims.map((v) => v.first_ts)))} after it was created`}${up.drain.victims[0].how ? ` (identified as such because it ${up.drain.victims[0].how})` : ''}` : null,
     fake.size ? `deployed ${fake.size} token contract${fake.size > 1 ? 's' : ''} of its own (${[...fake].slice(0, 6).join(', ')})${usedFake ? ' and used them in the attack transactions' : ''}` : null,
     origin.created_ts && Number.isFinite(firstAttack) ? `the account was ${hoursBetween(origin.created_ts, firstAttack)} old when the attack started` : null,

@@ -7,6 +7,7 @@ import { raise } from '../alerts/store.js';
 import { validNearAddress } from '../audit/service.js';
 import { traceIncident } from './trace.js';
 import { aiIncidentReport } from './ai.js';
+import { scheduleReview } from './deepreview.js';
 
 export const INCIDENT_V = 1;
 const TX_HASH = /^[1-9A-HJ-NP-Za-km-z]{43,44}$/;
@@ -34,19 +35,23 @@ async function flagAccounts(inc) {
   // the flags follow the latest trace: an account no longer in the attacker's set loses this incident's flag
   await col('firewall_flags').deleteMany({ source: 'incident', incident: inc._id, _id: { $nin: rows.map((a) => a.account) } });
   for (const a of rows) {
-    await col('firewall_flags').updateOne({ _id: a.account }, { $setOnInsert: { _id: a.account, severity: sev[a.role], reason: `${a.role === 'funder' ? 'funded an attacker that ' : ''}${reason}`.slice(0, 120),
-      detail: DETAIL[a.role], ts: Date.now(), source: 'incident', incident: inc._id } }, { upsert: true });
+    // this incident's own flag is refreshed with the latest wording; a flag from another source (a hand report, another incident) is kept
+    await col('firewall_flags').updateOne({ _id: a.account, source: 'incident', incident: inc._id }, { $set: { severity: sev[a.role], reason: `${a.role === 'funder' ? 'funded an attacker that ' : ''}${reason}`.slice(0, 120),
+      detail: DETAIL[a.role], source: 'incident', incident: inc._id }, $setOnInsert: { ts: Date.now() } }, { upsert: true }).catch((e) => { if (e.code !== 11000) throw e; });
   }
   return rows.length;
 }
 
 /** Trace, write up, save, flag and alert. Returns the saved incident. */
-export async function investigate(input, { ai = true, detected = null, log = () => {} } = {}) {
+export async function investigate(input, { ai = true, detected = null, review = true, log = () => {} } = {}) {
   const inc = await traceIncident(input, { log });
-  const prev = await col('incidents').findOne({ _id: inc._id }, { projection: { first_seen_ts: 1, detected: 1, ai: 1, alerted: 1 } });
+  const prev = await col('incidents').findOne({ _id: inc._id }, { projection: { first_seen_ts: 1, detected: 1, ai: 1, alerted: 1, review: 1, tags: 1, status: 1, cleared: 1 } });
+  // cleared by a deep review and still not confirmed by the rules: it stays cleared
+  if (prev?.status === 'cleared' && inc.status !== 'confirmed') inc.status = 'cleared';
   const report = ai && inc.status !== 'nothing_found' ? await aiIncidentReport(inc).catch((e) => { warn(`incident AI: ${e.message}`); return null; }) : null;
-  const doc = { ...inc, v: INCIDENT_V, ai: report || prev?.ai || null, detected: detected || prev?.detected || null, first_seen_ts: prev?.first_seen_ts || Date.now(), updated_ts: Date.now(), ...(prev?.alerted ? { alerted: true } : {}) };
+  const doc = { ...inc, v: INCIDENT_V, ai: report || prev?.ai || null, detected: detected || prev?.detected || null, first_seen_ts: prev?.first_seen_ts || Date.now(), updated_ts: Date.now(), ...(prev?.alerted ? { alerted: true } : {}), ...(prev?.review ? { review: prev.review } : {}), ...(prev?.tags ? { tags: prev.tags } : {}), ...(prev?.cleared ? { cleared: prev.cleared } : {}) };
   await col('incidents').replaceOne({ _id: doc._id }, doc, { upsert: true });
+  if (review && !prev && !detected && ['confirmed', 'suspected'].includes(doc.status)) await scheduleReview(doc._id, 'incident').catch(() => {});
   // traced from one of its wallets and re-rooted: an earlier empty investigation of that wallet now points here
   if (doc.pasted && doc.pasted !== doc.attacker.account) await col('incidents').deleteOne({ _id: `inc:${doc.pasted}`, status: 'nothing_found' }).catch(() => {});
   const flagged = await flagAccounts(doc).catch(() => 0);

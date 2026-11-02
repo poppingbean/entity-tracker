@@ -126,3 +126,16 @@ test('deploy watcher: deploys in a block, from successful action receipts only',
   assert.equal(d[0].signer, 'dev.near');
   assert.equal(d[0].ts, 1000000);
 });
+
+test('function review: views, calls, callbacks and risks from what the code can do', async () => {
+  const { describeFunctions } = await import('../src/audit/functions.js');
+  const f = Object.fromEntries(describeFunctions(['get', 'register', 'on_claim', 'new', 'withdraw', 'upgrade'], {
+    get: { effects: ['reads_state', 'writes_state', 'returns'] }, register: { effects: ['writes_state', 'reads_deposit'] }, on_claim: { effects: ['callback', 'writes_state'] },
+    new: { effects: ['writes_state'] }, withdraw: { effects: ['writes_state', 'send_near', 'reads_caller'] }, upgrade: { effects: ['deploy_code', 'reads_caller'] } }).map((x) => [x.method, x]));
+  assert.equal(f.get.kind, 'view'); assert.equal(f.get.risk, 'none');
+  assert.equal(f.register.kind, 'call'); assert.equal(f.register.risk, 'low');
+  assert.equal(f.on_claim.kind, 'callback');
+  assert.equal(f.new.kind, 'setup');
+  assert.equal(f.withdraw.risk, 'medium'); assert.ok(f.withdraw.does.includes('sends NEAR out'));
+  assert.equal(f.upgrade.risk, 'high'); assert.ok(f.upgrade.does.includes('can replace contract code'));
+});
