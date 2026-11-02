@@ -27,6 +27,8 @@ const PSEUDO = /^(mint|burn|intents|chain):/;
 const isRouter = (id) => PASS_THROUGH.has(id) || PSEUDO.test(id);
 const FREEZABLE = { 'usdt.tether-token.near': 'Tether can freeze it (add_to_blacklist / destroy_black_funds)', '17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1': 'Circle can freeze it (blacklist)' };
 const MAX_TXS = 800, HOP_TXS = 300;
+// following the money stays bounded: a busy wallet can pay hundreds of accounts, and each implicit one costs a 1Click status lookup
+const HOP_MOVES = 100, FOLLOW_MS = 3 * 60e3;
 
 async function pool(items, n, f) { const out = new Array(items.length); let i = 0; await Promise.all(Array.from({ length: n }, async () => { while (i < items.length) { const k = i++; out[k] = await f(items[k], k); } })); return out; }
 /** Full transactions for hashes (20 per call). */
@@ -289,12 +291,17 @@ async function followMoney(ownSet, flows, { since, depth, own, fake }) {
   const moves = [], exits = [], wallets = [], seen = new Set(ownSet);
   const keep = (f) => f.ts >= since && !fake.has(baseToken(f.token)) && !/^nft:|^mint:|^burn:/.test(f.token) && !(PSEUDO.test(f.to) && !f.to.startsWith('chain:'));
   let frontier = flows.filter((f) => keep(f) && ownSet.has(f.from) && !ownSet.has(f.to));
+  const t0 = Date.now(); let capped = null;
   for (let hop = 0; hop <= depth && frontier.length; hop++) {
+    if (hop && Date.now() - t0 > FOLLOW_MS) { capped = `stopped after ${hop} hop(s): out of time`; break; }
     const rows = await Promise.all(frontier.map(async (f) => ({ ...f, ...(await valueOf(f.token, f.raw)), hop })));
-    const big = rows.filter((r) => (r.usd ?? 0) >= 50 || (r.usd == null && r.token === NEAR));
+    const all = rows.filter((r) => (r.usd ?? 0) >= 50 || (r.usd == null && r.token === NEAR));
+    // the largest moves only (a busy wallet pays hundreds of accounts)
+    const big = all.sort((a, b) => (b.usd ?? 0) - (a.usd ?? 0)).slice(0, HOP_MOVES);
+    if (all.length > big.length) capped = `hop ${hop}: the ${HOP_MOVES} largest of ${all.length} moves followed`;
     const next = new Map();
     // a one-time 1Click deposit address is a cross-chain swap: its status says the chain, the recipient and the destination tx
-    const swaps = await pool(big, 3, (r) => (!destKind(r.to) && /^[0-9a-f]{64}$/.test(r.to) ? oneClickSwap(r.to) : null)); // three at a time: the status API rate-limits
+    const swaps = await pool(big, 3, (r) => (Date.now() - t0 < FOLLOW_MS && !destKind(r.to) && /^[0-9a-f]{64}$/.test(r.to) ? oneClickSwap(r.to) : null)); // three at a time: the status API rate-limits
     for (const [i, r] of big.entries()) {
       const sw = swaps[i];
       if (sw) {
@@ -318,6 +325,7 @@ async function followMoney(ownSet, flows, { since, depth, own, fake }) {
     const follow = [...next].sort((a, b) => b[1] - a[1]).slice(0, 10);
     const more = [];
     for (const [w, usd] of follow) {
+      if (Date.now() - t0 > FOLLOW_MS) { capped = `stopped at hop ${hop + 1}: out of time`; break; }
       seen.add(w); wallets.push({ account: w, received_usd: Math.round(usd), hop: hop + 1 });
       const { hashes } = await accountTxHashes(w, { limit: HOP_TXS });
       const fl = (await fetchTxs(hashes)).flatMap((t) => (t.transaction ? [...(t.receipts ? flowsOfTx(t) : [])] : []));
@@ -333,7 +341,7 @@ async function followMoney(ownSet, flows, { since, depth, own, fake }) {
   for (const e of exits) per.set(`${e.tx}|${e.to}|${e.token}`, e);
   const byKind = {};
   for (const e of per.values()) byKind[e.kind] = Math.round((byKind[e.kind] || 0) + (e.usd || 0));
-  return { moves: moves.sort((a, b) => a.ts - b.ts).slice(0, 200), exits, wallets, exit_usd: byKind };
+  return { moves: moves.sort((a, b) => a.ts - b.ts).slice(0, 200), exits, wallets, exit_usd: byKind, capped };
 }
 
 /** What one account holds now (NEAR + tokens, valued), with the tokens an issuer can freeze. */

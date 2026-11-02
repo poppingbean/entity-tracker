@@ -97,11 +97,13 @@ export async function reviewIncident(inc) {
 
 /** Run the next due review (one at a time, oldest finding first). Returns what it did, or null. */
 export async function processDeepReview() {
-  const r = await col('deep_reviews').findOneAndUpdate({ status: 'pending', due_ts: { $lte: Date.now() }, attempts: { $lt: 3 } }, { $set: { status: 'running', started_ts: Date.now() }, $inc: { attempts: 1 } }, { sort: { due_ts: 1 }, returnDocument: 'after' });
+  const r = await col('deep_reviews').findOneAndUpdate({ attempts: { $lt: 3 }, $or: [{ status: 'pending', due_ts: { $lte: Date.now() } }, { status: 'running', started_ts: { $lt: Date.now() - 20 * 60e3 } }] },
+    { $set: { status: 'running', started_ts: Date.now() }, $inc: { attempts: 1 } }, { sort: { due_ts: 1 }, returnDocument: 'after' });
   const job = r?.value !== undefined && r?.ok !== undefined ? r.value : r;
   if (!job) return null;
   try {
-    const { investigate } = await import('./service.js');
+    const { investigate: inv, withTimeout } = await import('./service.js');
+    const investigate = (...a) => withTimeout(inv(...a), config.incidents.investigateTimeoutMinutes * 60e3, 'deep review trace');
     let out;
     if (job.kind === 'detection') {
       const det = await col('incident_detections').findOne({ _id: job._id });

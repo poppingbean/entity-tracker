@@ -2,6 +2,7 @@
 // and Safety Check -> an alert. Investigations come from the live detector (detect.js), the page, the API or the CLI; they run one at a
 // time in the worker from `incident_queue`, or in this process for a page that asks (a web-only server has no worker).
 import { col } from '../db.js';
+import { config } from '../config.js';
 import { info, warn } from '../log.js';
 import { raise } from '../alerts/store.js';
 import { validNearAddress } from '../audit/service.js';
@@ -78,12 +79,17 @@ export const enqueueIncident = (input, { reason = 'manual', detected = null } = 
   { $set: { input, reason, detected, status: 'pending', ts: Date.now() }, $setOnInsert: { attempts: 0 } }, { upsert: true });
 
 /** Investigate the next queued incident (worker). */
+// a job "running" this long was cut off (a restart, a crash) and is taken again; one investigation gets this long before the next one starts
+const STALE_MS = 15 * 60e3;
+export const withTimeout = (p, ms, what) => Promise.race([p, new Promise((_, no) => { const t = setTimeout(() => no(new Error(`${what}: no result after ${Math.round(ms / 60e3)} min`)), ms); t.unref?.(); })]);
+
 export async function processIncidentQueue() {
-  const job = await col('incident_queue').findOneAndUpdate({ status: 'pending', attempts: { $lt: 3 } }, { $set: { status: 'running', started_ts: Date.now() }, $inc: { attempts: 1 } }, { sort: { ts: 1 }, returnDocument: 'after' });
+  const job = await col('incident_queue').findOneAndUpdate({ attempts: { $lt: 3 }, $or: [{ status: 'pending' }, { status: 'running', started_ts: { $lt: Date.now() - STALE_MS } }] },
+    { $set: { status: 'running', started_ts: Date.now() }, $inc: { attempts: 1 } }, { sort: { ts: 1 }, returnDocument: 'after' });
   const j = job?.value !== undefined && job?.ok !== undefined ? job.value : job;
   if (!j) return null;
   try {
-    const doc = await investigate(j.input, { detected: j.detected });
+    const doc = await withTimeout(investigate(j.input, { detected: j.detected }), config.incidents.investigateTimeoutMinutes * 60e3, 'investigation');
     await col('incident_queue').updateOne({ _id: j._id }, { $set: { status: 'done', done_ts: Date.now(), incident: doc._id } });
     return doc;
   } catch (e) {

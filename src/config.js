@@ -83,6 +83,7 @@ export const config = {
     minUsd: num(process.env.INCIDENT_MIN_USD, 5000),           // a receiver must take at least this from one protocol within 30 min
     alwaysUsd: num(process.env.INCIDENT_ALWAYS_USD, 250000),   // ... and is traced whatever it looks like above this
     freshHours: num(process.env.INCIDENT_FRESH_HOURS, 72),      // an account younger than this is a suspect
+    investigateTimeoutMinutes: num(process.env.INCIDENT_INVESTIGATE_TIMEOUT_MINUTES, 10), // the worker moves on to the next case after this long
     reviewDelayMinutes: num(process.env.INCIDENT_REVIEW_DELAY_MINUTES, 10), // the deep review (re-trace + NEAR AI verdict) runs this long after a finding
     exchangeMinUsd: num(process.env.INCIDENT_EXCHANGE_MIN_USD, 50000), // an exchange hot-wallet outflow worth checking for a drain
     followMinUsd: num(process.env.INCIDENT_FOLLOW_MIN_USD, 500),  // a move of stolen funds worth an alert

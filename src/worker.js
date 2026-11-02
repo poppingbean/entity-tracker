@@ -78,8 +78,10 @@ export async function cycle({ evaluate = true } = {}) {
   // hacks the detector (or anyone) queued: traced one at a time, beside the rest (a trace takes a minute or two); unchecked drain reports first
   if (config.incidents.enabled && !runtime.incident) {
     if (!runtime.reviewsBackfilled) { runtime.reviewsBackfilled = true; backfillReviews().catch(() => {}); } // findings from before the deep review
-    runtime.incident = reviewDetections(3).catch((e) => warn(`drain review: ${e.message}`)).then(() => processIncidentQueue()).then(() => processDeepReview()).catch((e) => warn(`deep review: ${e.message}`)).catch((e) => warn(`incident queue: ${e.message}`)).finally(() => { runtime.incident = null; });
+    runtime.incident = reviewDetections(3).catch((e) => warn(`drain review: ${e.message}`)).then(() => processIncidentQueue()).catch((e) => warn(`incident queue: ${e.message}`)).finally(() => { runtime.incident = null; });
   }
+  // deep reviews on their own lane: a slow investigation in the queue must not hold them up
+  if (config.incidents.enabled && !runtime.deepReview) runtime.deepReview = processDeepReview().catch((e) => warn(`deep review: ${e.message}`)).finally(() => { runtime.deepReview = null; });
   // measured accuracy: recomputed every hour beside the loop
   if (!runtime.accuracy && Date.now() - runtime.lastAccuracy > config.accuracy.everyMs) {
     runtime.lastAccuracy = Date.now();
