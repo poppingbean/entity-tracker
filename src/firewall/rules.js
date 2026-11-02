@@ -1,7 +1,7 @@
 // Transaction firewall, step 2: what each decoded action will do, and what is risky about it. Pure: the account and token facts come in
 // `ctx` (built by context.js), so every rule is unit-tested. Severity -> verdict: critical = block, high = warn, medium = caution.
 import { toNear } from './decode.js';
-import { looksLikeInjection } from '../ai/untrusted.js';
+import { looksLikeInjection } from '../ai/tools/untrusted.js';
 
 export const SEVERITIES = ['critical', 'high', 'medium', 'info'];
 export const VERDICT = { critical: 'block', high: 'warn', medium: 'caution', info: 'ok' };

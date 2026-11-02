@@ -4,9 +4,9 @@
 // "Update" sections instead of starting over. The latest is `ai` in `analyses` (with the evidence it was built from, to diff the next run
 // against); every run is also kept for good in `analysis_runs`, with its evidence and, for an update, what changed since the run before.
 import { col } from '../db.js';
-import { chatJSON } from '../ai/nearai.js';
+import { chatJSON } from '../ai/tools/nearai.js';
 import { config } from '../config.js';
-import { UNTRUSTED_RULE, evidenceMessage, maxRisk, riskFloor } from '../ai/untrusted.js';
+import { UNTRUSTED_RULE, evidenceMessage, maxRisk, riskFloor } from '../ai/tools/untrusted.js';
 import { tagOf } from '../evaluate/tags.js';
 import { INFRA, groupBrief } from './token.js';
 import { SYSTEM_INITIAL as SYSTEM, SYSTEM_UPDATE, actorsIn } from './prompt.js';

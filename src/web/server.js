@@ -7,7 +7,7 @@ import crypto from 'node:crypto';
 import { col, metaGet, getDb } from '../db.js';
 import { config } from '../config.js';
 import { recentLogs, info, error } from '../log.js';
-import { aiEnabled, aiStatus } from '../ai/nearai.js';
+import { aiEnabled, aiStatus } from '../ai/tools/nearai.js';
 import { simSell, ensureAccount, positionPnl } from '../sim/portfolio.js';
 import { startFetch, jobStatus, catchUp } from '../collect/ondemand.js';
 import { recomputeToken } from '../collect/rugs.js';
@@ -35,7 +35,22 @@ import { parseInvestigation, startInvestigation, investigationJob } from '../inc
 import { report } from '../incident/signals.js';
 import { walletView } from '../near/walletview.js';
 
-const page = fs.readFileSync(new URL('./index.html', import.meta.url), 'utf8');
+// the UI: a small shell page (public/index.html) and its assets (public/assets: app.css, js/core.js, js/pages/*.js, js/app.js).
+// Asset links carry the server's start time (?v=) so a deploy is picked up at once while the files themselves are cached long.
+const PUBLIC = new URL('./public/', import.meta.url);
+const page = fs.readFileSync(new URL('index.html', PUBLIC), 'utf8').replaceAll('__V__', Date.now().toString(36));
+const ASSET_TYPES = { '.js': 'application/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon', '.json': 'application/json' };
+const assetCache = new Map();
+/** A file under public/assets, or null (only plain names, no "..", only known types). */
+function asset(pathname) {
+  const rel = pathname.replace(/^\/assets\//, '');
+  if (!/^[a-z0-9_/-]+\.[a-z]+$/i.test(rel) || rel.includes('..')) return null;
+  const type = ASSET_TYPES[rel.slice(rel.lastIndexOf('.'))];
+  if (!type) return null;
+  if (!assetCache.has(rel)) { try { assetCache.set(rel, fs.readFileSync(new URL(`assets/${rel}`, PUBLIC))); } catch { assetCache.set(rel, null); } }
+  const body = assetCache.get(rel);
+  return body ? { body, type } : null;
+}
 // Google Search Console ownership file for app.safe-near.org, served as is at /<name>.html (before the password check, so Google can read it).
 const SITE_VERIFY = { '/google65675d2fcb9ab898.html': fs.readFileSync(new URL('./google65675d2fcb9ab898.html', import.meta.url), 'utf8') };
 // pages of the single-page UI; each is served the same HTML and the browser routes with the History API (no # in URLs)
@@ -907,6 +922,11 @@ export function startWeb() {
       }
       if (req.method !== 'GET') { res.writeHead(405).end(); return; }
       if (u.pathname === '/' || u.pathname === '/index.html') { res.writeHead(302, { location: '/explore' }).end(); return; }
+      if (u.pathname.startsWith('/assets/')) {
+        const a = asset(u.pathname);
+        if (!a) { res.writeHead(404).end('not found'); return; }
+        res.writeHead(200, { 'content-type': a.type, 'cache-control': 'public, max-age=31536000, immutable' }).end(a.body); return;
+      }
       if (UI_VIEWS.has(u.pathname.split('/')[1])) { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' }).end(page); return; } // client-side routes: /config, /groups/<id> ...
       if (HIDDEN_PUBLIC.has(u.pathname) && config.web.hosted && !config.web.password) { res.writeHead(404).end('not found'); return; } // logs and settings are not shown on a public deployment
       const route = routes[u.pathname];

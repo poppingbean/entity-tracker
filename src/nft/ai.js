@@ -2,29 +2,15 @@
 // the first run writes the assessment from the whole analysis; later runs update it from what changed since the previous run.
 // Latest in nft_analyses.ai (with its evidence snapshot); every run kept in analysis_runs (see analysis/ai.js saveRun).
 import { col } from '../db.js';
-import { chatJSON } from '../ai/nearai.js';
+import { chatJSON } from '../ai/tools/nearai.js';
 import { config } from '../config.js';
-import { UNTRUSTED_RULE, evidenceMessage, maxRisk, riskFloor } from '../ai/untrusted.js';
+import { UNTRUSTED_RULE, evidenceMessage, maxRisk, riskFloor } from '../ai/tools/untrusted.js';
 import { saveRun } from '../analysis/ai.js';
 
-const COMMON = `Rules: use only the supplied facts and numbers; never invent accounts, amounts or events; shares are fractions (0.05 = 5%); "money-linked" means
-the tracker found funding / transfers between the wallets (proof of common control only when one funded the other directly); "team" = the
-collection owner / deployer and whoever took the mint proceeds, plus wallets they funded. Shorten 64-hex accounts to their first 8 characters + "…".`;
-const SYSTEM = `You are an on-chain analyst writing a short investigation of a NEAR NFT collection (launchpads: HOT Craft, near.cooking, others).
-You get one JSON packet: the collection, the mint (minted, raised, price, top minters, where the mint money went), the team's own mints, minter
-groups linked by money (and groups that minted past the per-wallet maximum through several wallets), the secondary market (volume, prices,
-biggest buyers / sellers, sweeps, sales below mint, suspected wash trades with their reasons), holders and rule-based risk flags.
-${COMMON}
-Reply with ONE JSON object and nothing else, with exactly these keys:
-{"summary":"3-5 sentences: how the mint went, who really minted, what the market and holders look like","findings":["4-7 short findings, most important first"],
-"risk_level":"low"|"medium"|"high","confidence":number 0..1,"conclusion":"2-3 sentences: overall assessment and what to watch"}`;
-const SYSTEM_UPDATE = `You are an on-chain analyst keeping an investigation of a NEAR NFT collection up to date. You get "previous" (your last assessment),
-"since" (mints, sales, wash trades and holder changes since then, plus flags added / removed) and "now" (a compact current view).
-Update the assessment: keep what still holds, revise what changed, do not retell the mint.
-${COMMON}
-Reply with ONE JSON object and nothing else, with exactly these keys:
-{"changes":["2-6 short points on what happened since the previous assessment"],"summary":"3-5 sentences: the current picture","findings":["4-7 short findings as they stand now"],
-"risk_level":"low"|"medium"|"high","confidence":number 0..1,"conclusion":"2-3 sentences: overall assessment now and what to watch"}`;
+
+import { prompt } from '../ai/prompts/index.js';
+const SYSTEM = prompt('nft-analyst'); // src/ai/prompts/nft-analyst.md (+ nft-analyst-common.md)
+const SYSTEM_UPDATE = prompt('nft-analyst-update');
 
 const short = (s) => (typeof s === 'string' && /^[0-9a-f]{64}$/.test(s) ? s.slice(0, 8) + '…' : s);
 const sh = (o) => JSON.parse(JSON.stringify(o, (k, v) => (typeof v === 'string' ? short(v) : v)));

@@ -8,7 +8,7 @@ import { serviceSet, isService } from '../graph/services.js';
 import { isGenericKind } from '../graph/profile.js';
 import { ownersOf } from './decode.js';
 import { SOURCES } from './sync.js';
-import { looksLikeInjection } from '../ai/untrusted.js';
+import { looksLikeInjection } from '../ai/tools/untrusted.js';
 
 const MIN = 60e3, HOUR = 3600e3, DAY = 86400e3;
 export const CACHE_MS = 15 * MIN;

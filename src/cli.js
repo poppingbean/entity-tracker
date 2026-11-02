@@ -45,7 +45,7 @@ import { recomputeToken, flagRugs } from './collect/rugs.js';
 import { expandNetworks } from './graph/expand.js';
 const buildEntries_done = async () => { await evaluateGroups(); };
 import { resetSim, simBuy, managePositions } from './sim/portfolio.js';
-import { checkAi, aiEnabled, aiStatus } from './ai/nearai.js';
+import { checkAi, aiEnabled, aiStatus } from './ai/tools/nearai.js';
 import { evaluateAccuracy, backtest } from './accuracy/run.js';
 import { flagAccount, unflagAccount, checkRequest } from './firewall/service.js';
 import { listFeedback, resolveFeedback, setTruth, clearTruth } from './accuracy/feedback.js';

@@ -9,7 +9,7 @@ import { creatorIndex, creatorNetwork } from '../evaluate/creators.js';
 import { priceSeries } from '../collect/analyze.js';
 import { tagOf, ruggerGroup, ruggerWallet } from '../evaluate/tags.js';
 import { config } from '../config.js';
-import { looksLikeInjection } from '../ai/untrusted.js';
+import { looksLikeInjection } from '../ai/tools/untrusted.js';
 
 const MIN = 60e3, DAY = 86400e3;
 export const CACHE_MS = 15 * MIN;
