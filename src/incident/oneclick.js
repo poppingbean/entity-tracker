@@ -3,6 +3,9 @@
 // and the transaction on the destination chain. That is the next hop of a loot trail after NEAR. Answers cached an hour.
 const API = 'https://1click.chaindefuser.com/v0/status';
 const cache = new Map();
+// when the API is down (5 failures in a row), stop asking for 5 minutes: every lookup would otherwise wait out its retries
+const breaker = { fails: 0, until: 0 };
+export const oneClickDown = () => Date.now() < breaker.until;
 
 const CHAIN = { eth: 'Ethereum', btc: 'Bitcoin', sol: 'Solana', base: 'Base', arb: 'Arbitrum', bsc: 'BNB Chain', pol: 'Polygon', tron: 'Tron', ton: 'TON', doge: 'Dogecoin', xrp: 'XRP Ledger', zec: 'Zcash', sui: 'Sui',
   gnosis: 'Gnosis', bera: 'Berachain', avax: 'Avalanche', op: 'Optimism', stellar: 'Stellar', ltc: 'Litecoin', bch: 'Bitcoin Cash', ada: 'Cardano', aptos: 'Aptos', monad: 'Monad' };
@@ -21,6 +24,7 @@ export async function oneClickSwap(depositAddress) {
   if (!/^[0-9a-f]{64}$/.test(depositAddress)) return null;
   const c = cache.get(depositAddress);
   if (c && Date.now() - c.ts < 3600e3) return c.value;
+  if (oneClickDown()) return null;
   let value = null, definite = false;
   for (let attempt = 0; attempt < 3 && !definite; attempt++) {
   if (attempt) await new Promise((res) => setTimeout(res, 1000 * 2 ** attempt));
@@ -38,6 +42,7 @@ export async function oneClickSwap(depositAddress) {
   } catch {}
   }
   // only a definite answer is remembered: a rate limit or a timeout must not turn a swap into "not a swap" for an hour
-  if (definite) cache.set(depositAddress, { ts: Date.now(), value });
+  if (definite) { cache.set(depositAddress, { ts: Date.now(), value }); breaker.fails = 0; }
+  else if (++breaker.fails >= 5) { breaker.until = Date.now() + 5 * 60e3; breaker.fails = 0; }
   return value;
 }

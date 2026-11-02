@@ -95,8 +95,13 @@ export async function upstream(account, txs, history, { maxHops = 3, minUsd = Ma
     sources.push(...rows);
     // an exchange hot wallet that paid a large amount to an account created just before (or by that very payment): an exchange drain
     const curInfo = await identify(cur);
-    const exch = rows.filter((r) => r.kind === 'exchange');
-    const fresh = curInfo.first_ts != null && exch.length && exch.some((r) => r.first_ts - curInfo.first_ts < config.incidents.freshHours * 3600e3);
+    // only what arrived while the account was new counts: an implicit account is always "created" by its first payment, and a busy one
+    // (an exchange's own wallet, a market maker) goes on receiving from exchanges for months
+    const freshMs = config.incidents.freshHours * 3600e3, early = (r) => (ins.find((x) => x.from === r.account)?.items || []).filter((it) => it.ts - curInfo.first_ts < freshMs).reduce((s, it) => s + (it.usd || 0), 0);
+    const exch = curInfo.first_ts == null ? [] : rows.filter((r) => r.kind === 'exchange' && r.first_ts - curInfo.first_ts < freshMs).map((r) => ({ ...r, usd: Math.round(early(r)) }));
+    // and an exchange that still pays it a month after it was created is dealing with it (its own wallet, a market maker): a thief is paid once
+    const ongoing = curInfo.first_ts != null && rows.some((r) => r.kind === 'exchange' && (ins.find((x) => x.from === r.account)?.items || []).some((it) => it.ts - curInfo.first_ts > 30 * 86400e3));
+    const fresh = exch.length > 0 && !ongoing;
     const big = exch.reduce((s, r) => s + r.usd, 0);
     if (fresh && big >= config.incidents.alwaysUsd) {
       drain = { exchange: [...new Set(exch.map((r) => r.name.replace(/ hot wallet$/, '')))].join(', '), victims: exch, root: cur, root_created_ts: curInfo.first_ts, usd: Math.round(big) };
