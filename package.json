@@ -18,7 +18,7 @@
     "reprofile": "node src/cli.js reprofile",
     "scan": "node src/cli.js scan",
     "sim-reset": "node src/cli.js sim-reset",
-    "test": "node --test test/logic.test.js test/firewall.test.js test/audit.test.js"
+    "test": "node --test test/logic.test.js test/firewall.test.js test/audit.test.js test/incident.test.js"
   },
   "dependencies": {
     "dotenv": "^17.2.0",

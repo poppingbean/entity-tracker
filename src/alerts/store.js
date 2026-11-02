@@ -23,6 +23,8 @@ export const TYPES = {
   token_transfer: { label: 'Large transfer', group: 'activity' },
   contract_risk: { label: 'Risky new contract', group: 'contract' },
   contract_power_added: { label: 'New powers after an upgrade', group: 'contract' },
+  drain_suspected: { label: 'Possible exploit in progress', group: 'hack' },
+  incident: { label: 'Hack / exploit', group: 'hack' },
   nft_team_sell: { label: 'NFT team selling', group: 'nft' },
   nft_wash: { label: 'NFT wash trades', group: 'nft' },
 };

@@ -189,6 +189,8 @@ async function inspectContract(id, state, extra) {
   const look = lookalikeOf(id);
   if (look) points.push(pt('bad', `The name imitates ${look}: this is very likely a fake.`));
   for (const f of rep?.flags || []) points.push(pt(LEVEL_OF[f.severity] || 'warn', f.detail || f.reason));
+  const hit = await col('incidents').find({ 'target.account': id, status: 'confirmed' }, { projection: { stolen_usd: 1, started_ts: 1, 'ai.attack_type': 1 } }).sort({ started_ts: -1 }).limit(1).toArray().catch(() => []);
+  if (hit[0]) points.push(pt('warn', `It was exploited ${hit[0].started_ts ? `on ${new Date(hit[0].started_ts).toISOString().slice(0, 10)} ` : ''}(~$${Math.round(hit[0].stolen_usd).toLocaleString('en-US')} taken${hit[0].ai?.attack_type ? `, ${hit[0].ai.attack_type}` : ''}). Check the team has fixed it before depositing.`));
   // what the tracker saw this token do
   if (tok) {
     const o = tok.outcome || {};
@@ -233,7 +235,7 @@ async function inspectContract(id, state, extra) {
 async function inspectWallet(id, state) {
   const [keys, rep, holdings] = await Promise.all([viewAccessKeyList(id).catch(() => null), accountReputation(id).catch(() => null), fastnearGet(`/v1/account/${encodeURIComponent(id)}/ft`).catch(() => null)]);
   const points = [], actions = [];
-  for (const f of rep?.flags || []) points.push(pt(LEVEL_OF[f.severity] || 'warn', `This wallet: ${f.detail || f.reason}`));
+  for (const f of rep?.flags || []) points.push(pt(LEVEL_OF[f.severity] || 'warn', /^(This account|A |Received|Funded)/.test(f.detail || '') ? f.detail : `This wallet: ${f.detail || f.reason}`));
   const look = lookalikeOf(id);
   if (look) points.push(pt('bad', `The name imitates ${look}, but it is an ordinary wallet: do not send anything meant for ${look} here.`));
   const full = (keys || []).filter((k) => k.access_key?.permission === 'FullAccess');
@@ -273,7 +275,8 @@ async function inspectWallet(id, state) {
     if (lookToks.length) points.push(pt('warn', `Holds fake look-alike tokens (${lookToks.join(', ')}): they are often airdropped as bait. Do not try to sell or "claim" them on a site they point to.`));
   }
   const v = verdictOf(points);
-  return { kind: 'wallet', verdict: v, account: id, headline: v === 'danger' ? 'This wallet has a serious problem: act now.' : v === 'caution' ? 'This wallet is fine, but check the points below.' : 'This wallet looks safe.',
+  const flagged = (rep?.flags || []).some((f) => f.severity === 'critical');
+  return { kind: 'wallet', verdict: v, account: id, headline: flagged ? 'Do not send anything to this account: it is flagged.' : v === 'danger' ? 'This wallet has a serious problem: act now.' : v === 'caution' ? ((rep?.flags || []).length ? 'Be careful: this account is linked to something reported.' : 'This wallet is fine, but check the points below.') : 'This wallet looks safe.',
     facts: { balance_near: toNear(state.amount), full_access_keys: keys ? full.length : null, app_keys: apps.length, apps: appRows, tokens_held: held.length, label: rep?.label || null },
     points, actions: actions.length ? actions : v === 'safe' ? [] : ['Review the points above in your wallet.'], links: { explorer: nearblocks('address', id), wallet: `/wallets/${encodeURIComponent(id)}` } };
 }

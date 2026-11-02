@@ -31,12 +31,13 @@ import { checkRequest, accountReputation, FIREWALL_VERSION } from '../firewall/s
 import { AUTO_AUDIT_V } from '../audit/auto.js';
 import { contractReport, startAutoAudit, auditJob } from '../audit/report.js';
 import { inspect } from '../firewall/inspect.js';
+import { parseInvestigation, startInvestigation, investigationJob } from '../incident/service.js';
 
 const page = fs.readFileSync(new URL('./index.html', import.meta.url), 'utf8');
 // Google Search Console ownership file for app.safe-near.org, served as is at /<name>.html (before the password check, so Google can read it).
 const SITE_VERIFY = { '/google65675d2fcb9ab898.html': fs.readFileSync(new URL('./google65675d2fcb9ab898.html', import.meta.url), 'utf8') };
 // pages of the single-page UI; each is served the same HTML and the browser routes with the History API (no # in URLs)
-const UI_VIEWS = new Set(['firewall', 'accuracy', 'alerts', 'nfts', 'taggroups', 'analysis', 'creators', 'explore', 'audit', 'monitor', 'sim', 'scans', 'overview', 'signals', 'groups', 'entities', 'wallets', 'tokens', 'logs', 'config']);
+const UI_VIEWS = new Set(['incidents', 'firewall', 'accuracy', 'alerts', 'nfts', 'taggroups', 'analysis', 'creators', 'explore', 'audit', 'monitor', 'sim', 'scans', 'overview', 'signals', 'groups', 'entities', 'wallets', 'tokens', 'logs', 'config']);
 const HIDDEN_PUBLIC = new Set(['/api/logs', '/api/config']);
 const auditHits = new Map(); // ip -> [timestamps]
 const analysisHits = new Map(), aiHits = new Map();
@@ -110,7 +111,7 @@ const fwHits = new Map();
 const clientIp = (req) => String(req.headers['x-forwarded-for'] || '').split(',')[0].trim() || req.socket.remoteAddress || 'ip';
 const CORS = { 'access-control-allow-origin': '*', 'access-control-allow-methods': 'GET, POST, OPTIONS', 'access-control-allow-headers': 'content-type, x-api-key', 'access-control-max-age': '86400' };
 const FW_DOC = { name: 'Safe Near transaction firewall', version: FIREWALL_VERSION, docs: 'https://github.com/poppingbean/entity-tracker/blob/main/docs/tx-firewall.md',
-  endpoints: { 'POST /api/v1/tx/check': 'check transactions before they are signed', 'GET /api/v1/account?id=<account>': 'reputation of one account', 'GET /api/v1/contract?id=<account>': 'the automated audit of a contract', 'GET /api/v1/inspect?q=<wallet | contract | tx hash | link>': 'is it safe? one answer for whatever is pasted' } };
+  endpoints: { 'POST /api/v1/tx/check': 'check transactions before they are signed', 'GET /api/v1/account?id=<account>': 'reputation of one account', 'GET /api/v1/contract?id=<account>': 'the automated audit of a contract', 'GET /api/v1/inspect?q=<wallet | contract | tx hash | link>': 'is it safe? one answer for whatever is pasted', 'GET /api/v1/incidents': 'traced hacks and scams', 'GET /api/v1/incident?id=<id>': 'one incident: attacker accounts, target, losses, victims, money trail' } };
 async function firewallApi(req, res, u) {
   const send = (code, body) => res.writeHead(code, { 'content-type': 'application/json', 'cache-control': 'no-store', ...CORS }).end(JSON.stringify(body));
   if (req.method === 'OPTIONS') { res.writeHead(204, CORS).end(); return; }
@@ -122,6 +123,14 @@ async function firewallApi(req, res, u) {
     if (!q) { send(400, { error: 'q: a wallet, a contract or a transaction hash' }); return; }
     try { send(200, await inspect(q)); } catch (e) { send(400, { error: e.message }); }
     return;
+  }
+  if (u.pathname === '/api/v1/incidents' && req.method === 'GET') {
+    const rows = await col('incidents').find({ status: { $ne: 'nothing_found' } }, { projection: { status: 1, kind: 1, 'attacker.account': 1, 'target.account': 1, stolen_usd: 1, held_usd: 1, started_ts: 1, 'ai.headline': 1, 'trail.exit_usd': 1 } }).sort({ started_ts: -1 }).limit(100).toArray();
+    send(200, { incidents: rows }); return;
+  }
+  if (u.pathname === '/api/v1/incident' && req.method === 'GET') {
+    const doc = await col('incidents').findOne({ _id: String(u.searchParams.get('id') || '') }, { projection: { trail: { moves: 0 } } });
+    send(doc ? 200 : 404, doc || { error: 'no such incident' }); return;
   }
   if (u.pathname === '/api/v1/contract' && req.method === 'GET') {
     const id = String(u.searchParams.get('id') || '').trim().toLowerCase();
@@ -459,6 +468,38 @@ const routes = {
     }
     const cur = auditJob(id);
     return { id, auto: doc?.auto || null, current: doc?.auto?.v === AUTO_AUDIT_V, job: cur ? { running: cur.running, started: cur.started, error: cur.error } : null };
+  },
+  /** Hacks and scams: traced incidents (newest first) and what the live detector raised. */
+  '/api/incidents': async (u) => {
+    const f = {}, kind = u.searchParams.get('kind'); if (kind) f.kind = kind;
+    const offset = Math.max(0, Number(u.searchParams.get('offset')) || 0);
+    const [rows, total, detections, queue] = await Promise.all([
+      col('incidents').find({ ...f, status: { $ne: 'nothing_found' } }, { projection: { status: 1, kind: 1, 'attacker.account': 1, 'target.account': 1, stolen_usd: 1, held_usd: 1, started_ts: 1, first_seen_ts: 1, updated_ts: 1, 'ai.headline': 1, 'ai.attack_type': 1, 'trail.exit_usd': 1, victims: { $slice: 3 }, signals: 1, detected: 1 } })
+        .sort({ started_ts: -1, first_seen_ts: -1 }).skip(offset).limit(50).toArray(),
+      col('incidents').countDocuments({ ...f, status: { $ne: 'nothing_found' } }),
+      col('incident_detections').find({}).sort({ ts: -1 }).limit(20).toArray(),
+      col('incident_queue').aggregate([{ $group: { _id: '$status', n: { $sum: 1 } } }]).toArray(),
+    ]);
+    return { rows, total, detections, queue: Object.fromEntries(queue.map((q) => [q._id, q.n])) };
+  },
+  '/api/incident': async (u) => {
+    const id = String(u.searchParams.get('id') || '');
+    const doc = await col('incidents').findOne({ _id: id });
+    return doc ? { incident: doc } : { error: 'no such incident' };
+  },
+  /** Investigate an account, a tx hash or target:<contract>: the saved incident if there is one, else (run=1) start a trace here. */
+  '/api/incident/investigate': async (u, req) => {
+    let input; try { input = parseInvestigation(u.searchParams.get('q')); } catch (e) { return { error: e.message }; }
+    const existing = input.account ? await col('incidents').findOne({ $or: [{ _id: `inc:${input.account}` }, { 'accounts.account': input.account }] }, { projection: { _id: 1, status: 1, updated_ts: 1 } })
+      : input.tx ? await col('incidents').findOne({ 'attack_txs.tx': input.tx }, { projection: { _id: 1, status: 1, updated_ts: 1 } })
+      : await col('incidents').findOne({ 'target.account': input.target }, { projection: { _id: 1, status: 1, updated_ts: 1 }, sort: { started_ts: -1 } });
+    const fresh = existing && Date.now() - existing.updated_ts < 3600e3;
+    let job = investigationJob(input);
+    if (u.searchParams.get('run') === '1' && !job?.running && (!fresh || u.searchParams.get('force') === '1')) {
+      if (!auditAllowed(req.socket.remoteAddress || 'ip')) return { error: 'too many investigations, try again in a few minutes' };
+      job = startInvestigation(input);
+    }
+    return { input, existing: existing?._id || null, job: job ? { running: job.running, started: job.started, error: job.error, id: job.id, step: job.step } : null };
   },
   /** Contracts the deploy watcher found, newest first, with their automated audit. */
   '/api/contracts-new': async (u) => {
