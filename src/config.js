@@ -101,6 +101,7 @@ export const config = {
     everyMs: num(process.env.ALERTS_EVERY_SECONDS, 60) * 1000,
     telegramToken: process.env.TELEGRAM_BOT_TOKEN || '',
     telegramBot: (process.env.TELEGRAM_BOT_NAME || 'safenear_bot').replace(/^@/, ''), // the bot's @name, shown on the Alerts page
+    opsChat: process.env.OPS_TELEGRAM_CHAT || '',                    // private ops group: private cases, drain suspicions, on-call pings
     telegramChannel: process.env.TELEGRAM_CHANNEL_ID || '',          // public channel / chat for alerts at publicSeverity and above
     webhookUrl: process.env.ALERTS_WEBHOOK_URL || '',                // global webhook for the same alerts
     publicSeverity: ['high', 'medium', 'info'].includes(process.env.ALERTS_PUBLIC_SEVERITY) ? process.env.ALERTS_PUBLIC_SEVERITY : 'high',
@@ -209,6 +210,7 @@ export const config = {
     get port() { return this.ports[0]; },
     host: process.env.DASHBOARD_HOST || (process.env.PORT || process.env.RAILWAY_ENVIRONMENT || process.env.RAILWAY_PROJECT_ID ? '0.0.0.0' : '127.0.0.1'),
     password: process.env.DASHBOARD_PASSWORD || '', // optional: when set, the UI asks for it (HTTP Basic auth, any username)
+    operatorKeys: (process.env.OPERATOR_KEYS || '').split(',').map((s) => s.trim()).filter(Boolean), // "name:key,…": the response team (incident cases)
     // A public dashboard must not teach a rugger what is checked: thresholds, rule names, reasons and gate ids are removed from the API (web/redact.js).
     // Default: on for a public deployment (hosted, no password); HIDE_CRITERIA=1 / 0 forces it.
     get hideCriteria() { const v = process.env.HIDE_CRITERIA; return v != null && v !== '' ? /^(1|true|yes|on)$/i.test(v) : this.hosted && !this.password; },

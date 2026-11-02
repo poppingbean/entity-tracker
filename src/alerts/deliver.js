@@ -76,8 +76,14 @@ export async function deliverPending(limit = 30) {
   let sent = 0;
   for (const a of todo) {
     if (isStale(a)) { await col('alerts').updateOne({ _id: a._id }, { $set: { delivered: true, delivery: { skipped: 'stale' }, delivered_ts: Date.now() } }); continue; }
-    const out = { channel: 0, webhook: 0, chats: 0, hooks: 0, errors: [] };
+    const out = { channel: 0, webhook: 0, chats: 0, hooks: 0, ops: 0, errors: [] };
     const tryIt = async (k, fn) => { try { await fn(); out[k]++; } catch (e) { out.errors.push(`${k}: ${e.message}`.slice(0, 160)); } };
+    // the ops group gets every hack-side alert; private cases and unreviewed drain suspicions go nowhere else
+    const opsOnly = a.data?.private === true || a.type === 'drain_suspected';
+    if (config.alerts.opsChat && (opsOnly || ['incident', 'stolen_funds_moved', 'exchange_key_change', 'security_news'].includes(a.type))) {
+      await tryIt('ops', () => sendTelegram(config.alerts.opsChat, alertMessage(a) + (a.data?.owner ? `\nOn call: ${escHtml(a.data.owner)}` : '') + (opsOnly && a.data?.private ? '\n🔒 private case' : '')));
+    }
+    if (opsOnly) { await col('alerts').updateOne({ _id: a._id }, { $set: { delivered: true, delivery: out, delivered_ts: Date.now() } }); sent++; continue; }
     if (atLeast(a.severity, config.alerts.publicSeverity)) {
       if (config.alerts.telegramChannel) await tryIt('channel', () => sendTelegram(config.alerts.telegramChannel, alertMessage(a)));
       if (config.alerts.webhookUrl) await tryIt('webhook', () => postWebhook(config.alerts.webhookUrl, alertPayload(a)));

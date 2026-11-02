@@ -14,6 +14,7 @@ import { flowsOfReceipt, NEAR } from './flows.js';
 import { valueOf } from './prices.js';
 import { enqueueIncident } from './service.js';
 import { exchangeWalletMap, unusualOutflow } from './exchanges.js';
+import { isPrivate } from './cases.js';
 import { oneClickSwap } from './oneclick.js';
 import { viewAccount } from '../audit/rpc.js';
 import { builtinLabel } from '../labels.js';
@@ -148,9 +149,10 @@ async function followStolen(blocks) {
       if (!r.upsertedCount) continue;
       src.last_out_ts = Math.max(src.last_out_ts || 0, f.ts);
       const woke = idleH != null && idleH >= 24;
+      const kase = await col('incident_cases').findOne({ _id: src.incident }, { projection: { owner: 1, visibility: 1 } }).catch(() => null);
       await raise(`moved:${move._id}`, { type: 'stolen_funds_moved', severity: v.usd >= C.alwaysUsd || woke ? 'high' : 'medium',
         title: `${woke ? `Stolen funds woke up after ${idleH >= 48 ? Math.round(idleH / 24) + ' days' : Math.round(idleH) + ' hours'}: ` : 'Stolen funds moved: '}${Math.round(v.amount).toLocaleString('en-US')} ${v.symbol} (~$${Math.round(v.usd).toLocaleString('en-US')}) from ${f.from.slice(0, 14)}…`,
-        text: `From the ${src.role.replace(/_/g, ' ')} of incident ${src.incident.replace(/^inc:/, '').slice(0, 16)}… to ${where}.`, url: `/firewall/${encodeURIComponent(src.incident)}`, related: { wallets: [f.from, f.to] }, data: move, ts: f.ts });
+        text: `From the ${src.role.replace(/_/g, ' ')} of incident ${src.incident.replace(/^inc:/, '').slice(0, 16)}… to ${where}.`, url: `/firewall/${encodeURIComponent(src.incident)}`, related: { wallets: [f.from, f.to] }, data: { ...move, private: kase?.visibility === 'private' || undefined, owner: kase?.owner || undefined }, ts: f.ts });
       // the receiver joins the incident (flagged, followed from now on) unless it is a router or a swap service
       const toState = !ROUTERS.has(f.to) && !swap && !builtinLabel(f.to) ? await viewAccount(f.to).catch(() => null) : null;
       const toContract = !!toState && (toState.code_hash !== '11111111111111111111111111111111' || !!toState.global_contract_hash || !!toState.global_contract_account_id);

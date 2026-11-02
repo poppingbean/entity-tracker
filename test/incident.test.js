@@ -110,3 +110,22 @@ test('flows: NEAR attached to a call is paid in (a staked deposit nets out its w
   const back = receipt('linear-protocol.near', 'whale.near', [], [{ Transfer: { deposit: '1430000000000000000000000000000' } }]);
   assert.equal(netOf('whale.near', [...flowsOfReceipt(stake), ...flowsOfReceipt(back)]).near.net, '0');
 });
+
+test('response: operators by key; the evidence pack names wallets, sources and off-chain recipients', async () => {
+  const { config } = await import('../src/config.js');
+  const { operatorOf, evidencePack } = await import('../src/incident/cases.js');
+  const keep = config.web.operatorKeys;
+  config.web.operatorKeys = ['alice:k1'];
+  assert.equal(operatorOf({ headers: { 'x-operator-key': 'k1' } }), 'alice');
+  assert.equal(operatorOf({ headers: { 'x-operator-key': 'nope' } }), null);
+  assert.equal(operatorOf({ headers: {} }), null);
+  config.web.operatorKeys = keep;
+  const inc = { _id: 'inc:root', kind: 'exchange_drain', drain: { exchange: 'Binance' }, stolen_usd: 51000000, held_usd: 50000000, attacker: { account: 'root.near' },
+    sources: [{ kind: 'exchange', account: 'hot1', name: 'Binance hot wallet', how: 'sends its reserves to binancecold3.near', tokens: [{ symbol: 'NEAR', amount: 8091108 }], usd: 33000000, to: 'root.near', first_ts: 1793304926000, txs: ['T1'] }],
+    accounts: [{ account: 'root.near', role: 'attacker' }, { account: 'pay.near', role: 'cash_out_wallet' }, { account: 'funder.near', role: 'funder' }],
+    held: [{ account: 'root.near', tokens: [{ symbol: 'NEAR', amount: 12300738 }], usd: 50000000 }],
+    trail: { exits: [{ kind: 'swapped to Bitcoin', chain: 'Bitcoin', recipient: 'bc1qxyz', usd: 47000, amount_out: '0.61', asset: 'BTC', dest_txs: ['btctx'] }] } };
+  const md = evidencePack(inc, { siteUrl: 'https://x.test' });
+  for (const s of ['Exchange hot-wallet drain (Binance)', 'https://x.test/firewall/inc%3Aroot', '`hot1`: Binance hot wallet', '`root.near` (attacker): holds 12,300,738 NEAR', '`pay.near` (cash out wallet)', 'Bitcoin `bc1qxyz`', '`btctx`']) assert.ok(md.includes(s), s);
+  assert.ok(!md.includes('funder.near'), 'the funder is not on the refuse list');
+});

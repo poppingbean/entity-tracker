@@ -13,6 +13,7 @@ import { toNear } from './decode.js';
 import { flowsOfTx } from '../incident/flows.js';
 import { valueOf } from '../incident/prices.js';
 import { config } from '../config.js';
+import { privateIncidents } from '../incident/cases.js';
 
 const B58 = '[1-9A-HJ-NP-Za-km-z]';
 const TX_HASH = new RegExp(`^${B58}{43,44}$`);
@@ -92,11 +93,11 @@ export function parseInput(raw) {
 }
 
 /** One answer for whatever was pasted. */
-export async function inspect(raw) {
+export async function inspect(raw, { operator = null } = {}) {
   const p = parseInput(raw);
   const t0 = Date.now();
   const r = await route(p);
-  await withIncidents(p, r).catch(() => {});
+  await withIncidents(p, r, operator).catch(() => {});
   return { input_kind: p.kind, ...r, checked_ts: Date.now(), took_ms: Date.now() - t0 };
 }
 
@@ -104,11 +105,12 @@ const INC_FIELDS = { status: 1, kind: 1, 'attacker.account': 1, 'target.account'
 const incRow = (d, role) => ({ id: d._id, role, status: d.status, kind: d.kind, attacker: d.attacker?.account, target: d.target?.account || null, stolen_usd: d.stolen_usd, held_usd: d.held_usd,
   when: d.started_ts || d.first_seen_ts, headline: d.ai?.headline || null, attack_type: d.ai?.attack_type || null, exits: d.trail?.exit_usd || {} });
 /** The hacks an answer touches: the transaction was one of the attack's, the account is the attacker's (or one of its wallets), or the contract was hit. */
-async function withIncidents(p, r) {
+async function withIncidents(p, r, operator = null) {
   const id = r.account || (p.kind === 'account' ? p.value : null), hash = p.kind === 'tx' ? p.value : null;
   if (!id && !hash) return;
   const or = [...(hash ? [{ 'attack_txs.tx': hash }] : []), ...(id ? [{ 'accounts.account': id }, { 'target.account': id }] : [])];
-  const docs = await col('incidents').find({ $or: or, status: { $in: ['confirmed', 'suspected'] } }, { projection: INC_FIELDS }).sort({ started_ts: -1 }).limit(5).toArray();
+  const hidden = operator ? new Set() : await privateIncidents();
+  const docs = (await col('incidents').find({ $or: or, status: { $in: ['confirmed', 'suspected'] } }, { projection: INC_FIELDS }).sort({ started_ts: -1 }).limit(5).toArray()).filter((d) => !hidden.has(d._id));
   if (!docs.length) return;
   r.incidents = docs.map((d) => {
     const acc = (d.accounts || []).find((a) => a.account === id);
@@ -235,7 +237,8 @@ async function inspectContract(id, state, extra) {
   const look = lookalikeOf(id);
   if (look) points.push(pt('bad', `The name imitates ${look}: this is very likely a fake.`));
   for (const f of rep?.flags || []) points.push(pt(LEVEL_OF[f.severity] || 'warn', f.detail || f.reason));
-  const hit = await col('incidents').find({ 'target.account': id, status: 'confirmed' }, { projection: { stolen_usd: 1, started_ts: 1, 'ai.attack_type': 1 } }).sort({ started_ts: -1 }).limit(1).toArray().catch(() => []);
+  const hit = (await col('incidents').find({ 'target.account': id, status: 'confirmed' }, { projection: { stolen_usd: 1, started_ts: 1, 'ai.attack_type': 1 } }).sort({ started_ts: -1 }).limit(3).toArray().catch(() => []));
+  { const hid = await privateIncidents(); for (let i = hit.length - 1; i >= 0; i--) if (hid.has(hit[i]._id)) hit.splice(i, 1); }
   if (hit[0]) points.push(pt('warn', `It was exploited ${hit[0].started_ts ? `on ${new Date(hit[0].started_ts).toISOString().slice(0, 10)} ` : ''}(~$${Math.round(hit[0].stolen_usd).toLocaleString('en-US')} taken${hit[0].ai?.attack_type ? `, ${hit[0].ai.attack_type}` : ''}). Check the team has fixed it before depositing.`));
   // what the tracker saw this token do
   if (tok) {

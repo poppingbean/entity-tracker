@@ -253,7 +253,7 @@
 </header>
 <div class="pagehead" id="pagehead"><h1 id="pageTitle"></h1><p id="pageSub"></p></div>
 <main id="main"></main>
-<footer><span>Read-only on-chain. Comments and suggestions: <a href="https://t.me/poppingbean" target="_blank" rel="noopener">Telegram @poppingbean</a> · <a href="https://x.com/Raphael_Hoang" target="_blank" rel="noopener">X @Raphael_Hoang</a></span><span>Powered by <a href="https://trustflow.vn" target="_blank" rel="noopener">Trustflow.vn</a></span></footer>
+<footer><span>Read-only on-chain. Comments and suggestions: <a href="https://t.me/poppingbean" target="_blank" rel="noopener">Telegram @poppingbean</a> · <a href="https://x.com/Raphael_Hoang" target="_blank" rel="noopener">X @Raphael_Hoang</a></span><span><a href="#" id="opsLink" onclick="opsSignIn();return false" class="muted">Team sign-in</a> · Powered by <a href="https://trustflow.vn" target="_blank" rel="noopener">Trustflow.vn</a></span></footer>
 
 <script>
 const $ = (id) => document.getElementById(id);
@@ -284,7 +284,7 @@ const crChip = (r) => {
   return '';
 };
 const crFlag = (f) => (f === 'blacklisted' ? '<span class="v bad">blacklisted</span>' : f === 'rugger' ? '<span class="v bad">rugger</span>' : f === 'creator' ? '<span class="v unrated">creator</span>' : '');
-const get = async (path, params) => { const q = params ? '?' + new URLSearchParams(Object.entries(params).filter(([, v]) => v !== '' && v != null)) : ''; const r = await fetch(path + q); const j = await r.json(); if (j.error && !j.rows && !j.now && !j.nodes) throw new Error(j.error); return j; };
+const get = async (path, params) => { const q = params ? '?' + new URLSearchParams(Object.entries(params).filter(([, v]) => v !== '' && v != null)) : ''; const r = await fetch(path + q, typeof opHeaders === 'function' ? opHeaders() : {}); const j = await r.json(); if (j.error && !j.rows && !j.now && !j.nodes) throw new Error(j.error); return j; };
 
 // ---- external links: every wallet / contract / transaction goes to NearBlocks, every token to its launchpad's token page
 const NB = 'https://nearblocks.io', STOP = ' onclick="event.stopPropagation()"'; // a link inside a clickable row must not also open the row
@@ -1625,7 +1625,7 @@ views.firewall = async () => `<div class="grid2 main-l"><div><div class="card" s
     <li><b>Contracts:</b> any type (tokens, NFTs, pools, lending …): who controls it and what its code lets them do</li>
     <li><b>Websites:</b> look-alike addresses of NEAR sites, "claim / airdrop / sync wallet" lures, punycode</li></ul>
     <p class="muted small" style="margin:8px 0 0">The verdict comes from fixed rules and the automated contract audit; the AI only explains it and can never make something look safer.</p></div></details></div>
-  <div id="liveFeed"><div class="card muted">Loading the live feed …</div></div></div>`;
+  <div><div id="opsCases"></div><div id="liveFeed"><div class="card muted">Loading the live feed …</div></div></div></div>`;
 
 // ================================================================== HACKS & INCIDENTS (traced exploits and drainers, live detection)
 const INC_KIND = { exchange_drain: 'Exchange hot-wallet drain', protocol_exploit: 'Protocol exploit', wallet_drainer: 'Wallet drainer', suspicious_transfers: 'Suspicious transfers', none: '–' };
@@ -1710,13 +1710,80 @@ async function liveFeed() {
 let liveTimer = null;
 function liveStart() { clearInterval(liveTimer); liveFeed(); liveTimer = setInterval(() => { if (!$('liveFeed')) { clearInterval(liveTimer); return; } if (!document.hidden) liveFeed(); }, 15000); }
 
+// ================================================================== RESPONSE (operators: the response team's work on a case, next to the evidence)
+const OPS = { key: (() => { try { return localStorage.getItem('opKey') || ''; } catch { return ''; } })(), me: null };
+const opHeaders = () => (OPS.key ? { headers: { 'x-operator-key': OPS.key } } : {});
+async function opsWho() { try { OPS.me = (await fetch('/api/ops/me', opHeaders()).then((r) => r.json())).operator || null; } catch { OPS.me = null; } const el = $('opsLink'); if (el) el.textContent = OPS.me ? `Team: ${OPS.me} (sign out)` : 'Team sign-in'; return OPS.me; }
+function opsSignIn() {
+  if (OPS.me && OPS.key) { try { localStorage.removeItem('opKey'); } catch {} OPS.key = ''; OPS.me = null; opsWho(); render(); return; }
+  const k = prompt('Response team key'); if (!k) return;
+  OPS.key = k.trim(); try { localStorage.setItem('opKey', OPS.key); } catch {}
+  opsWho().then((me) => { if (!me) { alert('That key is not valid.'); try { localStorage.removeItem('opKey'); } catch {} OPS.key = ''; } render(); });
+}
+async function opsAct(id, action) {
+  const r = await fetch('/api/ops/case', { method: 'POST', headers: { 'content-type': 'application/json', 'x-tracker': '1', ...(OPS.key ? { 'x-operator-key': OPS.key } : {}) }, body: JSON.stringify({ id, action }) }).then((x) => x.json()).catch((e) => ({ error: e.message }));
+  if (r.error) { if (action.type === 'visibility' && /tick every check/.test(r.error) && confirm(`${r.error}\n\nPublish anyway?`)) return opsAct(id, { ...action, force: true }); alert(r.error); return; }
+  responsePanel(id);
+}
+const CONTACT_ST = { sent: ['neutral', 'waiting'], replied: ['good', 'replied'], acting: ['good', 'acting'], no_reply: ['bad', 'no reply'] };
+async function responsePanel(id) {
+  const el = $('respPanel'); if (!el) return;
+  const j = await fetch('/api/ops/case?' + new URLSearchParams({ id }), opHeaders()).then((r) => r.json()).catch((e) => ({ error: e.message }));
+  if (j.error) { el.innerHTML = `<div class="card err">${esc(j.error)}</div>`; return; }
+  const c = j.case, done = c.checks.filter((x) => x.done).length, idq = esc(JSON.stringify(id));
+  const priv = c.visibility === 'private';
+  el.innerHTML = `<div class="card" style="border:2px solid var(--${priv ? 'neutral' : 'line'})"><div class="bar"><h2 style="margin:0">Response</h2><span class="v ${priv ? 'neutral' : 'good'}">${priv ? '🔒 private' : 'public'}</span>
+      <span class="muted small">${priv ? 'Only the team sees this case. Its flags are held back and its alerts go only to the ops group.' : 'Everyone sees this case; its flags protect users.'}</span><span class="spacer"></span>
+      <button onclick='opsAct(${idq},{type:"visibility",value:"${priv ? 'public' : 'private'}"})'>${priv ? 'Make public' : 'Make private'}</button></div>
+    <div class="grid2" style="margin-top:10px"><div>
+      <h3>1. Check before telling anyone <span class="muted">${done}/${c.checks.length}</span></h3>
+      ${c.checks.map((x) => `<label class="small" style="display:flex;gap:8px;margin:6px 0;align-items:flex-start"><input type="checkbox" ${x.done ? 'checked' : ''} onchange='opsAct(${idq},{type:this.checked?"check":"uncheck",key:"${x.key}"})'><span>${esc(x.label)}${x.done ? `<div class="muted">✓ ${esc(x.by)} · ${since(x.ts)}</div>` : ''}</span></label>`).join('')}
+      <h3>On call</h3><div class="bar" style="flex-wrap:nowrap;gap:6px"><input id="respOwner" value="${esc(c.owner || '')}" placeholder="name or @telegram (pinged when the money moves)" style="flex:1"><button onclick='opsAct(${idq},{type:"owner",value:$("respOwner").value})'>Save</button></div>
+      <h3>Outcome</h3><div class="bar" style="flex-wrap:nowrap;gap:6px"><select id="respOut">${Object.entries(c.outcomes).map(([k, l]) => `<option value="${k}" ${c.outcome?.status === k ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select><input id="respOutNote" placeholder="note" value="${esc(c.outcome?.note || '')}" style="flex:1">
+        <button onclick='const s=$("respOut").value; if(s!=="false_alarm"||confirm("Mark as a false alarm? Its flags are removed and its alerts retracted.")) opsAct(${idq},{type:"outcome",status:s,note:$("respOutNote").value})'>Save</button></div>
+      ${c.outcome?.by ? `<p class="muted small">${esc(c.outcomes[c.outcome.status] || c.outcome.status)} · ${esc(c.outcome.by)} · ${since(c.outcome.ts)}</p>` : ''}
+    </div><div>
+      <h3>2. Evidence pack <span class="muted">the same brief for everyone, from the latest trace</span></h3>
+      <textarea id="respPack" readonly rows="10" style="width:100%;font-size:12px">${esc(j.pack)}</textarea>
+      <div class="bar" style="gap:6px"><button onclick="navigator.clipboard.writeText($('respPack').value).then(()=>this.textContent='Copied')">Copy</button><button onclick="opsDownload(${idq})">Download .md</button></div>
+    </div></div>
+    <h3>3. Who was told</h3>
+    <table class="small"><tr><th>Who</th><th>How</th><th>By</th><th>When</th><th>Status</th><th>Reply</th><th></th></tr>
+      ${c.contacts.map((x) => { const [cl, lab] = CONTACT_ST[x.status] || CONTACT_ST.sent; return `<tr><td><b>${esc(x.party)}</b>${x.note ? `<div class="muted">${esc(x.note)}</div>` : ''}</td><td>${esc(x.channel || '')}</td><td>${esc(x.by)}</td><td>${since(x.ts)}</td><td><span class="v ${cl}">${lab}</span></td><td class="wrap">${esc(x.reply || '')}${x.reply_ts ? `<div class="muted">${esc(x.reply_by || '')} · ${since(x.reply_ts)}</div>` : ''}</td>
+        <td style="white-space:nowrap"><select id="cs_${x.id}"><option value="replied">replied</option><option value="acting">acting</option><option value="no_reply">no reply</option><option value="sent">waiting</option></select><input id="cr_${x.id}" placeholder="their answer" style="width:140px"><button onclick='opsAct(${idq},{type:"contact_update",contact:"${x.id}",status:$("cs_${x.id}").value,reply:$("cr_${x.id}").value})'>Update</button></td></tr>`; }).join('') || empty(7, 'Nobody contacted yet.')}</table>
+    <div class="bar" style="gap:6px;margin-top:6px;flex-wrap:nowrap"><select id="ctParty">${c.parties.map((p) => `<option>${esc(p)}</option>`).join('')}</select><input id="ctChan" placeholder="channel (e.g. @seal_911_bot, security email, ticket #)" style="flex:1"><input id="ctNote" placeholder="what was sent" style="flex:1">
+      <button onclick='opsAct(${idq},{type:"contact_add",party:$("ctParty").value,channel:$("ctChan").value,note:$("ctNote").value})'>Log contact</button></div>
+    <details style="margin-top:10px"><summary class="small">History (${c.history?.length || 0})</summary><div class="bar" style="flex-wrap:nowrap;gap:6px;margin:6px 0"><input id="respNote" placeholder="add a note" style="flex:1"><button onclick='opsAct(${idq},{type:"note",note:$("respNote").value})'>Add</button></div>
+      <table class="small">${[...(c.history || [])].reverse().map((h) => `<tr><td style="white-space:nowrap">${when(h.ts)}</td><td>${esc(h.by)}</td><td class="wrap">${esc(h.what)}</td></tr>`).join('')}</table></details></div>`;
+}
+function opsDownload(id) {
+  const blob = new Blob([$('respPack').value], { type: 'text/markdown' });
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `safe-near-${id.replace(/^inc:/, '').slice(0, 16)}-evidence.md`; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+/** The team's case list (on Safety Check, above the live feed). */
+async function opsCases() {
+  const el = $('opsCases'); if (!el || !OPS.me) return;
+  const j = await fetch('/api/ops/cases', opHeaders()).then((r) => r.json()).catch(() => null);
+  if (!j?.rows) { el.innerHTML = ''; return; }
+  const OUT = { open: 'open', frozen: 'frozen', refused: 'refused', victim_confirmed: 'victim confirmed', closed: 'closed', false_alarm: 'false alarm' };
+  el.innerHTML = `<div class="card"><div class="bar"><h2 style="margin:0">Cases <span class="muted">response team</span></h2><span class="spacer"></span><span class="muted small">signed in as ${esc(OPS.me)}</span></div>
+    <table class="small"><tr><th></th><th>Case</th><th class="num">Taken</th><th>On call</th><th>Checks</th><th>Told</th><th>Outcome</th></tr>
+    ${j.rows.slice(0, 30).map((r) => `<tr ${row('/firewall/' + encodeURIComponent(r.id))}><td>${r.visibility === 'private' ? '🔒' : ''}</td><td class="wrap"><b>${esc(INC_KIND[r.kind] || r.kind)}</b> ${esc(short(r.target || r.attacker || '', 26))}<div class="muted">${since(r.when)}${r.status !== 'confirmed' ? ` · ${esc(r.status)}` : ''}${r.moves ? ` · <span class="r">${r.moves} move${r.moves > 1 ? 's' : ''}, last ${since(r.last_move)}</span>` : ''}</div></td>
+      <td class="num">${usd(r.stolen_usd)}</td><td>${esc(r.owner || '–')}</td><td>${r.checks_done}</td><td>${r.contacts}${r.waiting ? ` <span class="a">(${r.waiting} waiting)</span>` : ''}</td><td>${esc(OUT[r.outcome] || r.outcome)}</td></tr>`).join('') || empty(7, 'No case yet.')}</table></div>`;
+}
+
 async function incidentPage(id) {
-  const { incident: d, moved_from, live_moves } = await get('/api/incident', { id });
+  const resp = await fetch('/api/incident?' + new URLSearchParams({ id }), opHeaders()).then((r) => r.json());
+  if (resp.private) return `<div class="card"><h2>🔒 Private investigation</h2><p class="muted">${esc(resp.error)}</p><p class="small">${ilink('/firewall', 'Back to Safety Check')}</p></div>`;
+  if (resp.error) throw new Error(resp.error);
+  const { incident: d, moved_from, live_moves, operator } = resp;
   const A = d.ai, T = d.trail || {}, ex = T.exits || [], drain = d.kind === 'exchange_drain';
   const offNear = ex.filter((e) => e.chain && e.chain !== 'NEAR').reduce((s, e) => s + (e.usd || 0), 0);
   const freezeUsd = (d.freezable || []).reduce((s, f) => s + (f.usd || 0), 0);
   const pasted = moved_from || d.pasted;
+  if (operator) setTimeout(() => responsePanel(d._id), 0);
   let h = pasted && pasted !== d.attacker.account ? `<div class="banner neutral" style="display:block"><b>${esc(short(pasted, 40))}</b> is part of this incident: ${esc(INC_ROLE_TXT[(d.accounts || []).find((a) => a.account === pasted)?.role] || 'one of its wallets')}. The investigation follows the money from where it first arrived.</div>` : '';
+  if (operator) h += '<div id="respPanel"><div class="card muted">Loading the response panel …</div></div>';
   h += `<div class="card"><div class="bar"><h2 style="margin:0">${esc(drain ? INC_KIND[d.kind] : A?.attack_type || INC_KIND[d.kind] || 'Incident')}${drain ? ` from ${esc(d.drain?.exchange || 'an exchange')}` : d.target?.account ? ` on ${esc(d.target.account)}` : ''}</h2>${incStatus(d.status)}${d.detected ? '<span class="chip">caught live</span>' : ''}<span class="spacer"></span>
       <span class="muted small">traced ${since(d.traced_ts)} · ${d.stats?.txs || 0} transactions read</span><button onclick="incRetrace('${esc(d.attacker.account)}')">Trace again</button></div>
     <p style="font-size:16px;margin:10px 0"><b>${esc(A?.headline || d.signals?.[0] || '')}</b></p>
@@ -1887,13 +1954,14 @@ async function render() {
   $('main').classList.add('loading');
   try {
     const html = detail ? await DETAIL[view](id) : await views[view]();
-    if (my === seq) { $('main').innerHTML = html; if (view === 'audit' && id) runAudit(id); if (view === 'firewall' && !id) { scFromUrl(); liveStart(); } if (view === 'analysis' && id) anaPoll(id); if (view === 'nfts' && id) nftPoll(id); }
+    if (my === seq) { $('main').innerHTML = html; if (view === 'audit' && id) runAudit(id); if (view === 'firewall' && !id) { scFromUrl(); liveStart(); opsCases(); } if (view === 'analysis' && id) anaPoll(id); if (view === 'nfts' && id) nftPoll(id); }
   } catch (e) { if (my === seq) $('main').innerHTML = `<div class="card err">${esc(e.message)}</div>`; }
   if (my === seq) $('main').classList.remove('loading');
 }
 $('topSearch').outerHTML = searchBox('topQ');
 const loadStatus = () => get('/api/monitor').then((m) => setStatus(m.worker, m.now, m.ai)).catch(() => {});
 loadStatus(); setInterval(loadStatus, 60000);
+opsWho();
 window.addEventListener('popstate', render);
 Promise.all([loadMemeIds(), loadWatch().catch(() => {})]).then(render);
 setInterval(loadMemeIds, 600000);

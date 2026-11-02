@@ -156,10 +156,20 @@ Replaying the Veax blocks, the attacker stands out at $62.8k in 5 tokens across 
 - **Blocklist feed** for swap services, bridges, exchanges and wallets: `GET /api/v1/flags?since=`, `GET /api/v1/flags/check?ids=`.
 - **Off-chain signals:** `/report` to @safenear_bot or the form on Safety Check starts an investigation (it never flags on its own), and security news about NEAR (`NEWS_FEEDS`) is read every 15 minutes. Stories naming accounts or transactions are investigated.
 
+**Response.** Each investigation has a **Response** panel for the response team (sign in with a key from `OPERATOR_KEYS`):
+- a checklist to verify before telling anyone;
+- private / public visibility. New confirmed cases start private: flags held back, alerts only to the ops group (`OPS_TELEGRAM_CHAT`);
+- an evidence pack to send (copy or download);
+- a log of who was told and what they answered;
+- who is on call;
+- the outcome. "False alarm" removes the flags and retracts the alerts.
+
+Signed-in operators see a Cases list on Safety Check. See [docs/incidents.md](docs/incidents.md#response-what-people-do-next-to-the-evidence).
+
 More access:
 - CLI: `node src/cli.js incident <account | tx hash | target:<contract>>`; `node src/cli.js exchanges` rediscovers exchange wallets; `node src/cli.js exchange-wallet <account> <exchange>` adds one.
 - API: `GET /api/v1/incidents`, `GET /api/v1/incident?id=`.
-- Collections: `incidents`, `incident_queue`, `incident_detections`, `incident_moves`, `exchange_wallets`, `security_news`, `reports`.
+- Collections: `incidents`, `incident_queue`, `incident_detections`, `incident_moves`, `exchange_wallets`, `security_news`, `reports`, `incident_cases` (the response).
 
 How the tracer and the detector work, with the Veax exploit as the worked example: [docs/incidents.md](docs/incidents.md).
 

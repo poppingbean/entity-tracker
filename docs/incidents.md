@@ -126,6 +126,44 @@ The parties who can still stop stolen money are the services that convert it: NE
 - **Reports.** `/report <account | tx> [what happened]` to @safenear_bot, or the form on Safety Check, starts an investigation and shows in the live feed. A report never flags anything by itself; flags come only from what the trace confirms.
 - **News.** Public feeds (`NEWS_FEEDS`: Cointelegraph, The Block, Decrypt, rekt.news, CryptoSlate) are read every `NEWS_EVERY_MINUTES` (15). A story that mentions NEAR and a crime word raises `security_news`; any NEAR accounts or transaction hashes it names are investigated.
 
+## Response: what people do, next to the evidence
+
+Detection and tracing are automatic; acting on a case is not. Telling the victim, asking 1Click or a bridge to refuse swaps, and staying on call when the money moves are people's work. It happens in one place: the **Response** panel at the top of an investigation, visible only to the response team (`src/incident/cases.js`).
+
+**Sign-in.**
+- Team members sign in with a key ("Team sign-in" in the footer).
+- Keys come from `OPERATOR_KEYS` (`name:key,name2:key2`); the name is recorded on every action.
+- With no keys set, a local (not hosted) server treats everyone as an operator.
+
+**Private until signed off.** A case the tracer confirms starts **private**:
+- only the team sees it;
+- its flags are held back from the transaction firewall, Safety Check and the blocklist feed;
+- its alerts go only to the ops group.
+
+An operator makes it public after the checklist. Publishing earlier needs an explicit confirmation. This keeps the attacker from learning they are watched before the victim is told, and puts a person between the detector and any public flag. Cases confirmed before the panel existed (Veax, Binance) are public, as they were.
+
+**The panel:**
+1. **Check before telling anyone.** A checklist per kind of case (for an exchange drain: the source wallets are the exchange's, the root wallet and its balance, the payout wallets and cross-chain recipients, and a legitimate move ruled out). Each tick records who and when.
+2. **Evidence pack.** One brief for every party, built from the latest trace:
+   - where the money came from, with transactions;
+   - every attacker wallet and what it holds (the "please refuse" list);
+   - the cross-chain recipients and destination transactions;
+   - how the source was identified.
+
+   Copy it or download it as Markdown.
+3. **Who was told.** A log of each contact: party (victim, SEAL 911, NEAR Intents / 1Click, Omni Bridge, an exchange, chain analytics, NEAR Foundation …), channel, who sent it, when, and their answer (waiting / replied / acting / no reply).
+4. **On call.** The person pinged in the ops group when the money moves.
+5. **Outcome.** Open, funds frozen, swaps refused, victim confirmed, closed, or **false alarm**. A false alarm removes the case's flags, retracts its alerts and dismisses the incident.
+
+Every action is in the case's history. Signed-in operators also see a **Cases** list on Safety Check: open cases first, private ones marked, with who is on call, checks done, contacts still waiting and the latest moves.
+
+**The ops group (`OPS_TELEGRAM_CHAT`)** gets every hack-side alert:
+- confirmed hacks;
+- moves of stolen funds, naming who is on call;
+- exchange key changes and news.
+
+Private cases and unreviewed drain suspicions go only there. Public alerts still go to `TELEGRAM_CHANNEL_ID`.
+
 ## Worked example: Veax, 2026-10-31
 
 The investigation started from one attack transaction (`BQkmuByxyoovFknaHCPjDFBWtXm3FkLSsNg6FS7e4vbV`); the trace took about a minute.

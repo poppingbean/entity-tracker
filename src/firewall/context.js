@@ -41,7 +41,7 @@ async function trackerFacts(ids) {
   const [toks, black, flags, ruggers] = await Promise.all([
     col('tokens').find({ _id: { $in: ids } }, { projection: { symbol: 1, creator: 1, 'outcome.rugged': 1, 'outcome.rug_kinds': 1, 'ledger.collapsed': 1, tax: 1 } }).toArray(),
     col('blacklist').find({ _id: { $in: ids } }).toArray(),
-    col('firewall_flags').find({ _id: { $in: ids } }).toArray(),
+    col('firewall_flags').find({ _id: { $in: ids }, private: { $ne: true } }).toArray(), // a private case's flags are held back
     col('tokens').aggregate([{ $match: { creator: { $in: ids } } }, { $group: { _id: '$creator', launches: { $sum: 1 }, rugged: { $sum: { $cond: ['$outcome.rugged', 1, 0] } } } }]).toArray(),
   ]);
   // the creators of the tokens touched: their blacklist status and rug record

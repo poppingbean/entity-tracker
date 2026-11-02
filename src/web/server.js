@@ -33,6 +33,7 @@ import { contractReport, startAutoAudit, auditJob } from '../audit/report.js';
 import { inspect } from '../firewall/inspect.js';
 import { parseInvestigation, startInvestigation, investigationJob } from '../incident/service.js';
 import { report } from '../incident/signals.js';
+import { operatorOf, privateIncidents, getCase, caseAction, evidencePack, OUTCOMES } from '../incident/cases.js';
 
 const page = fs.readFileSync(new URL('./index.html', import.meta.url), 'utf8');
 // Google Search Console ownership file for app.safe-near.org, served as is at /<name>.html (before the password check, so Google can read it).
@@ -48,6 +49,11 @@ const watchHits = new Map(), keyHits = new Map(), feedbackHits = new Map();
 const reportHits = new Map();
 const POSTS = {
   /** Report a hack, a drainer or stolen funds: it is investigated from the chain (never flagged on the report alone). */
+  '/api/ops/case': async (b, ip, req) => {
+    const op = operatorOf(req);
+    if (!op) return { error: 'operators only' };
+    return caseAction(String(b.id || ''), b.action || {}, op);
+  },
   '/api/report': async (b, ip) => {
     if (limited(reportHits, ip, 10)) return { error: 'too many reports from this address, try again later' };
     return report(String(b.q || ''), { via: 'web', note: String(b.note || '') });
@@ -130,14 +136,14 @@ async function firewallApi(req, res, u) {
   if (u.pathname === '/api/v1/inspect' && req.method === 'GET') {
     const q = String(u.searchParams.get('q') || '').trim().slice(0, 300);
     if (!q) { send(400, { error: 'q: a wallet, a contract or a transaction hash' }); return; }
-    try { send(200, await inspect(q)); } catch (e) { send(400, { error: e.message }); }
+    try { send(200, await inspect(q, { operator: operatorOf(req) })); } catch (e) { send(400, { error: e.message }); }
     return;
   }
   // the blocklist feed: every flagged account (incident accounts, reported drainers), for swap services, bridges, exchanges and wallets
   if (u.pathname === '/api/v1/flags' && req.method === 'GET') {
     const since = Number(u.searchParams.get('since')) || 0, min = ['critical', 'high', 'medium'].indexOf(u.searchParams.get('min') || 'medium');
     const sev = ['critical', 'high', 'medium'].slice(0, (min < 0 ? 2 : min) + 1);
-    const rows = await col('firewall_flags').find({ ts: { $gt: since }, severity: { $in: sev } }, { projection: { severity: 1, reason: 1, incident: 1, source: 1, ts: 1 } }).sort({ ts: 1 }).limit(10000).toArray();
+    const rows = await col('firewall_flags').find({ ts: { $gt: since }, severity: { $in: sev }, private: { $ne: true } }, { projection: { severity: 1, reason: 1, incident: 1, source: 1, ts: 1 } }).sort({ ts: 1 }).limit(10000).toArray();
     const updated = rows.length ? rows[rows.length - 1].ts : since;
     res.setHeader('etag', `"flags-${updated}-${rows.length}"`);
     if (req.headers['if-none-match'] === `"flags-${updated}-${rows.length}"`) { res.writeHead(304, CORS).end(); return; }
@@ -147,16 +153,18 @@ async function firewallApi(req, res, u) {
   if (u.pathname === '/api/v1/flags/check' && req.method === 'GET') {
     const ids = String(u.searchParams.get('ids') || '').split(',').map((x) => x.trim().toLowerCase()).filter(Boolean).slice(0, 100);
     if (!ids.length) { send(400, { error: 'ids: up to 100 accounts, comma separated' }); return; }
-    const rows = await col('firewall_flags').find({ _id: { $in: ids } }, { projection: { severity: 1, reason: 1, incident: 1, ts: 1 } }).toArray();
+    const rows = await col('firewall_flags').find({ _id: { $in: ids }, private: { $ne: true } }, { projection: { severity: 1, reason: 1, incident: 1, ts: 1 } }).toArray();
     send(200, { checked: ids.length, flagged: Object.fromEntries(rows.map((f) => [f._id, { severity: f.severity, reason: f.reason, incident: f.incident || null, ts: f.ts }])) });
     return;
   }
   if (u.pathname === '/api/v1/incidents' && req.method === 'GET') {
-    const rows = await col('incidents').find({ status: { $ne: 'nothing_found' } }, { projection: { status: 1, kind: 1, 'attacker.account': 1, 'target.account': 1, stolen_usd: 1, held_usd: 1, started_ts: 1, 'ai.headline': 1, 'trail.exit_usd': 1 } }).sort({ started_ts: -1 }).limit(100).toArray();
+    const hid = await privateIncidents();
+    const rows = (await col('incidents').find({ status: { $in: ['confirmed', 'suspected'] } }, { projection: { status: 1, kind: 1, 'attacker.account': 1, 'target.account': 1, stolen_usd: 1, held_usd: 1, started_ts: 1, 'ai.headline': 1, 'trail.exit_usd': 1 } }).sort({ started_ts: -1 }).limit(100).toArray()).filter((r) => !hid.has(r._id));
     send(200, { incidents: rows }); return;
   }
   if (u.pathname === '/api/v1/incident' && req.method === 'GET') {
     const doc = await col('incidents').findOne({ _id: String(u.searchParams.get('id') || '') }, { projection: { trail: { moves: 0 } } });
+    if (doc && (await privateIncidents()).has(doc._id)) { send(404, { error: 'no such incident' }); return; }
     send(doc ? 200 : 404, doc || { error: 'no such incident' }); return;
   }
   if (u.pathname === '/api/v1/contract' && req.method === 'GET') {
@@ -497,8 +505,9 @@ const routes = {
     return { id, auto: doc?.auto || null, current: doc?.auto?.v === AUTO_AUDIT_V, job: cur ? { running: cur.running, started: cur.started, error: cur.error } : null };
   },
   /** The live security feed: where the chain watch is, new contracts as they are audited, drains caught live and traced hacks. */
-  '/api/security/live': async (u) => {
+  '/api/security/live': async (u, req) => {
     const only = u.searchParams.get('only'); // '' | hacks | contracts | risky
+    const hid = operatorOf(req) ? new Set() : await privateIncidents();
     const day = Date.now() - 86400e3;
     const [moves, news, reports] = only === 'contracts' || only === 'risky' ? [[], [], []] : await Promise.all([
       col('incident_moves').find({}).sort({ ts: -1 }).limit(20).toArray().catch(() => []),
@@ -523,13 +532,32 @@ const routes = {
     const items = [
       ...contracts.slice(0, 40),
       ...detections.map((d) => ({ type: 'drain', ts: d.event_ts || d.ts, receiver: d.receiver, protocol: d.protocol, exchange: d.exchange || null, kind: d.kind || 'protocol', usd: d.usd, reasons: d.reasons, txs: d.txs })),
-      ...moves.map((m) => ({ type: 'moved', ts: m.ts, incident: m.incident, from: m.from, to: m.to, symbol: m.symbol, amount: m.amount, usd: m.usd, idle_h: m.idle_h, swap: m.swap ? { chain: m.swap.chain, asset: m.swap.asset, recipient: m.swap.recipient } : null, tx: m.tx })),
+      ...moves.filter((m) => !hid.has(m.incident)).map((m) => ({ type: 'moved', ts: m.ts, incident: m.incident, from: m.from, to: m.to, symbol: m.symbol, amount: m.amount, usd: m.usd, idle_h: m.idle_h, swap: m.swap ? { chain: m.swap.chain, asset: m.swap.asset, recipient: m.swap.recipient } : null, tx: m.tx })),
       ...news.map((n) => ({ type: 'news', ts: n.ts, title: n.title, link: n.link, source: n.source, accounts: n.accounts, exchange: n.exchange })),
       ...reports.map((r) => ({ type: 'report', ts: r.last_ts, input: r.input, count: r.count })),
-      ...incidents.map((i) => ({ type: 'hack', ts: i.started_ts || i.first_seen_ts, id: i._id, status: i.status, kind: i.kind, attacker: i.attacker?.account, target: i.target?.account || null, stolen_usd: i.stolen_usd, held_usd: i.held_usd, headline: i.ai?.headline || null, attack_type: i.ai?.attack_type || null, exits: i.trail?.exit_usd || {}, caught_live: !!i.detected })),
+      ...incidents.filter((i) => !hid.has(i._id)).map((i) => ({ type: 'hack', ts: i.started_ts || i.first_seen_ts, id: i._id, status: i.status, kind: i.kind, attacker: i.attacker?.account, target: i.target?.account || null, stolen_usd: i.stolen_usd, held_usd: i.held_usd, headline: i.ai?.headline || null, attack_type: i.ai?.attack_type || null, exits: i.trail?.exit_usd || {}, caught_live: !!i.detected })),
     ].sort((a, b) => (b.ts || 0) - (a.ts || 0)).slice(0, 60);
     const [deploys24, audited24, risky24, drains24, hacks24, moves24, flagged] = counts;
     return { now: Date.now(), watch, live: !!watch && Date.now() - watch.tick_ts < 120e3, last24h: { deploys: deploys24, audited: audited24, risky: risky24, drains: drains24, hacks: hacks24, moves: moves24 }, flagged, items };
+  },
+  /** Who is signed in as an operator (the response team), if anyone. */
+  '/api/ops/me': async (u, req) => ({ operator: operatorOf(req), outcomes: OUTCOMES }),
+  /** Every case, open ones first: the response team's list. */
+  '/api/ops/cases': async (u, req) => {
+    if (!operatorOf(req)) return { error: 'operators only' };
+    const incs = await col('incidents').find({ status: { $in: ['confirmed', 'suspected', 'dismissed'] } }, { projection: { status: 1, kind: 1, 'attacker.account': 1, 'target.account': 1, stolen_usd: 1, held_usd: 1, started_ts: 1, first_seen_ts: 1, 'ai.headline': 1, drain: 1 } }).sort({ first_seen_ts: -1 }).limit(200).toArray();
+    const cases = new Map((await col('incident_cases').find({ _id: { $in: incs.map((i) => i._id) } }).toArray()).map((c) => [c._id, c]));
+    const moves = new Map((await col('incident_moves').aggregate([{ $group: { _id: '$incident', n: { $sum: 1 }, last: { $max: '$ts' } } }]).toArray()).map((m) => [m._id, m]));
+    const rows = incs.map((i) => { const c = cases.get(i._id); return { id: i._id, status: i.status, kind: i.kind, attacker: i.attacker?.account, target: i.drain?.exchange || i.target?.account, stolen_usd: i.stolen_usd, held_usd: i.held_usd, when: i.started_ts || i.first_seen_ts, headline: i.ai?.headline || null,
+      visibility: c?.visibility || 'public', owner: c?.owner || null, outcome: c?.outcome?.status || 'open', checks_done: Object.values(c?.checklist || {}).filter((x) => x.done).length, contacts: (c?.contacts || []).length, waiting: (c?.contacts || []).filter((x) => x.status === 'sent').length, moves: moves.get(i._id)?.n || 0, last_move: moves.get(i._id)?.last || null }; });
+    const order = (r) => (r.status === 'dismissed' || ['closed', 'false_alarm'].includes(r.outcome) ? 2 : r.status === 'suspected' ? 1 : 0);
+    return { rows: rows.sort((a, b) => order(a) - order(b) || (b.when || 0) - (a.when || 0)) };
+  },
+  '/api/ops/case': async (u, req) => {
+    if (!operatorOf(req)) return { error: 'operators only' };
+    const id = String(u.searchParams.get('id') || ''), inc = await col('incidents').findOne({ _id: id });
+    if (!inc) return { error: 'no such incident' };
+    return { case: await getCase(id, inc), pack: evidencePack(inc) };
   },
   /** Hacks and scams: traced incidents (newest first) and what the live detector raised. */
   '/api/incidents': async (u) => {
@@ -544,16 +572,18 @@ const routes = {
     ]);
     return { rows, total, detections, queue: Object.fromEntries(queue.map((q) => [q._id, q.n])) };
   },
-  '/api/incident': async (u) => {
-    const id = String(u.searchParams.get('id') || '');
+  '/api/incident': async (u, req) => {
+    const id = String(u.searchParams.get('id') || ''), op = operatorOf(req), hid = op ? new Set() : await privateIncidents();
     let doc = await col('incidents').findOne({ _id: id });
     // an investigation of a wallet that turned out to be part of a bigger one (re-rooted at the wallet that received the money first)
     if (!doc || doc.status === 'nothing_found') {
       const acc = id.replace(/^inc:/, '');
       const bigger = await col('incidents').findOne({ 'accounts.account': acc, status: { $in: ['confirmed', 'suspected'] } }, { sort: { stolen_usd: -1 } });
+      if (bigger && hid.has(bigger._id)) return { error: 'This investigation is private: the response team is checking it before it is published.', private: true };
       if (bigger) return { incident: bigger, moved_from: acc, live_moves: await col('incident_moves').find({ incident: bigger._id }).sort({ ts: -1 }).limit(100).toArray() };
     }
-    return doc ? { incident: doc, live_moves: await col('incident_moves').find({ incident: doc._id }).sort({ ts: -1 }).limit(100).toArray() } : { error: 'no such incident' };
+    if (doc && hid.has(doc._id)) return { error: 'This investigation is private: the response team is checking it before it is published.', private: true };
+    return doc ? { incident: doc, operator: op || undefined, live_moves: await col('incident_moves').find({ incident: doc._id }).sort({ ts: -1 }).limit(100).toArray() } : { error: 'no such incident' };
   },
   /** Investigate an account, a tx hash or target:<contract>: the saved incident if there is one, else (run=1) start a trace here. */
   '/api/incident/investigate': async (u, req) => {
@@ -753,10 +783,11 @@ const routes = {
 
   // ------------------------------------------------------------ alerts and watchlists
   /** Alerts, newest first: all of them (filter by severity, type group, or what they concern), or one watchlist's (key=). */
-  '/api/alerts': async (u) => {
+  '/api/alerts': async (u, req) => {
     const since = Number(u.searchParams.get('since')) || 0, limit = clamp(u.searchParams.get('limit'), 50, 200), key = u.searchParams.get('key');
     if (key) { if (!validKey(key)) return { error: 'invalid key' }; return { rows: (await alertsFor(key, { since, limit })).map(alertPayload) }; }
     const f = { ts: { $gt: since } };
+    if (!operatorOf(req)) f['data.private'] = { $ne: true };
     const sev = u.searchParams.get('severity'); if (SEVERITIES.includes(sev)) f.severity = { $in: SEVERITIES.slice(0, SEVERITIES.indexOf(sev) + 1) };
     const grp = u.searchParams.get('group'); if (grp) f.type = { $in: Object.keys(TYPES).filter((t) => TYPES[t].group === grp) };
     const kind = u.searchParams.get('kind'), id = u.searchParams.get('id');
@@ -899,7 +930,7 @@ export function startWeb() {
         if (req.headers['x-tracker'] !== '1' || (origin && new URL(origin).host !== req.headers.host)) { res.writeHead(403, { 'content-type': 'application/json' }).end(JSON.stringify({ error: 'forbidden: send the header x-tracker: 1' })); return; }
         let body = ''; for await (const d of req) { body += d; if (body.length > 4000) break; }
         let b = {}; try { b = JSON.parse(body || '{}'); } catch { res.writeHead(400, { 'content-type': 'application/json' }).end(JSON.stringify({ error: 'invalid JSON' })); return; }
-        const out = await POSTS[u.pathname](b, req.socket.remoteAddress || 'ip');
+        const out = await POSTS[u.pathname](b, req.socket.remoteAddress || 'ip', req);
         res.writeHead(out?.error ? 400 : 200, { 'content-type': 'application/json', 'cache-control': 'no-store' }).end(JSON.stringify(out));
         return;
       }

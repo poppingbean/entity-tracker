@@ -7,6 +7,7 @@ import { raise } from '../alerts/store.js';
 import { validNearAddress } from '../audit/service.js';
 import { traceIncident } from './trace.js';
 import { aiIncidentReport } from './ai.js';
+import { openCase, isPrivate } from './cases.js';
 
 export const INCIDENT_V = 1;
 const TX_HASH = /^[1-9A-HJ-NP-Za-km-z]{43,44}$/;
@@ -22,7 +23,7 @@ export function parseInvestigation(q) {
 }
 
 /** Flag the attacker's own accounts (not 1Click deposit addresses or the target) so every check that touches them warns. */
-async function flagAccounts(inc) {
+async function flagAccounts(inc, { hidden = false } = {}) {
   if (inc.status !== 'confirmed') return 0;
   const what = `${inc.kind === 'wallet_drainer' ? 'drained wallets' : inc.kind === 'exchange_drain' ? `received the money drained from ${inc.drain?.exchange || 'an exchange'}'s hot wallets` : `exploited ${inc.target?.account || 'a contract'}`}${inc.started_ts ? ` on ${new Date(inc.started_ts).toISOString().slice(0, 10)}` : ''} (~$${Math.round(inc.stolen_usd).toLocaleString('en-US')} taken)`;
   const reason = what;
@@ -37,6 +38,8 @@ async function flagAccounts(inc) {
     await col('firewall_flags').updateOne({ _id: a.account }, { $setOnInsert: { _id: a.account, severity: sev[a.role], reason: `${a.role === 'funder' ? 'funded an attacker that ' : ''}${reason}`.slice(0, 120),
       detail: DETAIL[a.role], ts: Date.now(), source: 'incident', incident: inc._id } }, { upsert: true });
   }
+  // a private case's flags are held back (no firewall, Safety Check or blocklist feed) until an operator makes it public
+  await col('firewall_flags').updateMany({ source: 'incident', incident: inc._id }, hidden ? { $set: { private: true } } : { $unset: { private: 1 } });
   return rows.length;
 }
 
@@ -49,7 +52,8 @@ export async function investigate(input, { ai = true, detected = null, log = () 
   await col('incidents').replaceOne({ _id: doc._id }, doc, { upsert: true });
   // traced from one of its wallets and re-rooted: an earlier empty investigation of that wallet now points here
   if (doc.pasted && doc.pasted !== doc.attacker.account) await col('incidents').deleteOne({ _id: `inc:${doc.pasted}`, status: 'nothing_found' }).catch(() => {});
-  const flagged = await flagAccounts(doc).catch(() => 0);
+  const hidden = doc.status === 'confirmed' ? await openCase(doc).catch(() => false) : await isPrivate(doc._id).catch(() => false);
+  const flagged = await flagAccounts(doc, { hidden }).catch(() => 0);
   // no longer confirmed (a re-trace with better evidence): its flags go, and its alert says it was retracted
   if (doc.status !== 'confirmed') {
     const r = await col('firewall_flags').deleteMany({ source: 'incident', incident: doc._id });
@@ -62,7 +66,7 @@ export async function investigate(input, { ai = true, detected = null, log = () 
     const from = doc.kind === 'exchange_drain' ? `${doc.drain?.exchange || 'an exchange'} (${doc.victims.filter((v) => v.exchange).length} hot wallets)` : t;
     await raise(`incident:${doc._id}`, { type: 'incident', severity: 'high', title: `${{ wallet_drainer: 'Wallet drainer', exchange_drain: 'Exchange hot-wallet drain' }[doc.kind] || 'Exploit'}: ~$${doc.stolen_usd.toLocaleString('en-US')} taken from ${from} by ${doc.attacker.account}`,
       text: `${doc.ai?.headline || doc.signals.join('; ')}${exits ? `. Money went to ${exits}` : ''}${doc.held_usd ? `. The attacker still holds ~$${doc.held_usd.toLocaleString('en-US')}` : ''}.`,
-      url: `/firewall/${encodeURIComponent(doc._id)}`, related: { wallets: [doc.attacker.account] }, data: { incident: doc._id, target: doc.target?.account, stolen_usd: doc.stolen_usd } });
+      url: `/firewall/${encodeURIComponent(doc._id)}`, related: { wallets: [doc.attacker.account] }, data: { incident: doc._id, target: doc.target?.account, stolen_usd: doc.stolen_usd, private: hidden || undefined } });
     await col('incidents').updateOne({ _id: doc._id }, { $set: { alerted: true } });
   }
   info(`incident ${doc._id}: ${doc.status} ${doc.kind} $${doc.stolen_usd} (${flagged} accounts flagged)`);
