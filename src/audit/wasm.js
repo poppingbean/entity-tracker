@@ -80,6 +80,48 @@ export function capabilitiesFromWat(text, wanted = null) {
   return out;
 }
 
+// What each method does to state and money, for the function review (a superset of HOST_CAPS: the harmless effects too)
+export const EFFECTS = { ...HOST_CAPS, storage_write: 'writes_state', storage_remove: 'deletes_state', storage_read: 'reads_state', storage_has_key: 'reads_state',
+  attached_deposit: 'reads_deposit', promise_result: 'callback', promise_results_count: 'callback', random_seed: 'randomness', log_utf8: 'logs', log_utf16: 'logs',
+  value_return: 'returns', account_balance: 'reads_balance', account_locked_balance: 'reads_balance', block_timestamp: 'reads_time', block_index: 'reads_time',
+  current_account_id: 'reads_self', prepaid_gas: 'reads_gas', used_gas: 'reads_gas', sha256: 'hashes', keccak256: 'hashes', ed25519_verify: 'verifies_signature', ecrecover: 'verifies_signature' };
+
+/** For every export: { effects: [...], size } (size = functions reachable from it: a rough measure of how much it does). Exported for tests. */
+export function effectsFromWat(text) {
+  const fns = parseWat(text);
+  const direct = (f) => [...f.calls].filter((c) => c.startsWith('$env.') && DANGEROUS.has(HOST_CAPS[c.slice(5)])).map((c) => HOST_CAPS[c.slice(5)]);
+  const wrapper = (g) => g && g.calls.size <= 2 && [...g.calls].every((c) => c.startsWith('$env.'));
+  const reach2 = (f) => new Set([...direct(f), ...[...f.calls].flatMap((c) => (wrapper(fns.get(c)) ? direct(fns.get(c)) : []))]);
+  const dispatchers = new Set([...fns].filter(([, f]) => reach2(f).size >= 3).map(([n]) => n));
+  const out = {};
+  for (const [name, f0] of fns) {
+    if (!f0.export) continue;
+    const seen = new Set([name]), stack = dispatchers.has(name) ? [] : [name], eff = new Set();
+    while (stack.length && seen.size < 6000) {
+      const f = fns.get(stack.pop());
+      if (!f) continue;
+      for (const c of f.calls) {
+        if (c.startsWith('$env.')) { const e = EFFECTS[c.slice(5)]; if (e) eff.add(e); continue; }
+        if (dispatchers.has(c)) { eff.add('generic_promise'); continue; }
+        if (!seen.has(c)) { seen.add(c); stack.push(c); }
+      }
+    }
+    out[f0.export] = { effects: [...eff].sort(), size: seen.size };
+  }
+  return out;
+}
+/** Effects of every exported method from WASM bytes, or null when it can't be decompiled. */
+export async function codeEffects(code) {
+  try {
+    const w = await wabt();
+    const m = w.readWasm(new Uint8Array(code), { readDebugNames: true });
+    m.generateNames(); m.applyNames();
+    const text = m.toText({ foldExprs: false, inlineExport: true });
+    m.destroy();
+    return effectsFromWat(text);
+  } catch { return null; }
+}
+
 /** Capabilities of a contract's write methods from its WASM bytes. null when the code can't be decompiled. */
 export async function codeCapabilities(code, methods) {
   try {

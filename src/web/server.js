@@ -33,6 +33,7 @@ import { contractReport, startAutoAudit, auditJob } from '../audit/report.js';
 import { inspect } from '../firewall/inspect.js';
 import { parseInvestigation, startInvestigation, investigationJob } from '../incident/service.js';
 import { report } from '../incident/signals.js';
+import { walletView } from '../near/walletview.js';
 
 const page = fs.readFileSync(new URL('./index.html', import.meta.url), 'utf8');
 // Google Search Console ownership file for app.safe-near.org, served as is at /<name>.html (before the password check, so Google can read it).
@@ -522,7 +523,7 @@ const routes = {
     if (only === 'risky') contracts = contracts.filter((c) => ['high', 'critical'].includes(c.level));
     const items = [
       ...contracts.slice(0, 40),
-      ...detections.map((d) => ({ type: 'drain', ts: d.event_ts || d.ts, receiver: d.receiver, protocol: d.protocol, verdict: d.verdict || null, own: d.own?.explanation || null, exchange: d.exchange || null, kind: d.kind || 'protocol', usd: d.usd, reasons: d.reasons, txs: d.txs })),
+      ...detections.map((d) => ({ type: 'drain', ts: d.event_ts || d.ts, receiver: d.receiver, protocol: d.protocol, verdict: d.verdict || null, own: d.own?.explanation || null, tags: (d.tags || []).map((t) => t.tag), why: d.review?.why || null, incident: d.review?.incident || null, exchange: d.exchange || null, kind: d.kind || 'protocol', usd: d.usd, reasons: d.reasons, txs: d.txs })),
       ...moves.map((m) => ({ type: 'moved', ts: m.ts, incident: m.incident, from: m.from, to: m.to, symbol: m.symbol, amount: m.amount, usd: m.usd, idle_h: m.idle_h, swap: m.swap ? { chain: m.swap.chain, asset: m.swap.asset, recipient: m.swap.recipient } : null, tx: m.tx })),
       ...news.map((n) => ({ type: 'news', ts: n.ts, title: n.title, link: n.link, source: n.source, accounts: n.accounts, exchange: n.exchange })),
       ...reports.map((r) => ({ type: 'report', ts: r.last_ts, input: r.input, count: r.count })),
@@ -601,7 +602,8 @@ const routes = {
   '/api/wallet': async (u) => {
     const id = u.searchParams.get('id');
     const w = await col('wallets').findOne({ _id: id });
-    if (!w) return { error: 'not found' };
+    // not an early launch buyer, so not profiled: the wallet as the chain shows it
+    if (!w) { const v = validNearAddress(String(id || '').toLowerCase()) ? await walletView(String(id).toLowerCase()).catch(() => null) : null; return v ? { id: v.id, onchain: v } : { error: 'No NEAR account with this name.' }; }
     const entries = await col('entries').find({ wallet: id }).sort({ first_buy_ts: -1 }).limit(100).toArray();
     const toks = await col('tokens').find({ _id: { $in: entries.map((e) => e.token) } }, { projection: { symbol: 1, launchpad: 1, status: 1, 'outcome.rugged': 1, 'outcome.peak_multiple': 1, 'ledger.synced_to_ts': 1, creator: 1 } }).toArray();
     const tmap = new Map(toks.map((t) => [t._id, t]));

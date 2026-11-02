@@ -15,6 +15,7 @@ import { valueOf } from './prices.js';
 import { enqueueIncident } from './service.js';
 import { exchangeWalletMap, unusualOutflow } from './exchanges.js';
 import { ownFunds } from './ownfunds.js';
+import { scheduleReview } from './deepreview.js';
 import { oneClickSwap } from './oneclick.js';
 import { viewAccount } from '../audit/rpc.js';
 import { builtinLabel } from '../labels.js';
@@ -94,7 +95,7 @@ async function scanExchanges(blocks) {
       const fresh = ageH <= C.freshHours;
       const unusual = f.token === NEAR ? unusualOutflow(w, v.amount, state ? Number(BigInt(state.amount) / 10n ** 21n) / 1e3 : null) : [];
       const correlated = list.length >= 2;
-      if (!((fresh && unusual.length) || (fresh && usd >= C.alwaysUsd) || (correlated && list.reduce((s, x) => s + x.usd, 0) >= C.exchangeMinUsd * 2))) continue;
+      if (!((fresh && unusual.length) || (fresh && usd >= C.alwaysUsd) || ((fresh || unusual.length) && correlated && list.reduce((s, x) => s + x.usd, 0) >= C.exchangeMinUsd * 2))) continue;
       const name = w?.exchange || 'an exchange';
       const reasons = [`${name} hot wallet ${f.exchange.slice(0, 12)}… sent ~$${Math.round(usd).toLocaleString('en-US')} (${Math.round(v.amount).toLocaleString('en-US')} ${v.symbol})`,
         ageH < 0.02 ? 'to an account created by this transfer' : `to an account ${ageH < 48 ? ageH.toFixed(1) + ' hours' : Math.round(ageH / 24) + ' days'} old`, ...unusual,
@@ -106,6 +107,7 @@ async function scanExchanges(blocks) {
       if (await raise(key, { type: 'drain_suspected', severity: sev, title: `Possible ${name === 'an exchange' ? 'exchange' : name} hot-wallet drain: ~$${Math.round(usd).toLocaleString('en-US')} to a new account ${f.to.slice(0, 16)}…`,
         text: `${reasons.join('; ')}. Tracing it now.`, url: `/firewall?q=${encodeURIComponent(f.to)}`, related: { wallets: [f.to] }, data: detected, ts: f.ts })) {
         await enqueueIncident({ account: f.to }, { reason: 'detected', detected });
+        await scheduleReview(key, 'detection');
         raised.push(detected);
       }
     }
@@ -197,12 +199,14 @@ export async function scanBlocks(blocks) {
     // its own money? (deposits into this protocol at least a day before): shown on the feed as a withdrawal, no alert, no trace
     const own = await ownFunds(w.receiver, w.protocol, { beforeTs: w.first, withdrawnUsd: w.usd }).catch(() => null);
     const detected = { ts: now, event_ts: w.first, protocol: w.protocol, receiver: w.receiver, usd: Math.round(w.usd), txs: [...w.txs].slice(0, 10), tokens: [...w.tokens], reasons: s.reasons,
-      verdict: own?.own_funds ? 'own_funds' : 'suspect', own: own ? { explanation: own.explanation, deposited_usd: own.deposited_usd, first_ts: own.first_ts, last_ts: own.last_ts, txs: own.txs } : null, reviewed_ts: Date.now() };
+      verdict: own?.own_funds ? 'own_funds' : 'suspect', own: own ? { explanation: own.explanation, deposited_usd: own.deposited_usd, first_ts: own.first_ts, last_ts: own.last_ts, txs: own.txs } : null, reviewed_ts: Date.now(),
+      tags: [{ tag: 'drain?', ts: now }, ...(own?.own_funds ? [{ tag: 'safe', ts: Date.now(), why: own.explanation, by: 'own-funds check' }] : [])] };
     await col('incident_detections').updateOne({ _id: `${w.receiver}|${w.protocol}|${Math.floor(w.first / 3600e3)}` }, { $set: detected }, { upsert: true });
     if (own?.own_funds) { info(`large withdrawal of own funds: ${w.receiver} took $${Math.round(w.usd)} from ${w.protocol} (${own.explanation})`); continue; }
     await raise(`drain:${w.receiver}:${w.protocol}:${Math.floor(w.first / 3600e3)}`, { type: 'drain_suspected', severity: 'high', title: `Possible exploit in progress: ${w.receiver} took ~$${Math.round(w.usd).toLocaleString('en-US')} from ${w.protocol}`,
       text: `${s.reasons.join('; ')}. Tracing it now.`, url: `/firewall?q=${encodeURIComponent(w.receiver)}`, related: { wallets: [w.receiver] }, data: detected });
     await enqueueIncident({ account: w.receiver }, { reason: 'detected', detected });
+    await scheduleReview(`${w.receiver}|${w.protocol}|${Math.floor(w.first / 3600e3)}`, 'detection');
     info(`incident suspected: ${w.receiver} took $${Math.round(w.usd)} from ${w.protocol} (${s.reasons.join('; ')})`);
     raised.push(detected);
   }
@@ -215,7 +219,8 @@ export async function reviewDetections(limit = 10) {
   for (const d of rows) {
     const own = await ownFunds(d.receiver, d.protocol, { beforeTs: d.event_ts || d.ts, withdrawnUsd: d.usd }).catch(() => null);
     if (!own) continue;
-    await col('incident_detections').updateOne({ _id: d._id }, { $set: { verdict: own.own_funds ? 'own_funds' : 'suspect', own: { explanation: own.explanation, deposited_usd: own.deposited_usd, first_ts: own.first_ts, last_ts: own.last_ts, txs: own.txs }, reviewed_ts: Date.now() } });
+    await col('incident_detections').updateOne({ _id: d._id }, { $set: { verdict: own.own_funds ? 'own_funds' : 'suspect', own: { explanation: own.explanation, deposited_usd: own.deposited_usd, first_ts: own.first_ts, last_ts: own.last_ts, txs: own.txs }, reviewed_ts: Date.now(),
+      tags: [{ tag: 'drain?', ts: d.ts }, ...(own.own_funds ? [{ tag: 'safe', ts: Date.now(), why: own.explanation, by: 'own-funds check' }] : [])] } });
     if (own.own_funds) {
       await col('alerts').updateMany({ type: { $in: ['drain_suspected', 'incident'] }, 'related.wallets': d.receiver, title: { $not: /^(Not a hack|Retracted)/ } }, [{ $set: { title: { $concat: ['Not a hack (own funds): ', '$title'] }, severity: 'info' } }]);
       info(`detection ${d._id}: own funds (${own.explanation})`);

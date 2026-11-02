@@ -17,6 +17,7 @@ import { watchDeploys, processAuditQueue } from './audit/watcher.js';
 import { processIncidentQueue } from './incident/service.js';
 import { refreshExchangeRegistry } from './incident/exchanges.js';
 import { reviewDetections } from './incident/detect.js';
+import { processDeepReview, backfillReviews } from './incident/deepreview.js';
 import { pollNews } from './incident/signals.js';
 import { evaluateGroups, reviewPending } from './evaluate/run.js';
 import { profileCreators } from './evaluate/creators.js';
@@ -76,7 +77,8 @@ export async function cycle({ evaluate = true } = {}) {
   }
   // hacks the detector (or anyone) queued: traced one at a time, beside the rest (a trace takes a minute or two); unchecked drain reports first
   if (config.incidents.enabled && !runtime.incident) {
-    runtime.incident = reviewDetections(3).catch((e) => warn(`drain review: ${e.message}`)).then(() => processIncidentQueue()).catch((e) => warn(`incident queue: ${e.message}`)).finally(() => { runtime.incident = null; });
+    if (!runtime.reviewsBackfilled) { runtime.reviewsBackfilled = true; backfillReviews().catch(() => {}); } // findings from before the deep review
+    runtime.incident = reviewDetections(3).catch((e) => warn(`drain review: ${e.message}`)).then(() => processIncidentQueue()).then(() => processDeepReview()).catch((e) => warn(`deep review: ${e.message}`)).catch((e) => warn(`incident queue: ${e.message}`)).finally(() => { runtime.incident = null; });
   }
   // measured accuracy: recomputed every hour beside the loop
   if (!runtime.accuracy && Date.now() - runtime.lastAccuracy > config.accuracy.everyMs) {
