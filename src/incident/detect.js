@@ -42,6 +42,45 @@ export function protocolOutflows(b, protos) {
   return out;
 }
 
+// exchange hot wallets: a large transfer from one to an account that did not exist a moment before is how an exchange drain looks
+let hubCache = { ts: 0, set: new Set() };
+async function exchangeWallets() {
+  if (Date.now() - hubCache.ts < 600e3 && hubCache.set.size) return hubCache.set;
+  const hubs = await col('entities').find({ $or: [{ kind: 'hub' }, { type: 'exchange' }] }, { projection: { _id: 1 } }).limit(5000).toArray().catch(() => []);
+  hubCache = { ts: Date.now(), set: new Set(hubs.map((h) => h._id)) };
+  return hubCache.set;
+}
+/** NEAR and token flows out of exchange hot wallets in one neardata block (pure apart from the wallet set). */
+export function exchangeOutflows(b, hubs) {
+  const out = [], ts = Number(b.block.header.timestamp_nanosec) / 1e6, height = b.block.header.height;
+  for (const s of b.shards || []) for (const ro of s.receipt_execution_outcomes || []) for (const f of flowsOfReceipt(ro, { tx: ro.tx_hash || null, height, ts })) {
+    if (hubs.has(f.from) && !hubs.has(f.to) && !ROUTERS.has(f.to) && !/^(nft|intents|mint|burn):/.test(f.token) && !/binance|okx|bybit|kucoin|gate|mexc|htx|huobi|coinbase|kraken|bitget|bitfinex|upbit|bithumb/i.test(f.to)) out.push({ ...f, exchange: f.from });
+  }
+  return out;
+}
+async function scanExchangeDrains(blocks) {
+  const C = config.incidents, hubs = await exchangeWallets();
+  if (!hubs.size) return [];
+  const raised = [];
+  for (const b of blocks) for (const f of exchangeOutflows(b, hubs)) {
+    const v = await valueOf(f.token, f.raw);
+    if ((v.usd || 0) < C.alwaysUsd) continue;
+    const first = await txIndexer('/v0/account', { account_id: f.to, limit: 1, desc: false }).then((j) => j?.account_txs?.[0]).catch(() => null);
+    const ageH = first ? (f.ts - Number(first.tx_block_timestamp) / 1e6) / 3600e3 : 0; // not indexed yet: created by this transfer
+    if (ageH > C.freshHours) continue;
+    const reasons = [`an exchange hot wallet (${f.exchange.slice(0, 12)}…) sent ~$${Math.round(v.usd).toLocaleString('en-US')} of ${v.symbol}`, ageH < 0.02 ? 'to an account created by this transfer' : `to an account ${ageH.toFixed(1)} hours old`];
+    const detected = { ts: Date.now(), protocol: f.exchange, receiver: f.to, usd: Math.round(v.usd), txs: [f.tx], tokens: [f.token], reasons, kind: 'exchange' };
+    const key = `xdrain:${f.to}:${Math.floor(f.ts / 3600e3)}`;
+    await col('incident_detections').updateOne({ _id: key }, { $set: detected }, { upsert: true });
+    if (await raise(key, { type: 'drain_suspected', severity: 'high', title: `Possible exchange drain: ~$${Math.round(v.usd).toLocaleString('en-US')} from an exchange hot wallet to a new account ${f.to.slice(0, 16)}…`,
+      text: `${reasons.join(' ')}. Tracing it now.`, url: `/firewall?q=${encodeURIComponent(f.to)}`, related: { wallets: [f.to] }, data: detected })) {
+      await enqueueIncident({ account: f.to }, { reason: 'detected', detected });
+      raised.push(detected);
+    }
+  }
+  return raised;
+}
+
 const WINDOW_MS = 30 * 60e3;
 const win = new Map(); // receiver|protocol -> { receiver, protocol, flows: [], usd, first, last, txs:Set, tokens:Set, raised }
 /** Add a batch of blocks' outflows to the window and raise / queue what crossed the line. Returns the suspects raised. */
@@ -49,6 +88,7 @@ export async function scanBlocks(blocks) {
   const C = config.incidents;
   if (!C.enabled || !blocks.length) return [];
   const protos = await protocols();
+  const xraised = await scanExchangeDrains(blocks).catch((e) => { info(`exchange drain scan: ${e.message}`); return []; });
   for (const b of blocks) for (const f of protocolOutflows(b, protos)) {
     const k = `${f.to}|${f.protocol}`, w = win.get(k) || { receiver: f.to, protocol: f.protocol, flows: [], usd: 0, first: f.ts, last: f.ts, txs: new Set(), tokens: new Set(), raised: false };
     const v = await valueOf(f.token, f.raw);
@@ -70,7 +110,7 @@ export async function scanBlocks(blocks) {
     info(`incident suspected: ${w.receiver} took $${Math.round(w.usd)} from ${w.protocol} (${s.reasons.join('; ')})`);
     raised.push(detected);
   }
-  return raised;
+  return [...xraised, ...raised];
 }
 
 /** Does this receiver look like an attacker? (account age, own fresh token contracts, many tokens in one go) */

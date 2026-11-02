@@ -1616,7 +1616,7 @@ views.firewall = async () => `<div class="grid2 main-l"><div><div class="card" s
   <div id="liveFeed"><div class="card muted">Loading the live feed …</div></div></div>`;
 
 // ================================================================== HACKS & INCIDENTS (traced exploits and drainers, live detection)
-const INC_KIND = { protocol_exploit: 'Protocol exploit', wallet_drainer: 'Wallet drainer', suspicious_transfers: 'Suspicious transfers', none: '–' };
+const INC_KIND = { exchange_drain: 'Exchange hot-wallet drain', protocol_exploit: 'Protocol exploit', wallet_drainer: 'Wallet drainer', suspicious_transfers: 'Suspicious transfers', none: '–' };
 const INC_ROLE = { attacker: 'attacker', fake_token: 'fake token it deployed', sub_account: 'its sub-account', contract: 'contract it deployed', intents_account: 'its NEAR Intents account', cash_out_wallet: 'cash-out wallet', funder: 'funded the attacker' };
 const usd = (x) => (x == null ? '–' : '$' + Math.round(x).toLocaleString('en-US'));
 const amt = (x) => (x == null ? '–' : x >= 1e9 ? (x / 1e9).toFixed(2) + 'B' : x >= 1e6 ? (x / 1e6).toFixed(2) + 'M' : x >= 1e3 ? (x / 1e3).toFixed(1) + 'k' : Number(x).toLocaleString('en-US', { maximumFractionDigits: 3 }));
@@ -1693,11 +1693,13 @@ let liveTimer = null;
 function liveStart() { clearInterval(liveTimer); liveFeed(); liveTimer = setInterval(() => { if (!$('liveFeed')) { clearInterval(liveTimer); return; } if (!document.hidden) liveFeed(); }, 15000); }
 
 async function incidentPage(id) {
-  const { incident: d } = await get('/api/incident', { id });
-  const A = d.ai, T = d.trail || {}, ex = T.exits || [];
+  const { incident: d, moved_from } = await get('/api/incident', { id });
+  const A = d.ai, T = d.trail || {}, ex = T.exits || [], drain = d.kind === 'exchange_drain';
   const offNear = ex.filter((e) => e.chain && e.chain !== 'NEAR').reduce((s, e) => s + (e.usd || 0), 0);
   const freezeUsd = (d.freezable || []).reduce((s, f) => s + (f.usd || 0), 0);
-  let h = `<div class="card"><div class="bar"><h2 style="margin:0">${esc(A?.attack_type || INC_KIND[d.kind] || 'Incident')}${d.target?.account ? ` on ${esc(d.target.account)}` : ''}</h2>${incStatus(d.status)}${d.detected ? '<span class="chip">caught live</span>' : ''}<span class="spacer"></span>
+  const pasted = moved_from || d.pasted;
+  let h = pasted && pasted !== d.attacker.account ? `<div class="banner neutral" style="display:block"><b>${esc(short(pasted, 40))}</b> is part of this incident: ${esc(INC_ROLE_TXT[(d.accounts || []).find((a) => a.account === pasted)?.role] || 'one of its wallets')}. The investigation follows the money from where it first arrived.</div>` : '';
+  h += `<div class="card"><div class="bar"><h2 style="margin:0">${esc(drain ? INC_KIND[d.kind] : A?.attack_type || INC_KIND[d.kind] || 'Incident')}${drain ? ` from ${esc(d.drain?.exchange || 'an exchange')}` : d.target?.account ? ` on ${esc(d.target.account)}` : ''}</h2>${incStatus(d.status)}${d.detected ? '<span class="chip">caught live</span>' : ''}<span class="spacer"></span>
       <span class="muted small">traced ${since(d.traced_ts)} · ${d.stats?.txs || 0} transactions read</span><button onclick="incRetrace('${esc(d.attacker.account)}')">Trace again</button></div>
     <p style="font-size:16px;margin:10px 0"><b>${esc(A?.headline || d.signals?.[0] || '')}</b></p>
     <div class="tiles">${tile('Taken', usd(d.stolen_usd), esc(d.prices_note || ''), 'r')}${tile('Victims', (d.victims || []).length, (d.victims || []).filter((v) => !v.contract).length ? `${(d.victims || []).filter((v) => !v.contract).length} wallets` : 'contracts')}${tile('Attacker accounts', (d.accounts || []).length, `${(d.accounts || []).filter((a) => a.role === 'fake_token').length} fake tokens`)}
@@ -1710,10 +1712,17 @@ async function incidentPage(id) {
     <div class="grid2"><div><h3>Recommendations</h3><ul class="small">${A.recommendations.map((s) => `<li>${esc(s)}</li>`).join('')}</ul></div><div><h3>Open questions</h3><ul class="small muted">${A.open_questions.map((s) => `<li>${esc(s)}</li>`).join('')}</ul></div></div>
     <p class="muted small" style="margin:0">Written from the traced evidence below; the numbers, status and flags come from the rules.</p></div>`;
   // losses and victims
-  h += `<div class="grid2"><div class="card"><h2>What was taken <span class="muted">${esc(d.target?.account || '')}</span></h2><table class="small"><tr><th>Token</th><th class="num">Amount</th><th class="num">USD</th></tr>
-      ${(d.losses || []).map((l) => `<tr><td>${esc(l.symbol)} <span class="muted">${esc(short(l.token, 28))}</span></td><td class="num">${amt(l.amount)}</td><td class="num">${usd(l.usd)}</td></tr>`).join('') || empty(3, '–')}</table></div>
+  h += `<div class="grid2"><div class="card"><h2>What was taken <span class="muted">${esc(drain ? `${(d.victims || []).filter((v) => v.exchange).length} hot wallets` : d.target?.account || '')}</span></h2><table class="small"><tr><th>Token</th><th class="num">Amount</th><th class="num">USD</th></tr>
+      ${(drain ? Object.values((d.victims || []).filter((v) => v.exchange).flatMap((v) => v.tokens).reduce((m, t) => { const k = t.symbol; m[k] = m[k] || { ...t, amount: 0, usd: 0 }; m[k].amount += t.amount || 0; m[k].usd += t.usd || 0; return m; }, {})) : d.losses || []).map((l) => `<tr><td>${esc(l.symbol)} <span class="muted">${esc(short(l.token, 28))}</span></td><td class="num">${amt(l.amount)}</td><td class="num">${usd(l.usd)}</td></tr>`).join('') || empty(3, '–')}</table></div>
     <div class="card"><h2>Victims <span class="muted">who lost value to the attacker</span></h2><table class="small"><tr><th>Account</th><th>Kind</th><th class="num">Lost</th><th>Transactions</th></tr>
-      ${(d.victims || []).map((v) => `<tr><td>${nbAcc(v.account)}${v.label ? ` <span class="muted">${esc(v.label)}</span>` : ''}</td><td>${v.contract ? 'contract (its users / liquidity providers)' : 'wallet'}</td><td class="num r">${usd(v.lost_usd)}</td><td>${(v.txs || []).slice(0, 3).map(nbTx).join(' ')}</td></tr>`).join('') || empty(4, '–')}</table></div></div>`;
+      ${(d.victims || []).map((v) => `<tr><td>${nbAcc(v.account)}${v.label ? ` <span class="muted">${esc(v.label)}</span>` : ''}</td><td>${v.exchange ? `exchange hot wallet${v.how ? `<div class="muted">${esc(v.how)}</div>` : ''}` : v.contract ? 'contract (its users / liquidity providers)' : 'wallet'}</td><td class="num r">${usd(v.lost_usd)}</td><td>${(v.txs || []).slice(0, 3).map(nbTx).join(' ')}</td></tr>`).join('') || empty(4, '–')}</table></div></div>`;
+  // where the money came from (the upstream trace), origin first
+  const SRC_KIND = { exchange: 'exchange', contract: 'contract', wallet: 'wallet' };
+  if ((d.sources || []).length) h += `<div class="card"><h2>Where the money came from <span class="muted">followed back from ${esc(short(pasted || d.attacker.account, 30))}</span></h2>
+    <table class="small"><tr><th>Hop</th><th>From</th><th>What it is</th><th></th><th>To</th><th class="num">Amount</th><th class="num">USD</th><th>When</th><th>Transactions</th></tr>
+    ${[...d.sources].sort((a, b) => b.hop - a.hop || b.usd - a.usd).map((x) => `<tr><td>${x.hop}</td><td>${nbAcc(x.account)}</td><td><span class="v ${x.kind === 'exchange' ? 'neutral' : 'unrated'}">${esc(SRC_KIND[x.kind] || x.kind)}</span> <b>${esc(x.name || '')}</b>${x.how ? `<div class="muted">${esc(x.how)}${x.tx_count ? '' : ''}</div>` : ''}</td><td>→</td><td>${nbAcc(x.to)}</td>
+      <td class="num">${(x.tokens || []).map((t) => `${amt(t.amount)} ${esc(t.symbol)}`).join('<br>')}</td><td class="num">${usd(x.usd)}</td><td>${when(x.first_ts)}</td><td>${(x.txs || []).slice(0, 3).map(nbTx).join(' ')}</td></tr>`).join('')}</table>
+    ${drain ? `<p class="small" style="margin:8px 0 0">The hot wallets sent the money to <b>${esc(short(d.attacker.account, 40))}</b>, ${esc((d.signals || [])[0]?.includes('created by the first') ? 'an account created by the first of these transfers' : 'an account created just before')}. That is where the investigation starts; every wallet it paid out to is followed below.</p>` : ''}</div>`;
   // money trail
   h += `<div class="card"><h2>Where the money went</h2>
     ${ex.length ? `<table class="small"><tr><th>When</th><th>What</th><th class="num">Sent</th><th class="num">USD</th><th>Recipient</th><th>Received</th><th>Transactions</th></tr>${ex.map((e) => `<tr><td>${when(e.ts)}</td><td><b>${esc(e.kind)}</b>${e.deposit_address ? `<div class="muted">1Click deposit ${esc(short(e.deposit_address, 14))}</div>` : ''}</td><td class="num">${amt(e.amount)} ${esc(e.symbol)}</td><td class="num">${usd(e.usd)}</td>

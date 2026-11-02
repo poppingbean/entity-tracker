@@ -513,7 +513,13 @@ const routes = {
   },
   '/api/incident': async (u) => {
     const id = String(u.searchParams.get('id') || '');
-    const doc = await col('incidents').findOne({ _id: id });
+    let doc = await col('incidents').findOne({ _id: id });
+    // an investigation of a wallet that turned out to be part of a bigger one (re-rooted at the wallet that received the money first)
+    if (!doc || doc.status === 'nothing_found') {
+      const acc = id.replace(/^inc:/, '');
+      const bigger = await col('incidents').findOne({ 'accounts.account': acc, status: { $in: ['confirmed', 'suspected'] } }, { sort: { stolen_usd: -1 } });
+      if (bigger) return { incident: bigger, moved_from: acc };
+    }
     return doc ? { incident: doc } : { error: 'no such incident' };
   },
   /** Investigate an account, a tx hash or target:<contract>: the saved incident if there is one, else (run=1) start a trace here. */

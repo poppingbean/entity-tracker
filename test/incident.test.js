@@ -62,3 +62,10 @@ test('AI write-up: thousands and millions read as such', () => {
   assert.deepEqual(unverifiedAmounts({ s: 'about $63k was taken, $51k went to Ethereum' }, p), []);
   assert.deepEqual(unverifiedAmounts({ s: 'about $3 million was taken' }, p), ['$3 million']);
 });
+
+test('detector: large transfers out of exchange hot wallets, not to other exchange accounts', async () => {
+  const { exchangeOutflows } = await import('../src/incident/detect.js');
+  const nearTx = (from, to, tx) => ({ ...receipt(from, to, [], [{ Transfer: { deposit: '8091108600000000000000000000000' } }]), tx_hash: tx });
+  const b = { block: { header: { height: 7, timestamp_nanosec: '1000000000' } }, shards: [{ receipt_execution_outcomes: [nearTx('hot1', 'fresh', 'T1'), nearTx('hot1', 'binancecold3.near', 'T2'), nearTx('alice.near', 'fresh', 'T3')] }] };
+  assert.deepEqual(exchangeOutflows(b, new Set(['hot1'])).map((f) => [f.exchange, f.to, f.tx]), [['hot1', 'fresh', 'T1']]);
+});

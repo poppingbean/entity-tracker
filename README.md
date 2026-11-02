@@ -129,6 +129,7 @@ Beside the box, a **live feed** refreshes every 15 seconds. It shows:
 
 Each investigation (`/firewall/<incident>`) rebuilds the incident from the chain, the way an investigator would by hand:
 
+- **Where the money came from:** followed back hop by hop to an exchange, a contract or an older wallet. Exchange hot wallets are recognised even without a name; one that sweeps to `binancecold3.near` is Binance's. An exchange hot wallet emptied into a just-created account is an **exchange hot-wallet drain**: the exchange is the victim, and the case is re-rooted at the account that got the money first, so every wallet it paid out to is followed.
 - **Attacker:** the signer, the sub-accounts and fake tokens it deployed, the NEAR Intents accounts that withdrew to it, the cash-out wallets, and who created and funded the first account.
 - **Target and attack:** the contract that paid out for nothing in return, and the attack transactions with their calls.
 - **Losses and victims:** per token in USD at today's prices; every account whose value ended up with the attacker.
@@ -144,6 +145,7 @@ Confirmed incidents raise an `incident` alert and flag the attacker's accounts f
 - A receiver that took at least `INCIDENT_MIN_USD` is a suspect when either:
   - its account is new (`INCIDENT_FRESH_HOURS`), or it deployed token contracts of its own the day before (the fake-token pattern behind the Veax and Rhea exploits); or
   - it pulled several tokens at once.
+- An exchange hot wallet sending `INCIDENT_ALWAYS_USD` or more to an account created moments before is a suspect too (an exchange drain).
 - A suspect raises a `drain_suspected` alert at once and is traced automatically.
 
 Replaying the Veax blocks, the attacker stands out at $62.8k in 5 tokens across 3 transactions; the next-largest receiver took $767.
