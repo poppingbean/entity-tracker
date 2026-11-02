@@ -10,6 +10,9 @@ import { accountReputation } from './context.js';
 import { checkRequest } from './service.js';
 import { lookalikeOf, TRUSTED } from './rules.js';
 import { toNear } from './decode.js';
+import { flowsOfTx } from '../incident/flows.js';
+import { valueOf } from '../incident/prices.js';
+import { config } from '../config.js';
 
 const B58 = '[1-9A-HJ-NP-Za-km-z]';
 const TX_HASH = new RegExp(`^${B58}{43,44}$`);
@@ -93,7 +96,30 @@ export async function inspect(raw) {
   const p = parseInput(raw);
   const t0 = Date.now();
   const r = await route(p);
+  await withIncidents(p, r).catch(() => {});
   return { input_kind: p.kind, ...r, checked_ts: Date.now(), took_ms: Date.now() - t0 };
+}
+
+const INC_FIELDS = { status: 1, kind: 1, 'attacker.account': 1, 'target.account': 1, stolen_usd: 1, held_usd: 1, started_ts: 1, first_seen_ts: 1, 'ai.headline': 1, 'ai.attack_type': 1, 'trail.exit_usd': 1, accounts: 1 };
+const incRow = (d, role) => ({ id: d._id, role, status: d.status, kind: d.kind, attacker: d.attacker?.account, target: d.target?.account || null, stolen_usd: d.stolen_usd, held_usd: d.held_usd,
+  when: d.started_ts || d.first_seen_ts, headline: d.ai?.headline || null, attack_type: d.ai?.attack_type || null, exits: d.trail?.exit_usd || {} });
+/** The hacks an answer touches: the transaction was one of the attack's, the account is the attacker's (or one of its wallets), or the contract was hit. */
+async function withIncidents(p, r) {
+  const id = r.account || (p.kind === 'account' ? p.value : null), hash = p.kind === 'tx' ? p.value : null;
+  if (!id && !hash) return;
+  const or = [...(hash ? [{ 'attack_txs.tx': hash }] : []), ...(id ? [{ 'accounts.account': id }, { 'target.account': id }] : [])];
+  const docs = await col('incidents').find({ $or: or, status: { $in: ['confirmed', 'suspected'] } }, { projection: INC_FIELDS }).sort({ started_ts: -1 }).limit(5).toArray();
+  if (!docs.length) return;
+  r.incidents = docs.map((d) => {
+    const acc = (d.accounts || []).find((a) => a.account === id);
+    const role = hash ? 'attack_tx' : d.target?.account === id ? 'target' : acc?.role || 'attacker';
+    return incRow(d, role);
+  });
+  const own = r.incidents.find((x) => ['attack_tx', 'attacker', 'fake_token', 'sub_account', 'contract', 'cash_out_wallet', 'intents_account'].includes(x.role) && x.status === 'confirmed');
+  if (own) {
+    r.verdict = 'danger';
+    r.headline = own.role === 'attack_tx' ? `This transaction is part of a hack: ${own.target || 'wallets'} lost ~$${Math.round(own.stolen_usd).toLocaleString('en-US')}.` : `Part of a hack: ${own.headline || `~$${Math.round(own.stolen_usd).toLocaleString('en-US')} taken from ${own.target || 'wallets'}`}`;
+  }
 }
 async function route(p) {
   switch (p.kind) {
@@ -131,11 +157,31 @@ async function inspectTx(hash) {
   if (!points.length && !check.error) points.push(pt('good', 'Nothing risky found in what it did.'));
   points.unshift(pt(failed ? 'warn' : 'info', failed ? 'It failed on chain (part or all of it did not happen; attached NEAR is normally refunded).' : 'It went through on chain.'));
   const did = (check.transactions || []).flatMap((x) => x.actions.map((a) => a.text)).filter(Boolean);
+  const payout = await bigPayout(t).catch(() => null);
+  if (payout) points.push(pt('warn', `${payout.from} paid ~$${Math.round(payout.usd).toLocaleString('en-US')} (${payout.tokens.join(', ')}) to ${short(payout.to)} in this transaction, for ~$${Math.round(payout.paid_usd).toLocaleString('en-US')} in return. If that was not a normal withdrawal, investigate it as a hack.`));
   const v = check.verdict === 'block' || check.verdict === 'warn' ? 'danger' : check.verdict === 'caution' ? 'caution' : check.error ? 'unknown' : 'safe';
   return { kind: 'tx', verdict: v, headline: v === 'safe' ? `A normal transaction from ${short(tx.signer_id)} to ${short(tx.receiver_id)}.` : check.summary,
-    facts: { from: tx.signer_id, to: tx.receiver_id, when: ts, status: failed ? 'failed' : 'success', did }, points,
+    facts: { from: tx.signer_id, to: tx.receiver_id, when: ts, status: failed ? 'failed' : 'success', did }, points, ...(payout ? { investigate: { q: hash, payout } } : {}),
     actions: v === 'danger' ? ['If you signed this by mistake: check your wallet for keys you do not recognise and remove them, and move funds to a new wallet if a full-access key was added.'] : [],
     links: { explorer: nearblocks('txns', hash) } };
+}
+
+/** The largest value a contract paid one account in a transaction, net of what it got back from it, when it is over the incident threshold. */
+async function bigPayout(t) {
+  const per = new Map();
+  for (const f of flowsOfTx(t)) {
+    if (/^(nft|mint|burn|intents|chain):/.test(f.token) || /^(mint|burn|intents|chain):/.test(f.from + f.to)) continue;
+    for (const [k, sign] of [[`${f.from}>${f.to}`, 1], [`${f.to}>${f.from}`, -1]]) { const x = per.get(k) || []; x.push({ ...f, sign }); per.set(k, x); }
+  }
+  let best = null;
+  for (const [k, fs] of per) {
+    const [from, to] = k.split('>');
+    if (['wrap.near', 'intents.near', 'aggregatedex.near'].includes(from) || from === 'system') continue;
+    let got = 0, paid = 0; const tokens = new Set();
+    for (const f of fs) { const v = await valueOf(f.token, f.raw); if (f.sign > 0) { got += v.usd || 0; if (v.usd) tokens.add(v.symbol); } else paid += v.usd || 0; }
+    if (got - paid >= config.incidents.minUsd && (!best || got - paid > best.usd - best.paid_usd)) best = { from, to, usd: got, paid_usd: paid, tokens: [...tokens].slice(0, 6) };
+  }
+  return best;
 }
 
 // ------------------------------------------------------------------------------------------------ a transaction a wallet will sign
@@ -278,7 +324,7 @@ async function inspectWallet(id, state) {
   const flagged = (rep?.flags || []).some((f) => f.severity === 'critical');
   return { kind: 'wallet', verdict: v, account: id, headline: flagged ? 'Do not send anything to this account: it is flagged.' : v === 'danger' ? 'This wallet has a serious problem: act now.' : v === 'caution' ? ((rep?.flags || []).length ? 'Be careful: this account is linked to something reported.' : 'This wallet is fine, but check the points below.') : 'This wallet looks safe.',
     facts: { balance_near: toNear(state.amount), full_access_keys: keys ? full.length : null, app_keys: apps.length, apps: appRows, tokens_held: held.length, label: rep?.label || null },
-    points, actions: actions.length ? actions : v === 'safe' ? [] : ['Review the points above in your wallet.'], links: { explorer: nearblocks('address', id), wallet: `/wallets/${encodeURIComponent(id)}` } };
+    points, actions: flagged ? ['Do not send tokens or NEAR to it, buy what it sells, or approve anything it asks for.'] : actions.length ? actions : v === 'safe' ? [] : ['If this is your wallet, review the points above in it.'], links: { explorer: nearblocks('address', id), wallet: `/wallets/${encodeURIComponent(id)}` } };
 }
 
 // ------------------------------------------------------------------------------------------------ a token by name

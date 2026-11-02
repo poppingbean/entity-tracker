@@ -6,6 +6,9 @@ An online sibling of the launch scanner. Instead of trading, it answers one ques
 - **Groups them by on-chain relationships:** shared funders up the funding chain, NEAR flowing between wallets or into a shared destination, near-simultaneous buying across several tokens, and funding by a token's creator.
 - **Evaluates each group** from how its early buys actually turned out (ROI at 1 h / 6 h / 24 h, rug exposure, insider links, fresh-wallet and synchronised-buy patterns) with a rule score, then asks **NEAR AI** to judge it: good / bad / neutral, with reasons and red flags.
 - **Investigates tokens and NFT collections** on demand: an on-chain analysis page per token, and an AI analyst that writes a TrustFlow Research report and a Telegram post from it.
+- **Is it safe?** One box (**Safety Check**) answers for anything a user pastes: a wallet, a token or its name, an NFT, any contract, a transaction, a link, a website, or what a wallet is about to sign. Wallets and dApps get the same answers through a public API, including a transaction firewall called right before signing.
+- **Audits every new contract** deployed on NEAR, of any type (tokens, NFTs, pools, lending, DAOs, bridges …): what it is, the powers its code gives someone over users, and who holds them.
+- **Catches hacks as they happen and traces them:** money leaving a DeFi protocol for an account that looks like an attacker is flagged within seconds. The incident is rebuilt from the chain: the attacker's accounts, the target, the losses and victims, and where the money went, across chains.
 - **Warns in time:** alerts on rugs in progress, contract changes, large buys, sells and transfers of anything on a watchlist, on the dashboard, through the Telegram bot [@safenear_bot](https://t.me/safenear_bot), an API or webhooks.
 - **Measures itself:** every gate, score and AI verdict is scored against what happened afterwards (the Accuracy page).
 - **Treats chain data as untrusted:** token names, metadata and memos are cleaned before any AI reads them, and the AI can never make something look safer than the rules say.
@@ -86,14 +89,14 @@ A public service any wallet or dApp can call **right before the user signs**: `P
 - **Rugs, from the tracker's own data:** sending to dev-rug creators, buying tokens that rugged (tokens inside Ref swap messages included), high-risk contract audits.
 - **Mistakes:** sending almost everything you hold, a receiver that doesn't exist, call data aimed at AI reviewers.
 
-The verdict always comes from rules (`src/firewall/rules.js`); `"explain": true` adds a plain-language AI explanation that can never change it. Lookups run in parallel under a 2.5 s budget (`context.complete: false` when some didn't answer). `GET /api/v1/account?id=` gives one account's reputation for "send to" screens. Open to any origin, no password; 300 checks per 10 minutes per IP (`FIREWALL_PER_IP_10MIN`), unlimited with a key from `FIREWALL_API_KEYS` (`x-api-key`); bodies up to 2 MB (`FIREWALL_MAX_BODY_BYTES`). Nothing about a transaction is stored, only counters per verdict. Operators report accounts with `node src/cli.js flag <account> critical|high|medium "<reason>"` (`firewall_flags`; `unflag` undoes it), and `node src/cli.js check-tx '<json>'` runs a check from the command line. The **Safety Check** page (`/firewall`) is the version for everyone: one box that takes a wallet, a token (or its name), an NFT, a contract, a transaction hash, an explorer or marketplace link, a website or a transaction to sign, and answers safe / be careful / danger in plain words with what to do (`GET /api/v1/inspect?q=`, `src/firewall/inspect.js`); the raw transaction check sits under "For developers". Integration guide: [docs/tx-firewall.md](docs/tx-firewall.md).
+The verdict always comes from rules (`src/firewall/rules.js`); `"explain": true` adds a plain-language AI explanation that can never change it. Lookups run in parallel under a 2.5 s budget (`context.complete: false` when some didn't answer). `GET /api/v1/account?id=` gives one account's reputation for "send to" screens. Open to any origin, no password; 300 checks per 10 minutes per IP (`FIREWALL_PER_IP_10MIN`), unlimited with a key from `FIREWALL_API_KEYS` (`x-api-key`); bodies up to 2 MB (`FIREWALL_MAX_BODY_BYTES`). Nothing about a transaction is stored, only counters per verdict. Operators report accounts with `node src/cli.js flag <account> critical|high|medium "<reason>"` (`firewall_flags`; `unflag` undoes it), and `node src/cli.js check-tx '<json>'` runs a check from the command line. The **Safety Check** page (`/firewall`) is the version for everyone. One box takes a wallet, a token (or its name), an NFT, a contract, a transaction hash, an explorer or marketplace link, a website or a transaction to sign, and answers safe / be careful / danger in plain words with what to do (`GET /api/v1/inspect?q=`, `src/firewall/inspect.js`). The same answer shows any hack the input is linked to, and the page has the live security feed (see *Hacks and incidents*). The raw transaction check sits under "For developers". Integration guide: [docs/tx-firewall.md](docs/tx-firewall.md).
 
 ## Contract audit
 
 Ported from the TrustFlow backend (`contractAuditService`, `nearContractAnalysis`, `nearRpcClient`): a NEAR token / contract audit scored into a **risk** (0-100, higher = riskier: low / medium / high / critical) and a separate **trust** score, with the full checklist (passed checks are listed too):
 
 - **Access keys:** a full-access key lets its holder redeploy or drain the contract; "locked" only counts as trust when the code has no backdoor.
-- **Code:** the WASM exports are analysed offline. A fake NEP-145 `storage_*` method is the classic honeypot backdoor (NEARDOGE's `storage_unstake`); privileged methods (blacklist / freeze / pause / mint / upgrade ...), owner-only guards and non-standard methods are flagged, standards, getters and callbacks are not.
+- **Code:** the WASM exports are analysed offline. A fake NEP-145 `storage_*` method in a **token** is the classic honeypot backdoor (NEARDOGE's `storage_unstake`); read-only `storage_*` views and other contract types are not flagged (a DEX's `storage_constants` is fine); privileged methods (blacklist / freeze / pause / mint / upgrade ...), owner-only guards and non-standard methods are flagged, standards, getters and callbacks are not.
 - **Behaviour:** recent sells (do holders' sells succeed, across how many wallets) and privileged accounts calling non-standard methods on other holders' accounts.
 - **Tax:** the launchpad's `get_tax` (buy / sell bps).
 
@@ -105,13 +108,26 @@ Every contract deployed on NEAR is audited automatically, and the audit understa
 
 - **Once per code** (`code_audits`): the contract's **type** (token, NFT collection, AMM, liquid staking, validator pool, lending, DAO, multisig, bridge, oracle, intents / router, launchpad / factory, order book, NFT marketplace, farm, lockup, smart wallet) and the **standards** it implements; the **powers** its methods give someone over users (upgrade, account control, move users' funds, freeze, mint, fees, oracle, admins, metadata, royalties), judged per type (`force_withdraw` is normal on a bridge, critical on a meme token); **what each method can really do**: the code is decompiled (`wabt`) and each method's call graph walked to the NEAR host functions it reaches, which catches a harmless-sounding method that deploys code or adds keys, and a power method that never checks who calls it; the **claimed source** (NEP-330): the repository at that commit must define every deployed method.
 - **Per account** (`audits.auto`): **who controls it** (full-access keys, the owner / admins / guardians it names, DAO policies, and what each controller is: a DAO, a multisig, a locked contract, a wallet, with its record in the tracker: dev-rug blacklist, rugged launches, reports), the **checks for its type** (NFT media on a mutable server, the owner's share, royalties, supply cap; staking fees; liquid-staking share price; DAO council; bridge pauses), **recent behaviour** (admin calls on users, withdrawals failing for many wallets), the **deployer**, and **what a redeploy changed**. A DAO or multisig owner lowers a power's severity; a flagged owner raises it.
-- **AI** where rules run out: typing unrecognised contracts and labelling unknown methods (Haiku, once per code), a deep review of contracts that hold value or look risky from the capability map, the claimed source's admin functions and behaviour (Sonnet), explaining a redeploy, and a plain-language summary. Code is attacker-written data, so it goes through the injection guard; the AI can only add risk, its labels are capped at medium, and an AI finding is kept only when the method or string it cites really exists. `AUTO_AUDIT_AI_PER_DAY` (200) caps the calls.
+- **AI** where rules run out: typing unrecognised contracts and labelling unknown methods (NEAR AI's fast model, `NEAR_AI_MODEL`, once per code), a deep review of contracts that hold value or look risky from the capability map, the claimed source's admin functions and behaviour (the analysis model, `NEAR_AI_ANALYSIS_MODEL`), explaining a redeploy, and a plain-language summary. Code is attacker-written data, so it goes through the injection guard; the AI can only add risk, its labels are capped at medium, and an AI finding is kept only when the method or string it cites really exists. `AUTO_AUDIT_AI_PER_DAY` (200) caps the calls.
 
 Where it shows: the **Contract audit** page (`/audit`) has the **New contracts** feed (filter by type and level, queue status) and the automated audit above the token checks for any account; NFT collection pages get a **Contract safety** card; alerts `contract_risk` (a new contract that is critical, or deployed / owned by a flagged account) and `contract_power_added` (a redeploy that adds powers); the transaction firewall turns strong findings into flags and queues contracts it hasn't seen; and `GET /api/v1/contract?id=` gives the audit to wallets and dApps. Settings: `AUTO_AUDIT_*`, `GITHUB_TOKEN` (optional). Design and measurements: [docs/auto-audit-design.md](docs/auto-audit-design.md).
 
 ## Hacks and incidents
 
-When a contract is drained or a drainer empties wallets, the **Hacks** page (`/incidents`) rebuilds the incident from the chain, the way an investigator would by hand. Paste the attacker's account, an attack transaction (or its NearBlocks / Pikespeak link), or `target:<contract>`:
+Hacks are part of **Safety Check** (`/firewall`), not a separate page. One box answers "is it safe?" for anything pasted, and the same answer shows the hacks it is linked to:
+- a transaction that was one of an attack's;
+- an account that is the attacker, one of its fake tokens or a cash-out wallet;
+- a contract that was hit.
+
+A transaction where a contract paid out a lot gets an "Investigate as a hack" button. Every contract gets "Look for hacks on this contract", which reads up to 6,000 of its recent transactions. Typing `target:<contract>` does the same.
+
+Beside the box, a **live feed** refreshes every 15 seconds. It shows:
+- where the chain watch is (block, lag);
+- every newly deployed contract as the automated audit checks it;
+- drains caught live, and traced hacks;
+- counts for the last 24 hours.
+
+Each investigation (`/firewall/<incident>`) rebuilds the incident from the chain, the way an investigator would by hand:
 
 - **Attacker:** the signer, the sub-accounts and fake tokens it deployed, the NEAR Intents accounts that withdrew to it, the cash-out wallets, and who created and funded the first account.
 - **Target and attack:** the contract that paid out for nothing in return, and the attack transactions with their calls.
@@ -119,9 +135,9 @@ When a contract is drained or a drainer empties wallets, the **Hacks** page (`/i
 - **Money trail:** hop by hop, through NEAR Intents **1Click** swaps (the destination chain, recipient address and destination transaction come from 1Click's public status), exchanges and bridges.
 - **What's left:** what the attacker still holds, and which of it an issuer can freeze (USDT, USDC).
 
-The **AI analyst** (Sonnet) writes the report: how the attack worked, impact, money trail, what can still be done, recommendations and open questions. Every dollar amount it quotes is checked against the evidence.
+The **NEAR AI analyst** (`NEAR_AI_ANALYSIS_MODEL`) writes the report: how the attack worked, impact, money trail, what can still be done, recommendations and open questions. Every dollar amount it quotes is checked against the evidence.
 
-Confirmed incidents raise a `incident` alert and flag the attacker's accounts for the transaction firewall and Safety Check. An exploited contract shows the incident on Safety Check.
+Confirmed incidents raise an `incident` alert and flag the attacker's accounts for the transaction firewall and Safety Check. An exploited contract shows the incident on Safety Check.
 
 **Live detection** runs on the blocks the deploy watcher already reads:
 - It sums every flow out of a DeFi protocol per receiver over 30 minutes.
@@ -136,6 +152,8 @@ More access:
 - CLI: `node src/cli.js incident <account | tx hash | target:<contract>>`.
 - API: `GET /api/v1/incidents`, `GET /api/v1/incident?id=`.
 - Collections: `incidents`, `incident_queue`, `incident_detections`.
+
+How the tracer and the detector work, with the Veax exploit as the worked example: [docs/incidents.md](docs/incidents.md).
 
 ## On-chain analysis
 
@@ -209,12 +227,13 @@ Names come from built-in patterns (Binance, OKX, Bybit, Meteor, Intear ...), the
 
 ## Web UI
 
-The UI is organised around two ways in, **tokens** and **wallets / groups**, plus the scanner. A search box at the top (press `/`) finds tokens by symbol or account, early wallets by account, and groups by id, AI label or member wallet. A NEAR account it doesn't know can still be sent to the contract audit. Dark by default, with a light theme toggle.
+The UI is organised around **tokens**, **wallets / groups** and **safety** (Safety Check, contract audits, hacks), plus the scanner. AI write-ups are credited to **NEAR AI**: the page never names the model, and API responses drop `model` fields. A search box at the top (press `/`) finds tokens by symbol or account, early wallets by account, and groups by id, AI label or member wallet. A NEAR account it doesn't know can still be sent to the contract audit. Dark by default, with a light theme toggle.
 
 | Section | Pages |
 |---|---|
-| **Explore** (`/explore`, home) | Headline counts (groups by tag, rugged tokens, linked wallets), tokens where rated wallets bought early (cards with an early-money bar), best (win80 / win50) and largest loss groups, latest launches. |
+| **Explore** (`/explore`, home) | Headline counts (tokens, early wallets, winning and loss groups, rugged tokens, blacklisted creators, contracts audited and hacks in the last 24 h), then two columns: highest trading volume and latest launches; hacks & drains and new contracts with their audit level; latest alerts and an "Is it safe?" box with the live watch status. |
 | **Tokens & Scanner** (one menu) | `/analysis`, `/analysis/<token>`: the on-chain analysis and AI analyst report. `/tokens`: one page for every launch: the scanner's first check, gates and decision, the early-money bar by tag, outcome, rug flags (price crash / creator dump / dev-rug blacklist); tabs All · New (24 h) · Checked · Passed gates · Bought (sim) · Rugged, plus launchpad poll health. `/signals`: recent tokens with winners in / loss wallets in / mixed. `/tokens/<id>`: outcome tiles, why it counts as rugged, early money by tag, a **bubble map** of the early buyers clustered by group, early buyers with their tags, contract audit summary. `/sim` (simulated wallet with simulated sell buttons), `/scans` and `/scans/<id>` (gate checks and AI reviews), `/audit` and `/audit/<account>`. `/monitor` now opens `/tokens`. |
+| **Safety Check** | `/firewall`: one box for anything pasted, with the hacks it is linked to and buttons to investigate a transaction or a contract as a hack; beside it the live feed (the chain watch, new contracts as they are audited, drains caught live, traced hacks, 24 h counts; refreshed every 15 s). `/firewall/<incident>`: one investigation (NEAR AI analyst report, losses, victims, money trail across chains, attacker accounts, what is still held, attack transactions, timeline). The old `/incidents` links open here. |
 | **Alerts** | `/alerts`: the alert feed (all, high only, my watchlist), the watchlist with its search, and the Telegram bot guide. |
 | **Accuracy** | `/accuracy`: how often the gates, scores, AI analyst and group verdicts were right. |
 | **NFT Collectibles** | `/nfts`, `/nfts/<contract>`: collections, mint, team mints, minter groups, market and wash trades, holders, AI analyst. |
@@ -247,7 +266,7 @@ The UI and API are read-only except the simulated sell button (`POST /api/sim/se
 
 ## MongoDB collections
 
-`tokens` (launches, outcome, status) · `trades` (swaps) · `transfers` (token hand-offs between wallets) · `entries` (early wallet × token, with ROI per checkpoint) · `wallets` (profile, funding chain, outflows, track record, group) · `edges` (funding and flow edges) · `audits` (contract audits) · `analyses` (token analyses and NEAR AI assessments) · `nft_collections` / `nft_events` / `nft_analyses` (NFT collectibles) · `scans` (gate checks + AI reviews) · `followups` · `sim_account` / `sim_positions` / `sim_fills` / `sim_equity` (simulated wallet) · `blacklist` · `templates` · `entities` (every funder / destination account incl. exchange wallets) · `labels` (hand-set names) · `clusters` (groups: members, links, metrics, tokens, rule + AI verdicts) · `cluster_history` · `events` (30-day log) · `alerts` · `watchlists` · `contract_state` · `token_flags` (alerts) · `analysis_runs` (every AI analyst run with its evidence) · `ground_truth` · `feedback` (accuracy) · `meta` (cursors, worker heartbeat, accuracy results).
+`tokens` (launches, outcome, status) · `trades` (swaps) · `transfers` (token hand-offs between wallets) · `entries` (early wallet × token, with ROI per checkpoint) · `wallets` (profile, funding chain, outflows, track record, group) · `edges` (funding and flow edges) · `audits` (contract audits) · `analyses` (token analyses and NEAR AI assessments) · `nft_collections` / `nft_events` / `nft_analyses` (NFT collectibles) · `scans` (gate checks + AI reviews) · `followups` · `sim_account` / `sim_positions` / `sim_fills` / `sim_equity` (simulated wallet) · `blacklist` · `templates` · `entities` (every funder / destination account incl. exchange wallets) · `labels` (hand-set names) · `clusters` (groups: members, links, metrics, tokens, rule + AI verdicts) · `cluster_history` · `events` (30-day log) · `alerts` · `watchlists` · `contract_deploys` / `audit_queue` / `code_audits` (automated audits) · `firewall_flags` (reported and incident accounts) · `incidents` / `incident_queue` / `incident_detections` (hacks) · `contract_state` · `token_flags` (alerts) · `analysis_runs` (every AI analyst run with its evidence) · `ground_truth` · `feedback` (accuracy) · `meta` (cursors, worker heartbeat, accuracy results, `security:watch` for the live feed).
 
 ## Configuration
 

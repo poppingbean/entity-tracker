@@ -70,7 +70,10 @@ export async function watchDeploys() {
   }
   await metaSet('audit:deploy_cursor', last);
   // the same blocks feed the live hack detector (protocol drains)
-  await scanBlocks(blocks).catch((e) => warn(`incident detector: ${e.message}`));
+  const drains = await scanBlocks(blocks).catch((e) => { warn(`incident detector: ${e.message}`); return []; });
+  // what the live feed shows: where the watch is, and that it is moving
+  const lastTs = blocks.length ? Number(blocks[blocks.length - 1].block.header.timestamp_nanosec) / 1e6 : null;
+  await metaSet('security:watch', { height: last, tip: top, behind: top - last, block_ts: lastTs, blocks: last - cursor, deploys: found.length, drains: drains.length, tick_ts: Date.now() });
   return { blocks: last - cursor, deploys: found.length, behind: top - last };
 }
 

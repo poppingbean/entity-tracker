@@ -78,6 +78,8 @@ const POSTS = {
 };
 /** Market cap now of some tokens: the last trade's price x total supply (from the first check, else read once and kept on the token) x NEAR in USD.
  *  Returns Map(id -> { near, usd, last_ts }). */
+/** The AI is shown as NEAR AI: which model runs behind it stays on the server. */
+const noModel = (k, v) => (k === 'model' || k === 'models' ? undefined : v); // JSON.stringify replacer for every API response
 async function marketCapNow(ids) {
   const out = new Map();
   if (!ids.length) return out;
@@ -113,7 +115,7 @@ const CORS = { 'access-control-allow-origin': '*', 'access-control-allow-methods
 const FW_DOC = { name: 'Safe Near transaction firewall', version: FIREWALL_VERSION, docs: 'https://github.com/poppingbean/entity-tracker/blob/main/docs/tx-firewall.md',
   endpoints: { 'POST /api/v1/tx/check': 'check transactions before they are signed', 'GET /api/v1/account?id=<account>': 'reputation of one account', 'GET /api/v1/contract?id=<account>': 'the automated audit of a contract', 'GET /api/v1/inspect?q=<wallet | contract | tx hash | link>': 'is it safe? one answer for whatever is pasted', 'GET /api/v1/incidents': 'traced hacks and scams', 'GET /api/v1/incident?id=<id>': 'one incident: attacker accounts, target, losses, victims, money trail' } };
 async function firewallApi(req, res, u) {
-  const send = (code, body) => res.writeHead(code, { 'content-type': 'application/json', 'cache-control': 'no-store', ...CORS }).end(JSON.stringify(body));
+  const send = (code, body) => res.writeHead(code, { 'content-type': 'application/json', 'cache-control': 'no-store', ...CORS }).end(JSON.stringify(body, noModel));
   if (req.method === 'OPTIONS') { res.writeHead(204, CORS).end(); return; }
   const keyed = config.firewall.apiKeys.includes(String(req.headers['x-api-key'] || ''));
   if (!keyed && limited(fwHits, clientIp(req), config.firewall.perIp10Min)) { send(429, { error: `rate limit: ${config.firewall.perIp10Min} requests per 10 minutes per IP (ask for an API key for more)` }); return; }
@@ -248,7 +250,7 @@ const routes = {
     return {
       now: Date.now(), tokens, tokenStatus: tokStatus.map((r) => ({ status: r._id, n: r.n })), clusterTag: clusterTag.map((r) => ({ tag: tagOf(r._id), n: r.n, wallets: r.wallets })), rugged, netWallets, blacklisted, groupsWithCreators,
       wallets, profiled, entries, worker, latest: latest.map(strip), topWin: topWin.map(strip), topLoss: topLoss.map(strip), topVolume,
-      ai: { enabled: aiEnabled(), model: config.ai.model, ...(worker?.ai || {}) }, db: config.mongo.dbName,
+      ai: { enabled: aiEnabled(), ...(worker?.ai || {}) }, db: config.mongo.dbName,
     };
   },
 
@@ -357,7 +359,7 @@ const routes = {
       col('tokens').countDocuments({ 'outcome.rugged': true }), col('tokens').estimatedDocumentCount(),
     ]);
     const worker = await metaGet('worker');
-    return { now, scan: config.scan, window24h: { launches: c24, scanned, passed, bought }, launchesLast3h: newTokens, ruggedTotal, tokensTotal, polls, worker, ai: { enabled: aiEnabled(), model: config.ai.model, ...(worker?.ai || {}) },
+    return { now, scan: config.scan, window24h: { launches: c24, scanned, passed, bought }, launchesLast3h: newTokens, ruggedTotal, tokensTotal, polls, worker, ai: { enabled: aiEnabled(), ...(worker?.ai || {}) },
       rows: recent.map((t) => ({ id: t._id, symbol: t.symbol, launchpad: t.launchpad, live_ts: t.live_ts, status: t.status, scan: t.scan || null, scan_done: !!t.scan_done, entries_n: t.entries_n ?? null, rugged: !!t.outcome?.rugged, peak_multiple: t.outcome?.peak_multiple ?? null, last_multiple: t.outcome?.last_multiple ?? null, now_multiple: t.ledger?.last_multiple ?? null })) };
   },
 
@@ -409,7 +411,7 @@ const routes = {
     return { id: _id, ...rest };
   },
 
-  '/api/config': async () => ({ scan: config.scan, rules: config.rules, analyst: config.analyst, sim: config.sim, followUp: config.followUp, entry: config.entry, outcome: config.outcome, launchpads: config.launchpads, ai: { enabled: aiEnabled(), model: config.ai.model }, db: config.mongo.dbName }),
+  '/api/config': async () => ({ scan: config.scan, rules: config.rules, analyst: config.analyst, sim: config.sim, followUp: config.followUp, entry: config.entry, outcome: config.outcome, launchpads: config.launchpads, ai: { enabled: aiEnabled(), provider: 'NEAR AI' }, db: config.mongo.dbName }),
 
   // ------------------------------------------------------------ contract audit
   '/api/audit': async (u, req) => {
@@ -468,6 +470,33 @@ const routes = {
     }
     const cur = auditJob(id);
     return { id, auto: doc?.auto || null, current: doc?.auto?.v === AUTO_AUDIT_V, job: cur ? { running: cur.running, started: cur.started, error: cur.error } : null };
+  },
+  /** The live security feed: where the chain watch is, new contracts as they are audited, drains caught live and traced hacks. */
+  '/api/security/live': async (u) => {
+    const only = u.searchParams.get('only'); // '' | hacks | contracts | risky
+    const day = Date.now() - 86400e3;
+    const [watchMeta, cursor, deploys, detections, incidents, counts] = await Promise.all([
+      metaGet('security:watch'), col('meta').findOne({ _id: 'audit:deploy_cursor' }),
+      only === 'hacks' ? [] : col('contract_deploys').find({}, { projection: { account: 1, kind: 1, by: 1, signer: 1, ts: 1 } }).sort({ ts: -1 }).limit(only === 'risky' ? 400 : 60).toArray(),
+      only === 'contracts' || only === 'risky' ? [] : col('incident_detections').find({}).sort({ ts: -1 }).limit(20).toArray(),
+      only === 'contracts' || only === 'risky' ? [] : col('incidents').find({ status: { $in: ['confirmed', 'suspected'] } }, { projection: { status: 1, kind: 1, 'attacker.account': 1, 'target.account': 1, stolen_usd: 1, held_usd: 1, started_ts: 1, first_seen_ts: 1, 'ai.headline': 1, 'ai.attack_type': 1, 'trail.exit_usd': 1, detected: 1 } }).sort({ first_seen_ts: -1 }).limit(20).toArray(),
+      Promise.all([col('contract_deploys').countDocuments({ ts: { $gt: day } }), col('audits').countDocuments({ 'auto.ts': { $gt: day } }), col('audits').countDocuments({ 'auto.ts': { $gt: day }, 'auto.level': { $in: ['high', 'critical'] } }),
+        col('incident_detections').countDocuments({ ts: { $gt: day } }), col('incidents').countDocuments({ first_seen_ts: { $gt: day }, status: 'confirmed' })]),
+    ]);
+    // a worker from before the live feed only moves the deploy cursor: that is enough to tell the watch is running
+    const watch = watchMeta || (cursor ? { height: cursor.value, tick_ts: cursor.ts, behind: null } : null);
+    const latest = new Map(); for (const d of deploys) if (!latest.has(d.account)) latest.set(d.account, d);
+    const audits = new Map((await col('audits').find({ _id: { $in: [...latest.keys()] } }, { projection: { 'auto.label': 1, 'auto.level': 1, 'auto.control.summary': 1, 'auto.summary.headline': 1, 'auto.family_n': 1, 'auto.findings': { $slice: 3 } } }).toArray()).map((a) => [a._id, a.auto]));
+    let contracts = [...latest.values()].map((d) => { const a = audits.get(d.account); return { type: 'contract', ts: d.ts, account: d.account, by: d.signer || d.by, how: /Global/.test(d.kind) ? 'shared code' : 'own code',
+      label: a?.label || null, level: a?.level || null, control: a?.control?.summary || null, family_n: a?.family_n || null, headline: a?.summary?.headline || (a?.findings || []).find((f) => f.severity !== 'info')?.title || null, audited: !!a }; });
+    if (only === 'risky') contracts = contracts.filter((c) => ['high', 'critical'].includes(c.level));
+    const items = [
+      ...contracts.slice(0, 40),
+      ...detections.map((d) => ({ type: 'drain', ts: d.ts, receiver: d.receiver, protocol: d.protocol, usd: d.usd, reasons: d.reasons, txs: d.txs })),
+      ...incidents.map((i) => ({ type: 'hack', ts: i.started_ts || i.first_seen_ts, id: i._id, status: i.status, kind: i.kind, attacker: i.attacker?.account, target: i.target?.account || null, stolen_usd: i.stolen_usd, held_usd: i.held_usd, headline: i.ai?.headline || null, attack_type: i.ai?.attack_type || null, exits: i.trail?.exit_usd || {}, caught_live: !!i.detected })),
+    ].sort((a, b) => (b.ts || 0) - (a.ts || 0)).slice(0, 60);
+    const [deploys24, audited24, risky24, drains24, hacks24] = counts;
+    return { now: Date.now(), watch, live: !!watch && Date.now() - watch.tick_ts < 120e3, last24h: { deploys: deploys24, audited: audited24, risky: risky24, drains: drains24, hacks: hacks24 }, items };
   },
   /** Hacks and scams: traced incidents (newest first) and what the live detector raised. */
   '/api/incidents': async (u) => {
@@ -842,7 +871,7 @@ export function startWeb() {
       const route = routes[u.pathname];
       if (!route) { res.writeHead(404).end('not found'); return; }
       const data = await route(u, req);
-      res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' }).end(JSON.stringify(config.web.hideCriteria ? redact(u.pathname, data) : data));
+      res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' }).end(JSON.stringify(config.web.hideCriteria ? redact(u.pathname, data) : data, noModel));
     } catch (e) { res.writeHead(500, { 'content-type': 'application/json' }).end(JSON.stringify({ error: e.message })); }
   });
   // A host routes its public domain to ONE port (Railway: the service's target port, 8080 by default, or $PORT). Listen on all of them

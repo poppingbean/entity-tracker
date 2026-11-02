@@ -32,7 +32,8 @@ export function staticAnalysis(code, isToken) {
   const exports = wasmExports(code);
   if (!exports) return null;
   const strings = code.toString('latin1').match(/[ -~]{6,}/g) || [];
-  const fakeStorage = exports.filter((m) => m.startsWith('storage_') && !NEP145.has(m));
+  // the honeypot trick is a token's fake storage_* method that wipes balances; read-only storage_* views (a DEX's storage_constants) are not it
+  const fakeStorage = isToken ? exports.filter((m) => m.startsWith('storage_') && !NEP145.has(m) && !IS_GETTER.test(m) && !/^storage_(constants|info|usage|cost|costs|stats|config|view|get|minimum|requirements?)/.test(m)) : [];
   const privilegedNames = isToken ? exports.filter((m) => PRIVILEGED_NAME.test(m) && !IS_GETTER.test(m)) : [];
   // Only genuinely unknown methods count as non-standard: known-safe exports and read-only getters pass; privileged ones have their own check.
   const nonStandard = exports.filter((m) => !STANDARD.has(m) && !fakeStorage.includes(m) && !SAFE_METHODS.has(m) && !privilegedNames.includes(m) && !IS_GETTER.test(m) && !IS_CALLBACK.test(m));
