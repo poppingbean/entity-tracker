@@ -25,6 +25,9 @@ export const TYPES = {
   contract_power_added: { label: 'New powers after an upgrade', group: 'contract' },
   drain_suspected: { label: 'Possible exploit in progress', group: 'hack' },
   incident: { label: 'Hack / exploit', group: 'hack' },
+  stolen_funds_moved: { label: 'Stolen funds moved', group: 'hack' },
+  exchange_key_change: { label: 'Exchange wallet key change', group: 'hack' },
+  security_news: { label: 'In the news', group: 'hack' },
   nft_team_sell: { label: 'NFT team selling', group: 'nft' },
   nft_wash: { label: 'NFT wash trades', group: 'nft' },
 };

@@ -27,10 +27,11 @@ const firstTx = async (id) => {
 export async function identify(id) {
   if (cache.has(id)) return cache.get(id);
   const b = builtinLabel(id);
-  const [ent, lab, first, state] = await Promise.all([col('entities').findOne({ _id: id }, { projection: { kind: 1, label: 1, label_source: 1 } }).catch(() => null), col('labels').findOne({ _id: id }).catch(() => null),
-    firstTx(id), viewAccount(id).catch(() => null)]);
+  const [ent, lab, first, state, reg] = await Promise.all([col('entities').findOne({ _id: id }, { projection: { kind: 1, label: 1, label_source: 1 } }).catch(() => null), col('labels').findOne({ _id: id }).catch(() => null),
+    firstTx(id), viewAccount(id).catch(() => null), col('exchange_wallets').findOne({ _id: id }).catch(() => null)]);
   let out;
-  if (lab?.label) out = { kind: lab.type === 'exchange' ? 'exchange' : 'wallet', name: lab.label, how: 'named by hand' };
+  if (reg) out = { kind: 'exchange', name: `${reg.exchange || 'Unnamed exchange'} ${reg.kind === 'cold' ? 'cold' : 'hot'} wallet`, how: reg.how || 'in the exchange wallet registry' };
+  else if (lab?.label) out = { kind: lab.type === 'exchange' ? 'exchange' : 'wallet', name: lab.label, how: 'named by hand' };
   else if (b?.type === 'exchange') out = { kind: 'exchange', name: b.label, how: 'account name' };
   if (!out) {
     const busy = (first?.total || 0) >= 20000 || ent?.kind === 'hub';
@@ -97,7 +98,7 @@ export async function upstream(account, txs, history, { maxHops = 3, minUsd = Ma
     const fresh = curInfo.first_ts != null && exch.length && exch.some((r) => r.first_ts - curInfo.first_ts < config.incidents.freshHours * 3600e3);
     const big = exch.reduce((s, r) => s + r.usd, 0);
     if (fresh && big >= config.incidents.alwaysUsd) {
-      drain = { exchange: [...new Set(exch.map((r) => r.name))].join(', '), victims: exch, root: cur, root_created_ts: curInfo.first_ts, usd: Math.round(big) };
+      drain = { exchange: [...new Set(exch.map((r) => r.name.replace(/ hot wallet$/, '')))].join(', '), victims: exch, root: cur, root_created_ts: curInfo.first_ts, usd: Math.round(big) };
       path.push({ hop, account: cur, from: exch.map((r) => r.account) });
       break;
     }

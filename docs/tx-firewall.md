@@ -127,6 +127,23 @@ Two more fields when they apply:
 
 The accounts of a confirmed incident are also in `firewall_flags`, so `POST /api/v1/tx/check` and `GET /api/v1/account` flag any transaction or account that touches them.
 
+## The blocklist feed: `GET /api/v1/flags`, `GET /api/v1/flags/check`
+
+For the services that can still stop stolen money (swap services such as NEAR Intents / 1Click, bridges, exchanges, wallets):
+
+```
+GET /api/v1/flags?since=0&min=high
+→ { "updated_ts": 1793603180408, "count": 10, "next": "/api/v1/flags?since=1793603180408",
+    "flags": [{ "account": "efd2242565…", "severity": "critical", "reason": "received the money drained from Binance's hot wallets on 2026-10-29 …",
+                "incident": "inc:efd2242565…", "source": "incident", "ts": 1793603180408 }] }
+```
+
+- **Syncing.** Keep the last `updated_ts` and ask for `since` it. The response has an ETag; an unchanged list answers 304.
+- **Severity.** `min` is `critical`, `high` (the default) or `medium`.
+- **Quick check.** `GET /api/v1/flags/check?ids=a.near,b.near` (up to 100) answers `{ checked, flagged: { "<account>": { severity, reason, incident, ts } } }` before a swap or withdrawal goes through.
+
+Accounts are flagged only by confirmed incidents (and accounts that receive money from them, as it moves) and by operator reports, never by a public report alone.
+
 ## `GET /api/v1/incidents`, `GET /api/v1/incident?id=<id>`
 
 Traced hacks, newest first, and one incident in full: attacker accounts, target, losses, victims, the money trail and the NEAR AI write-up. See [incidents.md](incidents.md).

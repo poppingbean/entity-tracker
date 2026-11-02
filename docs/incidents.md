@@ -28,10 +28,18 @@ Money flows come from executed receipts only:
 
 Failed receipts move nothing.
 
-**Status:**
-- **`confirmed`:** at least $1,000 taken, and the incident is a protocol exploit or a wallet drainer.
-- **`suspected`:** something was taken, but less.
+**Status.** Value received is never enough on its own: a whale withdrawing its own stake is the biggest outflow a protocol ever sees.
+
+- **`confirmed`** needs at least $1,000 taken **and** an attacker signal:
+  - **protocol exploit:** fake tokens used against the target, or an account that was new (`INCIDENT_FRESH_HOURS`) when it took the money;
+  - **exchange drain:** exchange hot wallets emptied into a just-created account;
+  - **wallet drainer:** at least 3 wallets emptied (each kept under 10 % of what it sent), plus a drainer's signing fingerprint: one key moving several victims' money, the attacker signing the moves itself (an approval), or an attacker account under 30 days old. Wallets sweeping into a fund or an OTC desk each sign with their own key and are not a drainer.
+- **`suspected`:** value was received but there is no attacker signal. No flags, no hack alert.
 - **`nothing_found`:** nobody took value for nothing in return.
+
+NEAR attached to a call (`deposit_and_stake`, `near_deposit`) counts as paid in, so withdrawing what you deposited nets to zero. An exchange paying a customer is a withdrawal, not a loss. The money trail never follows into a contract: a deposit into a protocol is a destination, and a protocol is never flagged.
+
+**Re-traces keep flags in sync.** When an incident is re-traced, accounts no longer in the attacker's set lose its flag. An incident that is no longer confirmed loses all its flags, and its alert is marked "Retracted (not a hack)".
 
 A confirmed incident:
 - raises an `incident` alert;
@@ -76,6 +84,47 @@ A suspect:
 - is queued for a full trace (`incident_queue`), which the worker runs one at a time beside its other work.
 
 The watcher also writes `security:watch` (block reached, lag, last check), which the live feed shows.
+
+## Early warning for crimes that are not on-chain hacks
+
+Some thefts happen off-chain: an exchange's signing keys or withdrawal system is compromised, and the chain only sees the exchange's own wallets sending money, signed with their usual key. Nothing on-chain is broken, but the money movement is unmistakable. Four parts watch for it.
+
+### 1. Exchange wallet watch (`src/incident/exchanges.js`)
+
+- **Registry (`exchange_wallets`).** Most hot wallets have no NEAR name, so they are discovered by what they do:
+  - start from the busy `hub` wallets the tracker meets while profiling buyers;
+  - find the exchange-named account each one sends its reserves to (its cold wallet, which names the exchange);
+  - add every other busy wallet that sends to the same cold wallet.
+
+  It is refreshed daily (`EXCHANGE_REGISTRY_EVERY_HOURS`, `node src/cli.js exchanges`). Add one by hand with `node src/cli.js exchange-wallet <account> <exchange>`.
+- **Baselines.** Per hot wallet, its customer withdrawals: the median and the large end (p98). Moves to its own cold wallets are left out, and p98 is used rather than the maximum, so a past drain in the sample does not make the next one look normal.
+- **Live protocol rule.** A large outflow from a protocol is a suspect only with an attacker signal: a new account, its own fresh token contracts, or several tokens at once from an account under 30 days old. Size alone never is.
+- **Drain rules.** An outflow worth at least `INCIDENT_EXCHANGE_MIN_USD` ($50k) to a non-exchange account is a suspect when:
+  - the receiver is new (at most `INCIDENT_FRESH_HOURS`, or created by the transfer), and the amount is unusual: 5× the wallet's p98, or half or more of its balance; or
+  - the receiver is new and the amount is above `INCIDENT_ALWAYS_USD`; or
+  - two or more hot wallets paid the same account within an hour.
+- **Key changes.** A full-access key added to or removed from a hot wallet raises `exchange_key_change`. Exchanges rotate keys, but an unexpected one is how a takeover starts.
+
+On the Binance case, the three hot wallets' customer withdrawals have a p98 of 35k–87k NEAR; the drain transfers were 24–93× that and 100 % of each balance.
+
+### 2. Live follow of stolen funds
+
+Every account of a confirmed incident (the attacker, its sub-accounts and NEAR Intents accounts, the cash-out wallets) is watched block by block. A transfer of at least `INCIDENT_FOLLOW_MIN_USD` ($500) out of one:
+- is recorded (`incident_moves`) and raises `stolen_funds_moved`. It is **high** severity when large or when the money had been idle for a day or more ("Stolen funds woke up after 3 days");
+- if it goes to a 1Click deposit address, the swap is resolved right away (chain, asset, recipient);
+- otherwise the receiver joins the incident, is flagged and is followed from then on;
+- the incident is re-traced (at most hourly).
+
+The investigation page lists these moves as they happen.
+
+### 3. The blocklist feed
+
+The parties who can still stop stolen money are the services that convert it: NEAR Intents / 1Click, bridges, exchanges, wallets. `GET /api/v1/flags?since=<ms>` gives every flagged account (synced incrementally, with an ETag), and `GET /api/v1/flags/check?ids=a,b` checks up to 100 accounts before a swap or withdrawal. High-severity alerts (drains, moves of stolen funds, confirmed hacks) also go to the public Telegram channel. See [tx-firewall.md](tx-firewall.md).
+
+### 4. Off-chain signals (`src/incident/signals.js`)
+
+- **Reports.** `/report <account | tx> [what happened]` to @safenear_bot, or the form on Safety Check, starts an investigation and shows in the live feed. A report never flags anything by itself; flags come only from what the trace confirms.
+- **News.** Public feeds (`NEWS_FEEDS`: Cointelegraph, The Block, Decrypt, rekt.news, CryptoSlate) are read every `NEWS_EVERY_MINUTES` (15). A story that mentions NEAR and a crime word raises `security_news`; any NEAR accounts or transaction hashes it names are investigated.
 
 ## Worked example: Veax, 2026-10-31
 
@@ -132,6 +181,7 @@ Replaying the drain's blocks, the exchange-drain detector flags the first transf
 
 - **Prices:** USD values are at today's prices, not the incident's.
 - **Trail depth:** the money trail follows two wallet hops and stops at other chains. Past an exchange deposit or a chain address, the exchange or that chain's explorer has to take over.
+- **1Click lookups:** a rate limit or timeout is retried and never cached. A deposit address whose status still cannot be read, but whose money only went to `bridge-mng.near`, is listed as a 1Click service account, never flagged.
 - **Contract scan:** `target:<contract>` reads up to 6,000 recent transactions. A very busy contract's window is cut, and the answer says so.
 - **Drainers:** wallets drained through a stolen key are traced from the attacker's account. The live detector watches protocol outflows and exchange hot wallets, not ordinary wallets.
 - **Exchange wallets:** a hot wallet is recognised only if the tracker has seen it (`entities`, kind `hub`) or it is busy enough (20,000+ transactions). Naming the exchange needs it to send its reserves to an exchange-named account. Otherwise it reads "Unnamed exchange hot wallet".

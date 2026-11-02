@@ -150,10 +150,16 @@ Confirmed incidents raise an `incident` alert and flag the attacker's accounts f
 
 Replaying the Veax blocks, the attacker stands out at $62.8k in 5 tokens across 3 transactions; the next-largest receiver took $767.
 
+**Early warning for off-chain crimes** (an exchange's keys or withdrawal system compromised: the chain only sees the exchange's own wallets paying out):
+- **Exchange wallet watch:** a registry of exchange hot wallets, discovered by behaviour and named from the cold wallets they sweep to, with each one's normal withdrawal size. A drain is flagged when a transfer is far above that, or most of the balance, goes to a brand-new account, or when several hot wallets pay one account. A full-access key change on a hot wallet raises an alert.
+- **Live follow:** every account of a confirmed incident is watched. Each move of stolen funds alerts at once ("woke up after 3 days"), 1Click swaps are resolved, the receiver is flagged and followed, and the trace is redone.
+- **Blocklist feed** for swap services, bridges, exchanges and wallets: `GET /api/v1/flags?since=`, `GET /api/v1/flags/check?ids=`.
+- **Off-chain signals:** `/report` to @safenear_bot or the form on Safety Check starts an investigation (it never flags on its own), and security news about NEAR (`NEWS_FEEDS`) is read every 15 minutes. Stories naming accounts or transactions are investigated.
+
 More access:
-- CLI: `node src/cli.js incident <account | tx hash | target:<contract>>`.
+- CLI: `node src/cli.js incident <account | tx hash | target:<contract>>`; `node src/cli.js exchanges` rediscovers exchange wallets; `node src/cli.js exchange-wallet <account> <exchange>` adds one.
 - API: `GET /api/v1/incidents`, `GET /api/v1/incident?id=`.
-- Collections: `incidents`, `incident_queue`, `incident_detections`.
+- Collections: `incidents`, `incident_queue`, `incident_detections`, `incident_moves`, `exchange_wallets`, `security_news`, `reports`.
 
 How the tracer and the detector work, with the Veax exploit as the worked example: [docs/incidents.md](docs/incidents.md).
 

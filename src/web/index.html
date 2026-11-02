@@ -421,12 +421,14 @@ views.explore = async () => {
   const cv = Object.fromEntries(o.clusterTag.map((x) => [x.tag, x]));
   const gt = (v, l, c) => tile(l, n(cv[v]?.n || 0, 0), `${n(cv[v]?.wallets || 0, 0)} wallets`, c);
   const items = live?.items || [], C = live?.last24h || {};
-  const hacks = items.filter((x) => x.type === 'hack' || x.type === 'drain').slice(0, 6);
+  const hacks = items.filter((x) => x.type === 'hack' || x.type === 'drain' || x.type === 'moved').slice(0, 6);
   const contracts = items.filter((x) => x.type === 'contract').slice(0, 8);
   const W = live?.watch;
   const watchLine = live?.live ? `<span class="dot ok"></span> Watching NEAR live · block ${Number(W.height).toLocaleString('en-US')} · checked ${since(W.tick_ts)}` : `<span class="dot bad"></span> The chain watch is not running`;
   const lvl = (l, audited) => `<span class="v ${l ? LIVE_LVL[l] || 'unrated' : 'unrated'}">${esc(l || (audited ? '–' : 'auditing'))}</span>`;
-  const hackRow = (x) => x.type === 'hack'
+  const hackRow = (x) => x.type === 'moved'
+    ? `<tr ${row('/firewall/' + encodeURIComponent(x.incident))}><td>${since(x.ts)}</td><td><span class="v bad">moved</span></td><td class="wrap"><b>${amt(x.amount)} ${esc(x.symbol)} of stolen funds</b><div class="muted small">from ${esc(short(x.from, 22))}${x.idle_h >= 24 ? `, idle ${x.idle_h >= 48 ? Math.round(x.idle_h / 24) + ' days' : x.idle_h + ' h'}` : ''}${x.swap ? ` → ${esc(x.swap.asset)} on ${esc(x.swap.chain)}` : ''}</div></td><td class="num r">${usd(x.usd)}</td></tr>`
+    : x.type === 'hack'
     ? `<tr ${row('/firewall/' + encodeURIComponent(x.id))}><td>${since(x.ts)}</td><td><span class="v bad">hack</span></td><td class="wrap"><b>${esc(x.target || 'wallets')}</b><div class="muted small">${esc(short(x.attack_type || x.headline || '', 90))}</div></td><td class="num r">${usd(x.stolen_usd)}</td></tr>`
     : `<tr ${row('/firewall?q=' + encodeURIComponent(x.receiver))}><td>${since(x.ts)}</td><td><span class="v neutral">drain?</span></td><td class="wrap"><b>${esc(short(x.protocol, 28))}</b><div class="muted small">to ${esc(short(x.receiver, 30))}</div></td><td class="num a">${usd(x.usd)}</td></tr>`;
   return `<div class="hero"><h1>Know who is behind every NEAR launch</h1>
@@ -1549,6 +1551,12 @@ function scBody(r) {
     ${scIncidents(r)}${facts}${links ? `<p class="small" style="margin:12px 0 0">${links}</p>` : ''}
     ${r.pending ? '<p class="muted small" style="margin:8px 0 0">The full answer appears here when the audit finishes.</p>' : ''}</div>`;
 }
+async function scReport() {
+  const q = $('repQ').value.trim(); if (!q) return;
+  const r = await fetch('/api/report', { method: 'POST', headers: { 'content-type': 'application/json', 'x-tracker': '1' }, body: JSON.stringify({ q, note: $('repNote').value.trim() }) }).then((x) => x.json()).catch((e) => ({ error: e.message }));
+  $('repOut').innerHTML = r.error ? `<span class="r">${esc(r.error)}</span>` : `<span class="g">Thanks: it is being investigated (a few minutes).</span> ${ilink('/firewall?q=' + encodeURIComponent(q), 'Check it now →')}`;
+  if (!r.error) { $('repQ').value = ''; $('repNote').value = ''; liveFeed(); }
+}
 function scExample(i) { $('scInput').value = SC_EXAMPLES[i][1]; scCheck(); }
 function scFromUrl() { const q = new URLSearchParams(location.search).get('q'); if (q && $('scInput')) { $('scInput').value = q; scCheck(q); } }
 
@@ -1589,7 +1597,10 @@ views.firewall = async () => `<div class="grid2 main-l"><div><div class="card" s
       oninput="this.style.height='auto';this.style.height=Math.min(180,this.scrollHeight)+'px'" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();scCheck()}"
       onpaste="setTimeout(()=>scCheck(),0)"></textarea><button class="cta" style="padding:12px 22px;font-size:15px" onclick="scCheck()">Check</button></div>
     <div class="bar small" style="margin-top:10px;gap:6px"><span class="muted">Try:</span>${SC_EXAMPLES.map(([l], i) => `<button class="chip" style="cursor:pointer" onclick="scExample(${i})">${esc(l)}</button>`).join('')}</div>
-    <p class="muted small" style="margin:10px 0 0">Nothing is signed or sent, and nothing you paste is kept. Never paste your seed phrase or private key: this page refuses them.</p></div>
+    <p class="muted small" style="margin:10px 0 0">Nothing is signed or sent, and nothing you paste is kept. Never paste your seed phrase or private key: this page refuses them.</p>
+    <details style="margin-top:10px"><summary class="small"><b>Report a hack, a drainer or stolen funds</b></summary>
+      <p class="muted small">Give the account or a transaction; it is investigated from the chain and shows in the live feed. Nothing is flagged on a report alone. Also from Telegram: <code>/report &lt;account&gt;</code> to @safenear_bot.</p>
+      <div class="bar" style="flex-wrap:nowrap;gap:8px"><input id="repQ" placeholder="account or transaction hash" style="flex:1"><input id="repNote" placeholder="what happened (optional)" style="flex:1"><button onclick="scReport()">Report</button></div><div id="repOut" class="small"></div></details></div>
   <div id="scOut"></div>
   <details class="card"><summary><b>For developers:</b> raw transaction check (JSON / borsh, signer, AI explanation)</summary>
     <p class="small muted" style="margin-top:0">Paste what a wallet or dApp is asking you to sign: JSON (wallet-selector or RPC format) or base64 borsh (Transaction, SignedTransaction, or a meta-transaction SignedDelegateAction). Nothing is signed or sent.</p>
@@ -1600,6 +1611,7 @@ views.firewall = async () => `<div class="grid2 main-l"><div><div class="card" s
   <details class="card"><summary><b>For wallets, dApps and developers:</b> the API and what it catches</summary><div class="card"><h2>For wallets and dApps</h2>
     <p class="small">Call the same check from your wallet or dApp right before the signing screen. It's free, works from any origin, and keeps nothing about the transaction.</p>
     <p class="small"><code>POST /api/v1/tx/check</code> with <code>{"transaction": …}</code>, <code>{"transactions": [ … ]}</code> or <code>{"transaction_base64": "…"}</code> → <code>verdict</code> (ok / caution / warn / block), the findings, and one plain line per action. Add <code>"explain": true</code> for an AI explanation.</p>
+    <p class="small"><b>Blocklist feed</b> for swap services, bridges, exchanges and wallets: <code>GET /api/v1/flags?since=&lt;ms&gt;</code> (every flagged account, synced incrementally) and <code>GET /api/v1/flags/check?ids=a,b</code> before a swap or withdrawal goes through. Accounts are flagged only from confirmed incidents and operator reports.</p>
     <p class="small"><code>GET /api/v1/inspect?q=…</code> → the same answer as this page for anything pasted (wallet, contract, token, NFT, tx hash, link, website).</p>
     <p class="small"><code>GET /api/v1/account?id=…</code> → the reputation of one account, for "send to" screens.</p>
     <p class="small"><a href="https://github.com/poppingbean/entity-tracker/blob/main/docs/tx-firewall.md" target="_blank" rel="noopener">Integration guide ↗</a> · 300 checks per 10 minutes per IP.</p></div>
@@ -1679,13 +1691,19 @@ async function liveFeed() {
   const item = (x) => {
     if (x.type === 'hack') return `<div class="lv" onclick="history.pushState(null,'','/firewall/${encodeURIComponent(x.id)}');render()" style="cursor:pointer"><span class="v bad">HACK</span> <b>${esc(x.attack_type || 'Exploit')}</b>${x.target ? ` on <span class="acct">${esc(short(x.target, 30))}</span>` : ''} · <b class="r">${usd(x.stolen_usd)}</b>${x.caught_live ? ' <span class="chip">caught live</span>' : ''}
       <div class="muted small">${esc(short(x.headline || `by ${x.attacker}`, 160))}${Object.keys(x.exits || {}).length ? ` · ${Object.entries(x.exits).map(([k, v]) => `${esc(k)} ${usd(v)}`).join(', ')}` : ''}</div></div>`;
-    if (x.type === 'drain') return `<div class="lv" onclick="$('scInput').value='${esc(x.receiver)}';scCheck()" style="cursor:pointer"><span class="v neutral">DRAIN?</span> <span class="acct">${esc(short(x.receiver, 28))}</span> took <b>${usd(x.usd)}</b> from <span class="acct">${esc(short(x.protocol, 26))}</span>
+    if (x.type === 'moved') return `<div class="lv" onclick="history.pushState(null,'','/firewall/${encodeURIComponent(x.incident)}');render()" style="cursor:pointer"><span class="v bad">MOVED</span> ${x.idle_h >= 24 ? `<b class="r">woke up after ${x.idle_h >= 48 ? Math.round(x.idle_h / 24) + ' days' : x.idle_h + ' h'}:</b> ` : ''}<b>${amt(x.amount)} ${esc(x.symbol)}</b> (${usd(x.usd)}) of stolen funds from <span class="acct">${esc(short(x.from, 18))}</span>
+      <div class="muted small">to ${x.swap ? `a 1Click swap to ${esc(x.swap.asset)} on ${esc(x.swap.chain)}${x.swap.recipient ? ` (${esc(short(x.swap.recipient, 18))})` : ''}` : esc(short(x.to, 30))}</div></div>`;
+    if (x.type === 'news') return `<div class="lv"><span class="v neutral">NEWS</span> <a href="${esc(x.link)}" target="_blank" rel="noopener">${esc(short(x.title, 120))}</a>
+      <div class="muted small">${esc(x.source)}${x.exchange ? ` · mentions ${esc(x.exchange)}` : ''}${(x.accounts || []).length ? ` · names ${x.accounts.map((a) => esc(short(a, 20))).join(', ')} (investigating)` : ''}</div></div>`;
+    if (x.type === 'report') { const q = x.input?.account || x.input?.tx || (x.input?.target ? 'target:' + x.input.target : ''); return `<div class="lv" onclick="$('scInput').value='${esc(q)}';scCheck()" style="cursor:pointer"><span class="v unrated">REPORT</span> <span class="acct">${esc(short(q, 34))}</span>${x.count > 1 ? ` <span class="muted">· ${x.count} reports</span>` : ''}
+      <div class="muted small">reported by people; investigated from the chain</div></div>`; }
+    if (x.type === 'drain') return `<div class="lv" onclick="$('scInput').value='${esc(x.receiver)}';scCheck()" style="cursor:pointer"><span class="v neutral">DRAIN?</span> <span class="acct">${esc(short(x.receiver, 28))}</span> took <b>${usd(x.usd)}</b> from ${x.kind === 'exchange' ? `<b>${esc(x.exchange || 'an exchange')}</b> hot wallet ` : ''}<span class="acct">${esc(short(x.protocol, 26))}</span>
       <div class="muted small">${esc((x.reasons || []).slice(1).join('; '))}</div></div>`;
     return `<div class="lv" onclick="$('scInput').value='${esc(x.account)}';scCheck()" style="cursor:pointer"><span class="v ${x.level ? LIVE_LVL[x.level] || 'unrated' : 'unrated'}">${esc(x.level || (x.audited ? '–' : 'auditing'))}</span> New contract <span class="acct">${esc(short(x.account, 34))}</span>${x.label ? ` <span class="chip">${esc(x.label)}</span>` : ''}
       <div class="muted small">${esc(x.how)}${x.family_n > 1 ? ` (${x.family_n} accounts)` : ''} · by ${esc(short(x.by || '?', 24))}${x.control ? ` · ${esc(x.control)}` : ''}${x.headline ? ` · ${esc(short(x.headline, 110))}` : ''}</div></div>`;
   };
   el.innerHTML = `<div class="card"><div class="bar"><h2 style="margin:0">Live</h2><span class="small">${status}</span></div>
-    <div class="tiles" style="margin:10px 0">${tile('Contracts deployed', C.deploys, 'last 24 h')}${tile('Audited', C.audited, `${C.risky} high risk`, C.risky ? 'a' : '')}${tile('Drains caught', C.drains, 'last 24 h', C.drains ? 'a' : '')}${tile('Hacks', C.hacks, 'confirmed, 24 h', C.hacks ? 'r' : '')}</div>
+    <div class="tiles" style="margin:10px 0">${tile('Contracts deployed', C.deploys, 'last 24 h')}${tile('Audited', C.audited, `${C.risky} high risk`, C.risky ? 'a' : '')}${tile('Drains caught', C.drains, 'last 24 h', C.drains ? 'a' : '')}${tile('Hacks', C.hacks, `confirmed · ${C.moves || 0} moves of stolen funds`, C.hacks || C.moves ? 'r' : '')}</div>
     <div class="bar small" style="gap:6px">${tab('', 'Everything')}${tab('hacks', 'Hacks & drains')}${tab('risky', 'High-risk contracts')}${tab('contracts', 'New contracts')}<span class="spacer"></span><span class="muted">updates every 15 s</span></div>
     <div style="max-height:720px;overflow:auto;margin-top:6px">${j.items.map((x) => `<div style="display:flex;gap:10px;padding:8px 2px;border-bottom:1px solid var(--line)"><span class="muted small" style="width:64px;flex:none" title="${esc(when(x.ts))}">${esc(since(x.ts).replace(' ago', ''))}</span><div style="flex:1;min-width:0">${item(x)}</div></div>`).join('') || '<p class="muted small">Nothing yet.</p>'}</div></div>`;
 }
@@ -1693,7 +1711,7 @@ let liveTimer = null;
 function liveStart() { clearInterval(liveTimer); liveFeed(); liveTimer = setInterval(() => { if (!$('liveFeed')) { clearInterval(liveTimer); return; } if (!document.hidden) liveFeed(); }, 15000); }
 
 async function incidentPage(id) {
-  const { incident: d, moved_from } = await get('/api/incident', { id });
+  const { incident: d, moved_from, live_moves } = await get('/api/incident', { id });
   const A = d.ai, T = d.trail || {}, ex = T.exits || [], drain = d.kind === 'exchange_drain';
   const offNear = ex.filter((e) => e.chain && e.chain !== 'NEAR').reduce((s, e) => s + (e.usd || 0), 0);
   const freezeUsd = (d.freezable || []).reduce((s, f) => s + (f.usd || 0), 0);
@@ -1716,6 +1734,10 @@ async function incidentPage(id) {
       ${(drain ? Object.values((d.victims || []).filter((v) => v.exchange).flatMap((v) => v.tokens).reduce((m, t) => { const k = t.symbol; m[k] = m[k] || { ...t, amount: 0, usd: 0 }; m[k].amount += t.amount || 0; m[k].usd += t.usd || 0; return m; }, {})) : d.losses || []).map((l) => `<tr><td>${esc(l.symbol)} <span class="muted">${esc(short(l.token, 28))}</span></td><td class="num">${amt(l.amount)}</td><td class="num">${usd(l.usd)}</td></tr>`).join('') || empty(3, '–')}</table></div>
     <div class="card"><h2>Victims <span class="muted">who lost value to the attacker</span></h2><table class="small"><tr><th>Account</th><th>Kind</th><th class="num">Lost</th><th>Transactions</th></tr>
       ${(d.victims || []).map((v) => `<tr><td>${nbAcc(v.account)}${v.label ? ` <span class="muted">${esc(v.label)}</span>` : ''}</td><td>${v.exchange ? `exchange hot wallet${v.how ? `<div class="muted">${esc(v.how)}</div>` : ''}` : v.contract ? 'contract (its users / liquidity providers)' : 'wallet'}</td><td class="num r">${usd(v.lost_usd)}</td><td>${(v.txs || []).slice(0, 3).map(nbTx).join(' ')}</td></tr>`).join('') || empty(4, '–')}</table></div></div>`;
+  // the money moving now: every transfer out of the incident's accounts since it was traced, seen block by block
+  h += `<div class="card"><h2>Live: stolen funds moving <span class="muted">${(live_moves || []).length ? `${live_moves.length} move${live_moves.length > 1 ? 's' : ''} seen as they happened` : 'watched block by block'}</span></h2>
+    ${(live_moves || []).length ? `<table class="small"><tr><th>When</th><th>From</th><th>To</th><th class="num">Amount</th><th class="num">USD</th><th>Idle before</th><th>Tx</th></tr>${live_moves.map((m) => `<tr><td>${when(m.ts)}</td><td>${nbAcc(m.from)}</td><td>${m.swap ? `1Click → ${esc(m.swap.asset)} on ${esc(m.swap.chain)}${m.swap.recipient ? `<div>${chainLink(m.swap.chain, 'address', m.swap.recipient)}</div>` : ''}` : nbAcc(m.to)}</td><td class="num">${amt(m.amount)} ${esc(m.symbol)}</td><td class="num">${usd(m.usd)}</td><td>${m.idle_h != null ? (m.idle_h >= 48 ? Math.round(m.idle_h / 24) + ' days' : m.idle_h + ' h') : '–'}</td><td>${nbTx(m.tx)}</td></tr>`).join('')}</table>`
+    : `<p class="muted small" style="margin:0">Every account of this incident is watched: the next transfer out of any of them raises an alert at once, the receiver is flagged and followed, and the trace is redone.</p>`}</div>`;
   // where the money came from (the upstream trace), origin first
   const SRC_KIND = { exchange: 'exchange', contract: 'contract', wallet: 'wallet' };
   if ((d.sources || []).length) h += `<div class="card"><h2>Where the money came from <span class="muted">followed back from ${esc(short(pasted || d.attacker.account, 30))}</span></h2>

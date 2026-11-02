@@ -32,6 +32,7 @@ import { AUTO_AUDIT_V } from '../audit/auto.js';
 import { contractReport, startAutoAudit, auditJob } from '../audit/report.js';
 import { inspect } from '../firewall/inspect.js';
 import { parseInvestigation, startInvestigation, investigationJob } from '../incident/service.js';
+import { report } from '../incident/signals.js';
 
 const page = fs.readFileSync(new URL('./index.html', import.meta.url), 'utf8');
 // Google Search Console ownership file for app.safe-near.org, served as is at /<name>.html (before the password check, so Google can read it).
@@ -44,7 +45,13 @@ const analysisHits = new Map(), aiHits = new Map();
 const aiRunning = new Map(); // token -> { started, error }
 const watchHits = new Map(), keyHits = new Map(), feedbackHits = new Map();
 /** Watchlist changes over POST (JSON body): create a key, add / remove an item, set an API key's webhook. */
+const reportHits = new Map();
 const POSTS = {
+  /** Report a hack, a drainer or stolen funds: it is investigated from the chain (never flagged on the report alone). */
+  '/api/report': async (b, ip) => {
+    if (limited(reportHits, ip, 10)) return { error: 'too many reports from this address, try again later' };
+    return report(String(b.q || ''), { via: 'web', note: String(b.note || '') });
+  },
   '/api/watch/key': async (b, ip) => {
     if (limited(keyHits, ip, 5)) return { error: 'too many keys from this address, try again later' };
     const kind = b.kind === 'api' ? 'api' : 'web', key = newKey(kind);
@@ -113,7 +120,7 @@ const fwHits = new Map();
 const clientIp = (req) => String(req.headers['x-forwarded-for'] || '').split(',')[0].trim() || req.socket.remoteAddress || 'ip';
 const CORS = { 'access-control-allow-origin': '*', 'access-control-allow-methods': 'GET, POST, OPTIONS', 'access-control-allow-headers': 'content-type, x-api-key', 'access-control-max-age': '86400' };
 const FW_DOC = { name: 'Safe Near transaction firewall', version: FIREWALL_VERSION, docs: 'https://github.com/poppingbean/entity-tracker/blob/main/docs/tx-firewall.md',
-  endpoints: { 'POST /api/v1/tx/check': 'check transactions before they are signed', 'GET /api/v1/account?id=<account>': 'reputation of one account', 'GET /api/v1/contract?id=<account>': 'the automated audit of a contract', 'GET /api/v1/inspect?q=<wallet | contract | tx hash | link>': 'is it safe? one answer for whatever is pasted', 'GET /api/v1/incidents': 'traced hacks and scams', 'GET /api/v1/incident?id=<id>': 'one incident: attacker accounts, target, losses, victims, money trail' } };
+  endpoints: { 'POST /api/v1/tx/check': 'check transactions before they are signed', 'GET /api/v1/account?id=<account>': 'reputation of one account', 'GET /api/v1/contract?id=<account>': 'the automated audit of a contract', 'GET /api/v1/inspect?q=<wallet | contract | tx hash | link>': 'is it safe? one answer for whatever is pasted', 'GET /api/v1/incidents': 'traced hacks and scams', 'GET /api/v1/flags?since=<ms>&min=high': 'the blocklist: every flagged account (sync with since)', 'GET /api/v1/flags/check?ids=a,b': 'are these accounts flagged?', 'GET /api/v1/incident?id=<id>': 'one incident: attacker accounts, target, losses, victims, money trail' } };
 async function firewallApi(req, res, u) {
   const send = (code, body) => res.writeHead(code, { 'content-type': 'application/json', 'cache-control': 'no-store', ...CORS }).end(JSON.stringify(body, noModel));
   if (req.method === 'OPTIONS') { res.writeHead(204, CORS).end(); return; }
@@ -124,6 +131,24 @@ async function firewallApi(req, res, u) {
     const q = String(u.searchParams.get('q') || '').trim().slice(0, 300);
     if (!q) { send(400, { error: 'q: a wallet, a contract or a transaction hash' }); return; }
     try { send(200, await inspect(q)); } catch (e) { send(400, { error: e.message }); }
+    return;
+  }
+  // the blocklist feed: every flagged account (incident accounts, reported drainers), for swap services, bridges, exchanges and wallets
+  if (u.pathname === '/api/v1/flags' && req.method === 'GET') {
+    const since = Number(u.searchParams.get('since')) || 0, min = ['critical', 'high', 'medium'].indexOf(u.searchParams.get('min') || 'medium');
+    const sev = ['critical', 'high', 'medium'].slice(0, (min < 0 ? 2 : min) + 1);
+    const rows = await col('firewall_flags').find({ ts: { $gt: since }, severity: { $in: sev } }, { projection: { severity: 1, reason: 1, incident: 1, source: 1, ts: 1 } }).sort({ ts: 1 }).limit(10000).toArray();
+    const updated = rows.length ? rows[rows.length - 1].ts : since;
+    res.setHeader('etag', `"flags-${updated}-${rows.length}"`);
+    if (req.headers['if-none-match'] === `"flags-${updated}-${rows.length}"`) { res.writeHead(304, CORS).end(); return; }
+    send(200, { updated_ts: updated, count: rows.length, next: `/api/v1/flags?since=${updated}`, flags: rows.map((f) => ({ account: f._id, severity: f.severity, reason: f.reason, incident: f.incident || null, source: f.source || 'reported', ts: f.ts })) });
+    return;
+  }
+  if (u.pathname === '/api/v1/flags/check' && req.method === 'GET') {
+    const ids = String(u.searchParams.get('ids') || '').split(',').map((x) => x.trim().toLowerCase()).filter(Boolean).slice(0, 100);
+    if (!ids.length) { send(400, { error: 'ids: up to 100 accounts, comma separated' }); return; }
+    const rows = await col('firewall_flags').find({ _id: { $in: ids } }, { projection: { severity: 1, reason: 1, incident: 1, ts: 1 } }).toArray();
+    send(200, { checked: ids.length, flagged: Object.fromEntries(rows.map((f) => [f._id, { severity: f.severity, reason: f.reason, incident: f.incident || null, ts: f.ts }])) });
     return;
   }
   if (u.pathname === '/api/v1/incidents' && req.method === 'GET') {
@@ -475,13 +500,18 @@ const routes = {
   '/api/security/live': async (u) => {
     const only = u.searchParams.get('only'); // '' | hacks | contracts | risky
     const day = Date.now() - 86400e3;
+    const [moves, news, reports] = only === 'contracts' || only === 'risky' ? [[], [], []] : await Promise.all([
+      col('incident_moves').find({}).sort({ ts: -1 }).limit(20).toArray().catch(() => []),
+      col('security_news').find({}).sort({ ts: -1 }).limit(10).toArray().catch(() => []),
+      col('reports').find({}).sort({ last_ts: -1 }).limit(10).toArray().catch(() => []),
+    ]);
     const [watchMeta, cursor, deploys, detections, incidents, counts] = await Promise.all([
       metaGet('security:watch'), col('meta').findOne({ _id: 'audit:deploy_cursor' }),
       only === 'hacks' ? [] : col('contract_deploys').find({}, { projection: { account: 1, kind: 1, by: 1, signer: 1, ts: 1 } }).sort({ ts: -1 }).limit(only === 'risky' ? 400 : 60).toArray(),
       only === 'contracts' || only === 'risky' ? [] : col('incident_detections').find({}).sort({ ts: -1 }).limit(20).toArray(),
       only === 'contracts' || only === 'risky' ? [] : col('incidents').find({ status: { $in: ['confirmed', 'suspected'] } }, { projection: { status: 1, kind: 1, 'attacker.account': 1, 'target.account': 1, stolen_usd: 1, held_usd: 1, started_ts: 1, first_seen_ts: 1, 'ai.headline': 1, 'ai.attack_type': 1, 'trail.exit_usd': 1, detected: 1 } }).sort({ first_seen_ts: -1 }).limit(20).toArray(),
       Promise.all([col('contract_deploys').countDocuments({ ts: { $gt: day } }), col('audits').countDocuments({ 'auto.ts': { $gt: day } }), col('audits').countDocuments({ 'auto.ts': { $gt: day }, 'auto.level': { $in: ['high', 'critical'] } }),
-        col('incident_detections').countDocuments({ ts: { $gt: day } }), col('incidents').countDocuments({ first_seen_ts: { $gt: day }, status: 'confirmed' })]),
+        col('incident_detections').countDocuments({ ts: { $gt: day } }), col('incidents').countDocuments({ first_seen_ts: { $gt: day }, status: 'confirmed' }), col('incident_moves').countDocuments({ ts: { $gt: day } }), col('firewall_flags').estimatedDocumentCount()]),
     ]);
     // a worker from before the live feed only moves the deploy cursor: that is enough to tell the watch is running
     const watch = watchMeta || (cursor ? { height: cursor.value, tick_ts: cursor.ts, behind: null } : null);
@@ -492,11 +522,14 @@ const routes = {
     if (only === 'risky') contracts = contracts.filter((c) => ['high', 'critical'].includes(c.level));
     const items = [
       ...contracts.slice(0, 40),
-      ...detections.map((d) => ({ type: 'drain', ts: d.ts, receiver: d.receiver, protocol: d.protocol, usd: d.usd, reasons: d.reasons, txs: d.txs })),
+      ...detections.map((d) => ({ type: 'drain', ts: d.event_ts || d.ts, receiver: d.receiver, protocol: d.protocol, exchange: d.exchange || null, kind: d.kind || 'protocol', usd: d.usd, reasons: d.reasons, txs: d.txs })),
+      ...moves.map((m) => ({ type: 'moved', ts: m.ts, incident: m.incident, from: m.from, to: m.to, symbol: m.symbol, amount: m.amount, usd: m.usd, idle_h: m.idle_h, swap: m.swap ? { chain: m.swap.chain, asset: m.swap.asset, recipient: m.swap.recipient } : null, tx: m.tx })),
+      ...news.map((n) => ({ type: 'news', ts: n.ts, title: n.title, link: n.link, source: n.source, accounts: n.accounts, exchange: n.exchange })),
+      ...reports.map((r) => ({ type: 'report', ts: r.last_ts, input: r.input, count: r.count })),
       ...incidents.map((i) => ({ type: 'hack', ts: i.started_ts || i.first_seen_ts, id: i._id, status: i.status, kind: i.kind, attacker: i.attacker?.account, target: i.target?.account || null, stolen_usd: i.stolen_usd, held_usd: i.held_usd, headline: i.ai?.headline || null, attack_type: i.ai?.attack_type || null, exits: i.trail?.exit_usd || {}, caught_live: !!i.detected })),
     ].sort((a, b) => (b.ts || 0) - (a.ts || 0)).slice(0, 60);
-    const [deploys24, audited24, risky24, drains24, hacks24] = counts;
-    return { now: Date.now(), watch, live: !!watch && Date.now() - watch.tick_ts < 120e3, last24h: { deploys: deploys24, audited: audited24, risky: risky24, drains: drains24, hacks: hacks24 }, items };
+    const [deploys24, audited24, risky24, drains24, hacks24, moves24, flagged] = counts;
+    return { now: Date.now(), watch, live: !!watch && Date.now() - watch.tick_ts < 120e3, last24h: { deploys: deploys24, audited: audited24, risky: risky24, drains: drains24, hacks: hacks24, moves: moves24 }, flagged, items };
   },
   /** Hacks and scams: traced incidents (newest first) and what the live detector raised. */
   '/api/incidents': async (u) => {
@@ -518,9 +551,9 @@ const routes = {
     if (!doc || doc.status === 'nothing_found') {
       const acc = id.replace(/^inc:/, '');
       const bigger = await col('incidents').findOne({ 'accounts.account': acc, status: { $in: ['confirmed', 'suspected'] } }, { sort: { stolen_usd: -1 } });
-      if (bigger) return { incident: bigger, moved_from: acc };
+      if (bigger) return { incident: bigger, moved_from: acc, live_moves: await col('incident_moves').find({ incident: bigger._id }).sort({ ts: -1 }).limit(100).toArray() };
     }
-    return doc ? { incident: doc } : { error: 'no such incident' };
+    return doc ? { incident: doc, live_moves: await col('incident_moves').find({ incident: doc._id }).sort({ ts: -1 }).limit(100).toArray() } : { error: 'no such incident' };
   },
   /** Investigate an account, a tx hash or target:<contract>: the saved incident if there is one, else (run=1) start a trace here. */
   '/api/incident/investigate': async (u, req) => {

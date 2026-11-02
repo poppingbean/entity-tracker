@@ -21,10 +21,14 @@ export async function oneClickSwap(depositAddress) {
   if (!/^[0-9a-f]{64}$/.test(depositAddress)) return null;
   const c = cache.get(depositAddress);
   if (c && Date.now() - c.ts < 3600e3) return c.value;
-  let value = null;
+  let value = null, definite = false;
+  for (let attempt = 0; attempt < 3 && !definite; attempt++) {
+  if (attempt) await new Promise((res) => setTimeout(res, 1000 * 2 ** attempt));
   try {
     const r = await fetch(`${API}?depositAddress=${depositAddress}`, { signal: AbortSignal.timeout(15000) });
+    if (r.status === 404) definite = true; // not a 1Click deposit address
     if (r.ok) {
+      definite = true;
       const j = await r.json(), q = j.quoteResponse?.quoteRequest || {}, d = j.swapDetails || {}, dest = assetChain(q.destinationAsset);
       value = { status: j.status, deposit_address: depositAddress, origin_asset: q.originAsset || null, destination_asset: q.destinationAsset || null, chain: dest.chain, asset: dest.asset,
         recipient: q.recipient || null, recipient_type: q.recipientType || null, refund_to: q.refundTo || null, amount_in: d.amountInFormatted ?? d.depositedAmountFormatted ?? null,
@@ -32,6 +36,8 @@ export async function oneClickSwap(depositAddress) {
         refunded_usd: Number(d.refundedAmountUsd) || 0, dest_txs: (d.destinationChainTxHashes || []).map((x) => x.hash), near_txs: d.nearTxHashes || [], referral: q.referral || null, updated: j.updatedAt || null };
     }
   } catch {}
-  cache.set(depositAddress, { ts: Date.now(), value });
+  }
+  // only a definite answer is remembered: a rate limit or a timeout must not turn a swap into "not a swap" for an hour
+  if (definite) cache.set(depositAddress, { ts: Date.now(), value });
   return value;
 }
