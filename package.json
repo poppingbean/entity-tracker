@@ -8,6 +8,7 @@
     "node": ">=20"
   },
   "license": "MIT",
+  "bin": { "safe-near-mcp": "src/agent/mcp-stdio.js" },
   "scripts": {
     "start": "node src/main.js",
     "web": "node src/main.js --web-only",
@@ -19,11 +20,15 @@
     "reprofile": "node src/cli.js reprofile",
     "scan": "node src/cli.js scan",
     "sim-reset": "node src/cli.js sim-reset",
-    "test": "node --test test/logic.test.js test/firewall.test.js test/audit.test.js test/incident.test.js test/prompts.test.js"
+    "mcp": "node src/agent/mcp-stdio.js",
+    "agent-example": "node examples/agent-guard.mjs",
+    "test": "node --test test/logic.test.js test/firewall.test.js test/audit.test.js test/incident.test.js test/prompts.test.js test/agent.test.js"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.2",
     "dotenv": "^17.2.0",
     "mongodb": "^7.7.0",
-    "wabt": "^1.0.39"
+    "wabt": "^1.0.39",
+    "zod": "^4.6.7"
   }
 }

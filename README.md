@@ -1,6 +1,6 @@
 # Safe Near: security gate and defenses for NEAR
 
-**The problem.** On NEAR, a user about to sign a transaction, send to a wallet or buy a new token cannot tell whether it is safe, and when an exchange or a protocol is drained, nobody can see where the money goes until it is gone. **Safe Near** watches every NEAR block live, audits every new contract, catches large outflows within seconds, traces the money across chains, and answers "is it safe?" for anything a user pastes, on a website, a Telegram bot and an API wallets can call before signing. It is read-only: no wallet, no keys, no trading.
+**The problem.** On NEAR, a user about to sign a transaction, send to a wallet or buy a new token cannot tell whether it is safe, and when an exchange or a protocol is drained, nobody can see where the money goes until it is gone. **Safe Near** watches every NEAR block live, audits every new contract, catches large outflows within seconds, traces the money across chains, and answers "is it safe?" for anything a user pastes, on a website, a Telegram bot and an API wallets can call before signing. **AI agents** get the same checks as MCP tools (the **Agent Guard**), with spending limits and limited keys, so an agent can hold money on NEAR without the keys to everything. It is read-only: no wallet, no keys, no trading.
 
 **Website (live, public, no login): <https://app.safe-near.org>** · **Telegram:** [@safenear_bot](https://t.me/safenear_bot) · **API:** `https://app.safe-near.org/api/v1/…` ([docs](docs/tx-firewall.md)) · **License:** [MIT](LICENSE)
 
@@ -15,6 +15,8 @@
 | Open <https://app.safe-near.org/audit/pets.kibble.near> | An automated contract audit: what kind of contract it is, the powers its code gives its owner (mint, freeze …), who holds them, each method's effects read from the WASM, NEAR AI's function review; tagged **High** |
 | Run `curl "https://app.safe-near.org/api/v1/inspect?q=efd224256518a7cacd209867963276efed302a8e222c013c43f4b1bd369ae5af"` | The same answer as JSON (`"verdict": "danger"`): what a wallet or an AI agent calls before it lets a user sign. `POST /api/v1/tx/check` checks a whole transaction ([docs/tx-firewall.md](docs/tx-firewall.md)) |
 | In Telegram, send `/hacks` to [@safenear_bot](https://t.me/safenear_bot), then `/hack efd224256518a7cacd209867963276efed302a8e222c013c43f4b1bd369ae5af` | The latest proven hacks, then this case with an evidence file to forward to whoever can act (an exchange, a bridge, SEAL 911) |
+| Add the Agent Guard to Claude Code: `claude mcp add --transport http safe-near https://app.safe-near.org/mcp`, then ask *"Send 0.5 NEAR from my-agent.near to efd224256518a7cacd209867963276efed302a8e222c013c43f4b1bd369ae5af"* | The agent calls `guard_transaction` and gets **BLOCK**: the receiver holds the Binance drain. Codex: `codex mcp add safe-near --url https://app.safe-near.org/mcp` ([docs/agent-guard.md](docs/agent-guard.md)) |
+| Run `npm install && npm run agent-example` | An agent in code guards three transactions: a payment to the drain account (**BLOCK**), wrapping 0.5 NEAR (**ALLOW**), a full-access key for a "support agent" (**BLOCK**), then plans a function-call key limited to one contract instead |
 
 Run it yourself: see [Setup](#setup) (Node.js 20+, MongoDB, a NEAR AI key; `npm test` runs the unit tests).
 
@@ -23,14 +25,15 @@ Run it yourself: see [Setup](#setup) (Node.js 20+, MongoDB, a NEAR AI key; `npm 
 - **The chain, live:** every block (neardata) and the FastNEAR RPC and transaction indexer; flows decoded from NEAR transfers, NEP-141 tokens, NEP-171 NFTs and NEP-245 multi-tokens.
 - **NEAR Intents / 1Click:** the money trail follows intents withdrawals and 1Click deposit addresses through the 1Click status API to the destination chain, recipient and transaction.
 - **NEAR AI Cloud:** every write-up (incident reports, deep reviews, follow-up notes, contract code and function reviews) comes from NEAR AI; the rules decide, the AI explains and can never make something look safer. Prompts: [src/ai/prompts/](src/ai/prompts/).
+- **Function-call keys for agents:** the Agent Guard's `plan_scoped_key` gives an agent a key that can call one contract's methods with a gas-only allowance (it can never send NEAR), instead of its owner's full-access key.
 - **Access keys:** audits read every account's keys (full-access keys, function-call keys and their allowances) and what each contract method can really do from its WASM (deploy code, add keys, delete the account, send NEAR).
 
 ## Built at NEAR HACKATHON
 
 - **Window:** this repository was created on 2026-10-20, after the hackathon's announcement (2026-10-19); every commit is inside the window.
 - **Carried over from our earlier work (baseline, Q-005):** the token/contract audit core was ported from the TrustFlow backend (`contractAuditService`, `nearContractAnalysis`, `nearRpcClient`: keys, privileged methods, sell checks; the "Keys, code and token checks" card and its risk/trust scores); the scanner's hard gates were ported from our live launch scanner; the token analyst prompt adapts the TrustFlow Research analyst prompt.
-- **Built in the window:** everything else: Safety Check and the transaction firewall API, the live chain watch, the automated audit of every new contract (classification, powers, control, WASM effects, NEAR AI reviews), hack detection and tracing (exchange drains, protocol exploits, wallet drainers, NEAR Intents / 1Click trails, upstream tracing), deep reviews and follow-ups, the Telegram bot's security commands, wallet grouping, the web UI.
-- **Libraries:** `mongodb`, `wabt` (WASM decompiling), `dotenv`. Written with the help of AI coding agents (Claude Code).
+- **Built in the window:** everything else: Safety Check and the transaction firewall API, the Agent Guard (MCP server, policy engine, scoped keys), the live chain watch, the automated audit of every new contract (classification, powers, control, WASM effects, NEAR AI reviews), hack detection and tracing (exchange drains, protocol exploits, wallet drainers, NEAR Intents / 1Click trails, upstream tracing), deep reviews and follow-ups, the Telegram bot's security commands, wallet grouping, the web UI.
+- **Libraries:** `mongodb`, `wabt` (WASM decompiling), `dotenv`, `@modelcontextprotocol/sdk` and `zod` (the Agent Guard). Written with the help of AI coding agents (Claude Code).
 
 ## What it does
 
@@ -124,6 +127,13 @@ A public service any wallet or dApp can call **right before the user signs**: `P
 - **Mistakes:** sending almost everything you hold, a receiver that doesn't exist, call data aimed at AI reviewers.
 
 The verdict always comes from rules (`src/firewall/rules.js`); `"explain": true` adds a plain-language AI explanation that can never change it. Lookups run in parallel under a 2.5 s budget (`context.complete: false` when some didn't answer). `GET /api/v1/account?id=` gives one account's reputation for "send to" screens. Open to any origin, no password; 300 checks per 10 minutes per IP (`FIREWALL_PER_IP_10MIN`), unlimited with a key from `FIREWALL_API_KEYS` (`x-api-key`); bodies up to 2 MB (`FIREWALL_MAX_BODY_BYTES`). Nothing about a transaction is stored, only counters per verdict. Operators report accounts with `node src/cli.js flag <account> critical|high|medium "<reason>"` (`firewall_flags`; `unflag` undoes it), and `node src/cli.js check-tx '<json>'` runs a check from the command line. The **Safety Check** page (`/firewall`) is the version for everyone. One box takes a wallet, a token (or its name), an NFT, a contract, a transaction hash, an explorer or marketplace link, a website or a transaction to sign, and answers safe / be careful / danger in plain words with what to do (`GET /api/v1/inspect?q=`, `src/firewall/inspect.js`). The same answer shows any hack the input is linked to, and the page has the live security feed (see *Hacks and incidents*). The raw transaction check sits under "For developers". Integration guide: [docs/tx-firewall.md](docs/tx-firewall.md).
+
+## Agent Guard (for AI agents)
+
+The checks above as **MCP tools**, for any agent that speaks MCP (Claude, Codex, Cursor, an agent in code). Before it signs, an agent calls `guard_transaction` with the transaction and its owner's policy (spending limits per transaction, request and day; allowed receivers and methods; forbidden actions such as adding a full-access key). It gets **allow**, **ask_human** or **block**, with the reasons. `check_account`, `check_contract` and `check_transaction` answer single questions, and `plan_scoped_key` returns a function-call key limited to one contract, for the owner to sign once instead of handing over full access. It is read-only and refuses private keys and seed phrases.
+
+- Remote: `https://app.safe-near.org/mcp` (Streamable HTTP). Local: `npm run mcp` (stdio; asks the hosted API, no database needed).
+- Setup for Claude Code and Desktop, Codex and agents in code, the policy fields and the limits: [docs/agent-guard.md](docs/agent-guard.md). Example agent: [examples/agent-guard.mjs](examples/agent-guard.mjs).
 
 ## Contract audit
 
