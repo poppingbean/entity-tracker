@@ -40,16 +40,16 @@ Failed receipts move nothing.
 NEAR attached to a call (`deposit_and_stake`, `near_deposit`) counts as paid in, so withdrawing what you deposited nets to zero. An exchange paying a customer is a withdrawal, not a loss. The money trail never follows into a contract: a deposit into a protocol is a destination, and a protocol is never flagged.
 
 **Deep review.** Every finding (a drain report or a new case) gets a second, slower look `INCIDENT_REVIEW_DELAY_MINUTES` (3) after it was found. Investigations and deep reviews each start at most once a minute (`INCIDENT_EVERY_SECONDS`, 60; the chain watch that spots drains keeps reading blocks every 15 s), and one investigation gets `INCIDENT_INVESTIGATE_TIMEOUT_MINUTES` (10) before the worker moves on. NEAR AI has its own daily budget for the investigations and deep reviews (`INCIDENT_AI_PER_DAY`, 60), apart from the contract audits; a review NEAR AI could not answer (budget spent, outage) is tried again every hour, up to 6 times, and reads "waiting for NEAR AI" meanwhile. Findings are reviewed one at a time, in the order they were found (`deep_reviews`, `src/incident/deepreview.js`):
-1. The full trace again: by then the money's path has settled.
+1. A follow-up of the trace (`src/incident/followup.js`: what the accounts did since; a full trace when new money came in or the case is from an older version): by then the money's path has settled.
 2. The receiver's past with whoever paid it. Many earlier transfers from the same accounts, over months, mean a routine relationship (consolidation, treasury, OTC), not theft.
 3. The own-funds check.
 4. NEAR AI (`NEAR_AI_ANALYSIS_MODEL`) reads it all and answers hack / not a hack / unclear, with its confidence and reasons.
 
-The tag then follows the verdict, and the page shows how it changed, e.g. **Drain? → Safe**, **Drain? → Hack**, or **Hack → Under review**:
-- **Hack** needs the rules' attacker signal; NEAR AI never confirms one alone.
-- A case the rules did not confirm is cleared (**Safe**) on a routine relationship, or on NEAR AI's "not a hack" with medium or high confidence. Its alerts are relabelled "Safe after review".
-- A confirmed case that NEAR AI calls "not a hack" with high confidence goes back to **Under review**.
-- An unconfirmed case is never shown as a hack: it reads **Unconfirmed** until its review.
+The tag then follows the verdict, and the page shows how it changed, e.g. **Large transfer → Normal**, **Large transfer → Watching**, **Large transfer → Hack**, or **Hack → Watching**:
+- **Hack** (or **Exploited** for a protocol exploit, **Rugged** for a rug) needs the rules' attacker signal; NEAR AI never confirms one alone.
+- A case the rules did not confirm is cleared (**Normal**) on a routine relationship, or on NEAR AI's "not a hack" with medium or high confidence. Its alerts are relabelled "Safe after review".
+- A confirmed case that NEAR AI calls "not a hack" with high confidence goes back to **Watching**.
+- A case that is not proven is never shown as a hack: it reads **Watching** until its review, and its page uses plain words (the receiving account, the accounts that paid it, the transfers), never attacker, victim or stolen.
 
 Each case page has a Deep review card with the verdict, NEAR AI's reasons and the receiver's past with its payers. `node src/cli.js deep-review [--now]` runs the reviews by hand.
 
@@ -57,13 +57,13 @@ Each case page has a Deep review card with the verdict, NEAR AI's reasons and th
 
 When those deposits are worth at least half of what came out (staking rewards and price moves account for the rest):
 - it is a **withdrawal of its own funds**;
-- it stays on the live feed and Explore as **WITHDRAWAL … not a hack**, with the proof ("it put 3.13M NEAR into linear-protocol.near between 2023-06-11 and 2023-10-28");
+- it stays on the live feed and Explore as **Large transfer → Normal**, with the proof ("it put 3.13M NEAR into linear-protocol.near between 2023-06-11 and 2023-10-28");
 - it raises no alert and starts no trace;
 - the tracer never confirms it.
 
 Past reports are checked by the worker, a few per pass, and by `node src/cli.js review-drains`; their alerts are relabelled.
 
-**Re-traces keep flags in sync.** When an incident is re-traced, accounts no longer in the attacker's set lose its flag. An incident that is no longer confirmed loses all its flags, and its alert is marked "Retracted (not a hack)".
+**Re-traces keep flags in sync.** When an incident is re-traced or followed up, accounts no longer in the attacker's set lose its flag. An incident that is no longer confirmed loses all its flags, and its alert is marked "Retracted (not a hack)".
 
 A confirmed incident:
 - raises an `incident` alert;
