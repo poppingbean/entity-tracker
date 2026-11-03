@@ -17,3 +17,5 @@ Answer with JSON only:
  "what_it_is": "one short phrase, e.g. 'exchange hot-wallet drain', 'whale consolidating its own wallets', 'staking withdrawal'",
  "reasons": ["the 2-5 facts from the evidence that decide it"]}
 Use only facts in the evidence. If the evidence cannot decide, say "unclear".
+Write the reasons in plain words: "the receiving account", "the accounts that paid it", "the transfers". Words like attacker, victim,
+stolen or loot belong only to a case you call a hack; do not use them, even in quotes, for any other verdict.
