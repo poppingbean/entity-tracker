@@ -134,7 +134,7 @@ export async function buildAnalysis(id) {
   const launch = {
     launchpad: t.launchpad, live_ts: live, live_tx: t.live_tx || null, creator, supply, dev_buy_near: t.dev_buy_near ?? null, pool: t.pool ? { dex: t.pool.dex, quote: t.pool.quote } : null,
     lp_locked: t.lp?.locked ?? null, transfer_fee_pct: t.tax?.transferFeePips != null ? t.tax.transferFeePips / 1e4 : null, buy_tax_pct: t.tax?.buyBps != null ? t.tax.buyBps / 100 : null, sell_tax_pct: t.tax?.sellBps != null ? t.tax.sellBps / 100 : null,
-    audit: audit.available ? { risk_score: audit.risk_score, risk_level: audit.risk_level, trust_score: audit.trust_score, full_access_keys: audit.full_access_keys, privileged_methods: audit.privileged_methods, confirmed_malicious: audit.confirmed_malicious.map((c) => c.key), audited_ts: audit.audited_ts } : null,
+    audit: audit.available ? { risk_score: audit.risk_score, risk_level: audit.risk_level, trust_score: audit.trust_score, full_access_keys: audit.full_access_keys, privileged_methods: audit.privileged_methods, confirmed_malicious: audit.confirmed_malicious.map((c) => c.key), audited_ts: audit.audited_ts, synced: audit.synced || null } : null,
   };
 
   // ---- creator

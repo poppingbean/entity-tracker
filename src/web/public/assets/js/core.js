@@ -58,6 +58,10 @@ const tokLink = (id, lp, k = 26) => (id ? ext(tokUrl(id, lp), short(id, k), id) 
 const P = { creator: (id) => '/creators/' + encodeURIComponent(id), tok: (id) => '/tokens/' + encodeURIComponent(id), wal: (id) => '/wallets/' + encodeURIComponent(id), grp: (id) => '/groups/' + encodeURIComponent(id),
   ent: (id) => '/entities/' + encodeURIComponent(id), scan: (id) => '/scans/' + encodeURIComponent(id), sim: (id) => '/sim/' + encodeURIComponent(id), audit: (id) => '/audit/' + encodeURIComponent(id), ana: (id) => '/analysis/' + encodeURIComponent(id), tgp: (id) => '/taggroups/' + encodeURIComponent(id), nft: (id) => '/nfts/' + encodeURIComponent(id) };
 const row = (path) => `data-href="${esc(path)}" onclick="rowNav(event,this)"`;
+/** An audit summary with the scores as shown: held to the automated audit's level when it is graver (the server says: `synced`). */
+const auShown = (au) => (au?.synced ? { ...au, ...au.synced } : au);
+/** The trust level in words that cannot be read as a risk level ("high" trust is good). */
+const trustWord = (lv) => ({ high: 'trusted', medium: 'some trust', low: 'little trust', unrated: 'unrated' })[lv] || lv || '–';
 const ilink = (path, html, title) => `<a href="${esc(path)}" onclick="event.stopPropagation();return navA(event,this)"${title ? ` title="${esc(title)}"` : ''}>${html}</a>`;
 const hue = (s) => { let h = 7; for (const c of String(s)) h = (h * 31 + c.charCodeAt(0)) >>> 0; return h % 360; };
 const avatar = (id, label, size = 30) => `<span class="av" style="--h:${hue(id)};width:${size}px;height:${size}px;font-size:${Math.round(size * 0.38)}px">${esc(String(label || id || '?').replace(/^[^a-z0-9]+/i, '').slice(0, 2).toUpperCase() || '?')}</span>`;

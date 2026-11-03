@@ -31,7 +31,7 @@ const BY_ROLE = {
   amm: { freeze: 'low', move_user_funds: 'medium' },
   liquid_staking: { freeze: 'low' },
   staking_pool: { freeze: 'low' },
-  account: { account_control: 'high' }, // the design of a smart wallet: who may call it decides (see control)
+  account: { account_control: 'low' }, // what a smart wallet is for; anyone being able to call it is caught apart (unguarded_power)
   dao: { set_admins: 'info', upgrade: 'low' },
   multisig: { set_admins: 'info', account_control: 'low' },
   factory: { set_fees: 'info', upgrade: 'medium', move_user_funds: 'medium' },
