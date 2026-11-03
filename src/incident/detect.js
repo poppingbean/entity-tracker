@@ -104,8 +104,8 @@ async function scanExchanges(blocks) {
       const key = `xdrain:${f.to}:${Math.floor(f.ts / 3600e3)}`;
       await col('incident_detections').updateOne({ _id: key }, { $set: detected }, { upsert: true });
       const sev = correlated || usd >= C.alwaysUsd ? 'high' : 'medium';
-      if (await raise(key, { type: 'drain_suspected', severity: sev, title: `Possible ${name === 'an exchange' ? 'exchange' : name} hot-wallet drain: ~$${Math.round(usd).toLocaleString('en-US')} to a new account ${f.to.slice(0, 16)}…`,
-        text: `${reasons.join('; ')}. Tracing it now.`, url: `/firewall?q=${encodeURIComponent(f.to)}`, related: { wallets: [f.to] }, data: detected, ts: f.ts })) {
+      if (await raise(key, { type: 'drain_suspected', severity: sev, title: `Large transfer from ${name === 'an exchange' ? 'an exchange' : name} hot wallet: ~$${Math.round(usd).toLocaleString('en-US')} to ${f.to.slice(0, 16)}… (being checked)`,
+        text: `${reasons.join('; ')}. Being checked: most large transfers are ordinary.`, url: `/firewall?q=${encodeURIComponent(f.to)}`, related: { wallets: [f.to] }, data: detected, ts: f.ts })) {
         await enqueueIncident({ account: f.to }, { reason: 'detected', detected });
         await scheduleReview(key, 'detection');
         raised.push(detected);
@@ -203,8 +203,8 @@ export async function scanBlocks(blocks) {
       tags: [{ tag: 'drain?', ts: now }, ...(own?.own_funds ? [{ tag: 'safe', ts: Date.now(), why: own.explanation, by: 'own-funds check' }] : [])] };
     await col('incident_detections').updateOne({ _id: `${w.receiver}|${w.protocol}|${Math.floor(w.first / 3600e3)}` }, { $set: detected }, { upsert: true });
     if (own?.own_funds) { info(`large withdrawal of own funds: ${w.receiver} took $${Math.round(w.usd)} from ${w.protocol} (${own.explanation})`); continue; }
-    await raise(`drain:${w.receiver}:${w.protocol}:${Math.floor(w.first / 3600e3)}`, { type: 'drain_suspected', severity: 'high', title: `Possible exploit in progress: ${w.receiver} took ~$${Math.round(w.usd).toLocaleString('en-US')} from ${w.protocol}`,
-      text: `${s.reasons.join('; ')}. Tracing it now.`, url: `/firewall?q=${encodeURIComponent(w.receiver)}`, related: { wallets: [w.receiver] }, data: detected });
+    await raise(`drain:${w.receiver}:${w.protocol}:${Math.floor(w.first / 3600e3)}`, { type: 'drain_suspected', severity: 'high', title: `Large outflow from ${w.protocol}: ${w.receiver} took ~$${Math.round(w.usd).toLocaleString('en-US')} (being checked)`,
+      text: `${s.reasons.join('; ')}. Being checked: most large transfers are ordinary.`, url: `/firewall?q=${encodeURIComponent(w.receiver)}`, related: { wallets: [w.receiver] }, data: detected });
     await enqueueIncident({ account: w.receiver }, { reason: 'detected', detected });
     await scheduleReview(`${w.receiver}|${w.protocol}|${Math.floor(w.first / 3600e3)}`, 'detection');
     info(`incident suspected: ${w.receiver} took $${Math.round(w.usd)} from ${w.protocol} (${s.reasons.join('; ')})`);

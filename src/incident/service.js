@@ -60,6 +60,7 @@ export async function investigate(input, { ai = true, detected = null, review = 
   if (doc.status !== 'confirmed') {
     const r = await col('firewall_flags').deleteMany({ source: 'incident', incident: doc._id });
     if (prev?.alerted) await col('alerts').updateOne({ _id: `incident:${doc._id}`, title: { $not: /^Retracted/ } }, [{ $set: { title: { $concat: ['Retracted (not a hack): ', '$title'] }, severity: 'info' } }]).catch(() => {});
+    await retractMoveAlerts([doc._id]);
     if (r.deletedCount) info(`incident ${doc._id}: no longer confirmed, ${r.deletedCount} flags removed`);
   }
   if (doc.status === 'confirmed' && !prev?.alerted) {
@@ -73,6 +74,14 @@ export async function investigate(input, { ai = true, detected = null, review = 
   }
   info(`incident ${doc._id}: ${doc.status} ${doc.kind} $${doc.stolen_usd} (${flagged} accounts flagged)`);
   return doc;
+}
+
+/** The "stolen funds moved" alerts of cases that are not (or no longer) confirmed say they were retracted. Returns how many. */
+export async function retractMoveAlerts(ids = null) {
+  if (!ids) { const proven = new Set(await col('incidents').distinct('_id', { status: 'confirmed' })); ids = (await col('alerts').distinct('data.incident', { type: 'stolen_funds_moved' })).filter((i) => !proven.has(i)); }
+  if (!ids.length) return 0;
+  const r = await col('alerts').updateMany({ type: 'stolen_funds_moved', 'data.incident': { $in: ids }, title: { $not: /^Retracted/ } }, [{ $set: { title: { $concat: ['Retracted (not a hack): ', '$title'] }, severity: 'info' } }]).catch(() => null);
+  return r?.modifiedCount || 0;
 }
 
 export const enqueueIncident = (input, { reason = 'manual', detected = null } = {}) => col('incident_queue').updateOne({ _id: JSON.stringify(input) },
