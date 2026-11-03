@@ -100,7 +100,7 @@ function anaAiBody(a) {
       <button onclick="anaRun(${esc(JSON.stringify(x.id))},this)">Show figures</button><div></div></div>`).join('')}</details>`;
   return h + '<p class="small muted">Written by the NEAR AI analyst from the figures on this page; check the tables before relying on it.</p></div>';
 }
-/** The analyst's full report (TrustFlow Research sections), with each cluster's evidence and whether it is proof or a pattern. */
+/** The analyst's full report (its sections), with each cluster's evidence and whether it is proof or a pattern. */
 const REPORT_SECTIONS = [['launch_safety', 'Launch and contract safety'], ['creator', 'Creator'], ['price_flows', 'Price and flows'], ['early_buyers', 'Early buyers and snipers'], ['holders', 'Holders'], ['repeat_actors', 'Repeat actors'], ['risk_notes', 'Risk notes']];
 function aiReport(R) {
   if (!R) return '';

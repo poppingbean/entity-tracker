@@ -1,5 +1,4 @@
-// The token analyst's instructions: TrustFlow Research's on-chain analyst prompt (../prompts/near_onchain_analyst_prompt.md, beside this repo),
-// adapted to how this tracker works. The tracker pulls and decodes the full ledger, reads live balances, contracts and funders itself, and
+// The token analyst's instructions (src/ai/prompts/token-analyst*.md): our on-chain analyst prompt, adapted to how this tracker works. The tracker pulls and decodes the full ledger, reads live balances, contracts and funders itself, and
 // hands the model one evidence packet; the model writes the investigation (report sections + a Telegram post) from that packet only.
 // The data-pulling, decoding and file-writing parts of the original prompt are done by the tracker; its standards, tracing techniques,
 // known actors and house style are here.

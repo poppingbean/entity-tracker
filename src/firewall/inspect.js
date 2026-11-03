@@ -22,7 +22,7 @@ const WEB_TLD = /\.(com|org|net|io|xyz|app|finance|exchange|money|fi|dev|ai|co|g
 const NEAR_SITES = ['near.org', 'near.ai', 'nearblocks.io', 'pikespeak.ai', 'app.ref.finance', 'ref.finance', 'rhea.finance', 'app.rhea.finance', 'mynearwallet.com', 'app.mynearwallet.com', 'meteorwallet.app',
   'wallet.meteorwallet.app', 'herewallet.app', 'hot-labs.org', 'sender.org', 'senderwallet.io', 'app.burrow.finance', 'burrow.finance', 'metapool.app', 'linearprotocol.org', 'mintbase.xyz', 'paras.id',
   'intear.tech', 'meme.cooking', 'aurora.dev', 'bitte.ai', 'wallet.bitte.ai', 'nearmobile.app', 'intents.near.org', 'app.near-intents.org', 'near-intents.org', 'dex.intear.tech', 'justhoot.com', 'tkn.homes',
-  'fastnear.com', 'sweateconomy.com', 'shitzu.app', 'nearcatalog.org', 'trustflow.vn'];
+  'fastnear.com', 'sweateconomy.com', 'shitzu.app', 'nearcatalog.org'];
 const LURE = /airdrop|claim|reward|bonus|giveaway|free-?near|verify|validate|sync|rectif|restore|migrat|unlock|recover|connect-?wallet|wallet-?connect|support|dapps?-?fix/;
 // well-known tokens by symbol (the tracker itself follows launchpad tokens)
 const KNOWN_TOKENS = { near: 'wrap.near', wnear: 'wrap.near', usdt: 'usdt.tether-token.near', usdc: '17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1', sweat: 'token.sweat',
