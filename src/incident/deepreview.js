@@ -1,6 +1,7 @@
 // Deep review: a second, slower look at every finding, a few minutes after it was raised (INCIDENT_REVIEW_DELAY_MINUTES, 3) (the first look is made in seconds, from one block's
 // worth of evidence). Findings are reviewed one at a time, in the order they were found:
-//   1. the full trace again (the money's path has had time to settle; upstream, own funds, the attacker signals)
+//   1. a follow-up of the trace (followup.js: what the accounts did since; a full trace when new money came in or the case is from an
+//      older version)
 //   2. the receiver's past with whoever paid it: a wallet that has been receiving from the same accounts for months is consolidating,
 //      not stealing; one that never heard of them before is not
 //   3. NEAR AI reads it all and gives a verdict (hack / not a hack / unclear) with its reasons

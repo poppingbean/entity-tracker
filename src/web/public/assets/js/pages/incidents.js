@@ -121,7 +121,7 @@ async function incidentPage(id) {
   const isHack = incTag(d) === 'hack';
   h = `<div style="margin-bottom:10px"><a href="/firewall" onclick="return navA(event,this)" class="cta" style="padding:7px 14px;font-size:13px">← Safety Check</a></div>` + h;
   h += `<div class="card"><div class="bar"><h2 style="margin:0">${esc(incTag(d) === 'safe' ? `Not a hack${d.review?.ai?.what_it_is ? `: ${d.review.ai.what_it_is}` : ''}` : drain || !isHack ? `${INC_KIND[d.kind] || 'Incident'}${isHack ? '' : ' (not confirmed)'}` : A?.attack_type || INC_KIND[d.kind] || 'Incident')}${drain ? ` from ${esc(d.drain?.exchange || 'an exchange')}` : d.target?.account ? ` on ${esc(d.target.account)}` : ''}</h2>${incStatus(d.status, d)}${d.detected ? '<span class="chip">caught live</span>' : ''}<span class="spacer"></span>
-      <span class="muted small">traced ${since(d.traced_ts)} · ${d.stats?.txs || 0} transactions read</span><button onclick="incRetrace('${esc(d.attacker.account)}', this)" ${retracing ? 'disabled' : ''}>${retracing ? 'Tracing …' : 'Trace again'}</button></div>
+      <span class="muted small">traced ${since(d.traced_ts)} · ${d.stats?.txs || 0} transactions read${d.followed_ts ? ` · followed up ${since(d.followed_ts)}` : ''}</span><button onclick="incRetrace('${esc(d.attacker.account)}', this)" ${retracing ? 'disabled' : ''} title="A quick look at what happened since the last run">${retracing ? 'Working …' : 'Follow up'}</button><button onclick="incRetrace('${esc(d.attacker.account)}', this, true)" ${retracing ? 'disabled' : ''} title="Trace the whole case again and write a new report (1-3 minutes)">Full re-trace</button></div>
     <p style="font-size:16px;margin:10px 0"><b>${esc(incTag(d) === 'safe' ? `Checked: not a hack. ${d.review?.why || ''}` : A?.headline || d.signals?.[0] || '')}</b></p>
     <div class="tiles">${tile(isHack ? 'Taken' : 'Moved', usd(d.stolen_usd), esc(d.prices_note || ''), isHack ? 'r' : '')}${tile(isHack ? 'Victims' : 'Paid by', (d.victims || []).length, (d.victims || []).filter((v) => !v.contract).length ? `${(d.victims || []).filter((v) => !v.contract).length} wallets` : 'contracts')}${tile(isHack ? 'Attacker accounts' : 'Accounts', (d.accounts || []).length, `${(d.accounts || []).filter((a) => a.role === 'fake_token').length} fake tokens`)}
       ${tile('Sent off NEAR', usd(offNear), [...new Set(ex.filter((e) => e.chain && e.chain !== 'NEAR').map((e) => e.chain))].join(', ') || 'nothing yet', offNear ? 'r' : '')}${tile('Still held', usd(d.held_usd), isHack ? 'on the attacker\'s NEAR accounts' : 'on these NEAR accounts')}${tile('Freezable', usd(freezeUsd), freezeUsd ? 'an issuer can freeze it' : 'nothing an issuer can freeze', freezeUsd ? 'g' : '')}</div>
@@ -131,8 +131,13 @@ async function incidentPage(id) {
     <p><b>${esc(R.tag === 'safe' ? 'Not a hack' : R.tag === 'hack' ? 'Confirmed hack' : 'Not confirmed: still under review')}</b>: ${esc(R.why || '')}</p>
     ${R.ai?.reasons?.length ? `<ul class="small">${R.ai.reasons.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>` : ''}
     ${R.past?.length ? `<table class="small"><tr><th>Who paid it</th><th class="num">Earlier transfers</th><th class="num">USD</th><th>Since</th></tr>${R.past.map((p) => `<tr><td class="acct">${esc(short(p.account, 30))}</td><td class="num">${p.n}</td><td class="num">${usd(p.usd)}</td><td>${p.first_ts ? new Date(p.first_ts).toISOString().slice(0, 10) : '–'}</td></tr>`).join('')}</table>` : ''}
-    <p class="muted small" style="margin:6px 0 0">Run ${LIVE.delayMin} minutes after the finding: the full trace again, the receiver's past with whoever paid it, then NEAR AI. A hack needs the rules' attacker signal; NEAR AI can clear an unconfirmed case.</p></div>`;
+    <p class="muted small" style="margin:6px 0 0">Run ${LIVE.delayMin} minutes after the finding: a follow-up of the trace, the receiver's past with whoever paid it, then NEAR AI. A hack needs the rules' attacker signal; NEAR AI can clear an unconfirmed case.</p></div>`;
   else if (!isHack) h += `<div class="card"><p class="small" style="margin:0">${tagChip(incTag(d), d.kind)} This case is not a confirmed hack. Its deep review runs ${LIVE.delayMin} minutes after it was found.</p></div>`;
+  const FU = (d.followups || []).slice().reverse();
+  if (FU.length) h += `<div class="card"><div class="bar"><h2 style="margin:0">Follow-ups <span class="muted">${FU.length}</span></h2><span class="muted small">what happened since the report, newest first</span></div>
+    ${FU.slice(0, 8).map((f) => `<div style="border-top:1px solid var(--line);padding:8px 0"><div class="small"><b>${when(f.ts)}</b> <span class="muted">· ${f.txs_read} new transactions read${f.more ? ' (busy: the newest only)' : ''}</span></div>
+      <div class="small">${f.new_moves ? `${f.new_moves} new move${f.new_moves > 1 ? 's' : ''} (${usd(f.moved_usd)})${f.new_exits ? `, ${f.new_exits} leaving NEAR or reaching a service (${usd(f.exit_usd)})` : ''}` : 'nothing moved'} · still held ${usd(f.held_before)} → <b>${usd(f.held_after)}</b>${(f.new_accounts || []).length ? ` · new wallets: ${f.new_accounts.map((a) => esc(short(a, 18))).join(', ')}` : ''}</div>
+      ${f.note ? `<div class="small" style="margin-top:4px"><span class="muted">NEAR AI:</span> ${esc(f.note.update)}${f.note.where_now ? ` <b>${esc(f.note.where_now)}</b>` : ''}${f.note.act_now ? `<div class="muted">${esc(f.note.act_now)}</div>` : ''}${f.note.worth_full_review ? '<div class="a">NEAR AI suggests a full re-trace.</div>' : ''}</div>` : ''}</div>`).join('')}</div>`;
   if (A) h += `<div class="card"><div class="bar"><h2 style="margin:0">NEAR AI analyst</h2><span class="muted small">confidence ${esc(A.confidence)} · ${A.unverified_amounts?.length ? `<span class="r">unverified amounts: ${esc(A.unverified_amounts.join(', '))}</span>` : 'every amount checked against the evidence'}</span></div>
     <p>${esc(A.summary)}</p>
     <div class="grid2"><div><h3>How it worked</h3><ol class="small" style="padding-left:20px">${A.how_it_worked.map((s) => `<li style="margin:4px 0">${esc(s)}</li>`).join('')}</ol></div>
@@ -173,21 +178,22 @@ async function incidentPage(id) {
   return h;
 }
 let retracing = null;
-async function incRetrace(account, btn) {
+async function incRetrace(account, btn, full = false) {
   if (retracing) return; // one trace at a time
   retracing = account;
-  if (btn) { btn.disabled = true; btn.textContent = 'Tracing …'; }
+  if (btn) { btn.disabled = true; btn.textContent = 'Working …'; }
   const status = (t) => { const el = $('incRe') || ($('main').insertAdjacentHTML('afterbegin', '<div class="card muted" id="incRe"></div>'), $('incRe')); el.textContent = t; };
-  status('Tracing again (1-3 minutes) …');
+  const what = full ? 'Tracing the whole case again' : 'Following up';
+  status(full ? `${what} (1-3 minutes) …` : `${what}: reading what happened since the last run …`);
   const q = new URLSearchParams({ q: account });
   try {
-    let r = await fetch('/api/incident/investigate?' + new URLSearchParams({ q: account, run: '1', force: '1' })).then((x) => x.json());
+    let r = await fetch('/api/incident/investigate?' + new URLSearchParams({ q: account, run: '1', force: '1', ...(full ? { full: '1' } : {}) })).then((x) => x.json());
     if (r.error) { status(r.error); return; }
     while (true) {
       await new Promise((res) => setTimeout(res, 4000));
       r = await fetch('/api/incident/investigate?' + q).then((x) => x.json());
       if (!r.job?.running) break;
-      status(`Tracing again … ${r.job.step || ''} (started ${since(r.job.started)})`);
+      status(`${what} … ${r.job.step || ''} (started ${since(r.job.started)})`);
     }
     if (r.job?.error) { status(`The trace failed: ${r.job.error}`); return; }
     render();

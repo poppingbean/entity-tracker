@@ -24,7 +24,7 @@ const IMPLICIT = /^[0-9a-f]{64}$|^0x[0-9a-f]{40}$/;
 // accounts that pass value through rather than own it: wrapping, swapping, intents, launch routers
 const PASS_THROUGH = new Set(['wrap.near', 'intents.near', 'aggregatedex.near', 'v2.ref-finance.near', 'dclv2.ref-labs.near', 'dex.intear.near', 'meteor-relayer.near', 'relay.aurora', 'near']);
 const PSEUDO = /^(mint|burn|intents|chain):/;
-const isRouter = (id) => PASS_THROUGH.has(id) || PSEUDO.test(id);
+export const isRouter = (id) => PASS_THROUGH.has(id) || PSEUDO.test(id);
 const FREEZABLE = { 'usdt.tether-token.near': 'Tether can freeze it (add_to_blacklist / destroy_black_funds)', '17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1': 'Circle can freeze it (blacklist)' };
 const MAX_TXS = 800, HOP_TXS = 300;
 // following the money stays bounded: a busy wallet can pay hundreds of accounts, and each implicit one costs a 1Click status lookup
@@ -287,7 +287,7 @@ function destKind(id) {
 }
 
 /** Follow value out of the attacker's accounts: hop by hop through new wallets, up to exchanges / bridges / NEAR Intents. */
-async function followMoney(ownSet, flows, { since, depth, own, fake }) {
+export async function followMoney(ownSet, flows, { since, depth, own, fake }) {
   const moves = [], exits = [], wallets = [], seen = new Set(ownSet);
   const keep = (f) => f.ts >= since && !fake.has(baseToken(f.token)) && !/^nft:|^mint:|^burn:/.test(f.token) && !(PSEUDO.test(f.to) && !f.to.startsWith('chain:'));
   let frontier = flows.filter((f) => keep(f) && ownSet.has(f.from) && !ownSet.has(f.to));
@@ -345,7 +345,7 @@ async function followMoney(ownSet, flows, { since, depth, own, fake }) {
 }
 
 /** What one account holds now (NEAR + tokens, valued), with the tokens an issuer can freeze. */
-async function heldBy(account) {
+export async function heldBy(account) {
   const j = await fastnearGet(`/v1/account/${encodeURIComponent(account)}/full`).catch(() => null);
   let nearRaw = '0';
   try { nearRaw = (await viewAccount(account))?.amount || '0'; } catch {}
