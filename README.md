@@ -2,7 +2,7 @@
 
 **The problem.** On NEAR, a user about to sign a transaction, send to a wallet or buy a new token cannot tell whether it is safe, and when an exchange or a protocol is drained, nobody can see where the money goes until it is gone. **Safe Near** watches every NEAR block live, audits every new contract, catches large outflows within seconds, traces the money across chains, and answers "is it safe?" for anything a user pastes, on a website, a Telegram bot and an API wallets can call before signing. It is read-only: no wallet, no keys, no trading.
 
-**Hosted demo:** <https://app.safe-near.org> (public, no login) · **Telegram:** [@safenear_bot](https://t.me/safenear_bot) · **License:** [MIT](LICENSE)
+**Website (live, public, no login): <https://app.safe-near.org>** · **Telegram:** [@safenear_bot](https://t.me/safenear_bot) · **API:** `https://app.safe-near.org/api/v1/…` ([docs](docs/tx-firewall.md)) · **License:** [MIT](LICENSE)
 
 ## Try it (5 minutes, on the hosted demo)
 
