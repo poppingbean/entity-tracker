@@ -4,7 +4,7 @@ Goal: **every contract deployed on NEAR mainnet is audited automatically, soon a
 
 ## 1. What we have today
 
-The audit (`src/audit/`, ported from the TrustFlow backend) runs **on demand** for one account. It is triggered by the scanner (each launch it checks), the Contract audit page, on-demand token fetches and `node src/cli.js audit`. Results are cached for an hour in `audits`.
+The audit (`src/audit/`, ported from our earlier backend) runs **on demand** for one account. It is triggered by the scanner (each launch it checks), the Contract audit page, on-demand token fetches and `node src/cli.js audit`. Results are cached for an hour in `audits`.
 
 | Part | What it does | Limit for other contract types |
 |---|---|---|

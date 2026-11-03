@@ -1,5 +1,5 @@
 // Every system prompt the AI is given, as plain Markdown files in this folder, so they can be read and edited without touching code.
-//   {{include:name}}  inserts another prompt file (shared parts: the TrustFlow analyst standards, the NFT analyst rules …)
+//   {{include:name}}  inserts another prompt file (shared parts: the token analyst standards, the NFT analyst rules …)
 //   {{name}}          a value the caller fills in (a config number, the list of contract types …); a missing one is an error
 // prompt('audit-code-review', { roles, powers }) returns the finished text. Files are read once and cached.
 import fs from 'node:fs';

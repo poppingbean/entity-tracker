@@ -1,4 +1,4 @@
-// Read-only NEAR contract queries for the audit (ported from the TrustFlow backend's nearRpcClient). Goes through the tracker's
+// Read-only NEAR contract queries for the audit (ported from our earlier backend's nearRpcClient). Goes through the tracker's
 // RPC helper, so it uses the same endpoints, retries and FastNEAR key as everything else.
 import { rpc } from '../near/rpc.js';
 

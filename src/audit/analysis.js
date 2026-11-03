@@ -1,4 +1,4 @@
-// Code-level and behaviour-level checks for NEAR contracts (ported from the TrustFlow backend's nearContractAnalysis).
+// Code-level and behaviour-level checks for NEAR contracts (ported from our earlier backend's nearContractAnalysis).
 // Access keys alone say nothing about what the contract code does: a keyless ("locked") token can still carry an owner backdoor.
 // Example: doge.neardogecoin.near exports a fake `storage_unstake(account_id, amount)` that the owner calls on buyers to zero their
 // balance, so every later sell panics with "doesn't have enough balance".

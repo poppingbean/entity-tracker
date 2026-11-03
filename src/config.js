@@ -192,7 +192,7 @@ export const config = {
     positionCheckSeconds: num(process.env.POSITION_CHECK_SECONDS, 60),
     rugWatch: bool(process.env.SIM_RUG_WATCH, true),                 // creator dumps a held token: blacklist the creator, exit the position
   },
-  // contract audit (ported from the TrustFlow backend): access keys, code, tax and sell behaviour of the token contract
+  // contract audit (ported from our earlier backend): access keys, code, tax and sell behaviour of the token contract
   audit: {
     enabled: bool(process.env.AUDIT_ENABLED, true),
     maxRisk: num(process.env.AUDIT_MAX_RISK, 70),                    // a risk score at or above this fails the gate (70 = "critical")

@@ -1,4 +1,4 @@
-// Contract audit scoring (ported from the TrustFlow backend's contractAuditService / auditBehaviour for NEAR).
+// Contract audit scoring (ported from our earlier backend's contractAuditService / auditBehaviour for NEAR).
 // A flat checklist of {key, label, labelVi, category, weight, hit, detail, detailVi}: `weight` is what a hit adds to the risk score
 // (negative for trust-building signals); a check that did not hit still appears with hit:false so the UI shows it as a passed check.
 // Risk: 0-19 low, 20-44 medium, 45-69 high, 70-100 critical. Trust is separate (not 100 - risk): a brand-new token can have a low
