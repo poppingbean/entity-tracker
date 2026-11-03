@@ -146,7 +146,7 @@ function syncBanner(t) {
 async function tokenPage(id) {
   let t0;
   try { t0 = await get('/api/token', { id }); } catch (e) { if (/not found/.test(e.message)) return fetchPage(id); throw e; }
-  const t = t0, o = t.outcome || {}, es = t.entries || [], au = t.audit;
+  const t = t0, o = t.outcome || {}, es = t.entries || [], au = auShown(t.audit);
   const mix = Object.fromEntries(MIXV.map(([v]) => [v, { w: 0, near: 0 }])), groups = new Map();
   for (const e of es) {
     const v = tagOk(e.tag);
@@ -200,7 +200,7 @@ async function tokenPage(id) {
       ${cn.siblings.length ? `<div style="margin-top:8px">${cn.siblings.map((s) => `<a class="gchip" href="${esc(P.creator(s.account))}" onclick="return navA(event,this)" title="${esc(s.relations.map((r) => REL[r.type] || r.type).join(', '))}"><i style="background:${s.rugged || s.blacklisted ? 'var(--loss)' : 'var(--unknown)'}"></i><span>${esc(short(s.account, 22))} · ${s.rugged}/${s.launches}</span></a>`).join('')}</div>` : ''}</div>`;
   }
   if (o.rugged) h += `<div class="card err"><h2>Why it counts as rugged</h2><ul class="flags">${rugWhy(o, t.rug)}</ul></div>`;
-  h += `<div class="card"><div class="head"><h2>Contract audit</h2>${ilink(P.audit(t.id), 'Open the full audit →')}</div>` + (au?.available ? `<p><span class="v ${riskCls === 'g' ? 'good' : riskCls === 'a' ? 'neutral' : 'bad'}">risk ${au.risk_score} · ${esc(au.risk_level)}</span> <span class="v ${au.trust_level === 'high' ? 'good' : 'unknown'}">trust ${au.trust_score}</span> · full-access keys ${au.full_access_keys ?? '–'} · ${(au.confirmed_malicious || []).length ? '<span class="r">confirmed: ' + au.confirmed_malicious.map((c) => esc(c.key)).join(', ') + '</span>' : 'no confirmed malicious finding'}</p>${(au.findings || []).length ? '<ul class="flags">' + au.findings.map((f) => `<li>${esc(f.key)}${f.weight != null ? ` (+${f.weight})` : ''}${f.detail ? ' <span class="muted">' + esc(f.detail) + '</span>' : ''}</li>`).join('') + '</ul>' : ''}` : '<p class="muted">Not audited yet.</p>') + '</div>';
+  h += `<div class="card"><div class="head"><h2>Contract audit</h2>${ilink(P.audit(t.id), 'Open the full audit →')}</div>` + (au?.available ? `<p><span class="v ${riskCls === 'g' ? 'good' : riskCls === 'a' ? 'neutral' : 'bad'}">risk ${au.risk_score} · ${esc(au.risk_level)}</span> <span class="v ${au.trust_level === 'high' ? 'good' : 'unknown'}">trust ${au.trust_score} · ${esc(trustWord(au.trust_level))}</span> · full-access keys ${au.full_access_keys ?? '–'} · ${(au.confirmed_malicious || []).length ? '<span class="r">confirmed: ' + au.confirmed_malicious.map((c) => esc(c.key)).join(', ') + '</span>' : 'no confirmed malicious finding'}</p>${(au.findings || []).length ? '<ul class="flags">' + au.findings.map((f) => `<li>${esc(f.key)}${f.weight != null ? ` (+${f.weight})` : ''}${f.detail ? ' <span class="muted">' + esc(f.detail) + '</span>' : ''}</li>`).join('') + '</ul>' : ''}` : '<p class="muted">Not audited yet.</p>') + '</div>';
   return h;
 }
 

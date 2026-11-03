@@ -19,7 +19,7 @@ import { describeFunctions, aiFunctionReview, mergeFunctions } from './functions
 import { reviewSource } from './source.js';
 import { aiCodeReview, aiDeepReview, aiExplainChange, aiWriteUp } from './ai.js';
 
-export const AUTO_AUDIT_V = 4; // bump when the audit logic changes: older code audits are redone
+export const AUTO_AUDIT_V = 5; // bump when the audit logic changes: older code audits are redone
 const STANDARD_METHODS = new Set([...STANDARD, 'nft_transfer', 'nft_transfer_call', 'nft_token', 'nft_approve', 'nft_revoke', 'nft_revoke_all', 'nft_is_approved', 'nft_resolve_transfer',
   'nft_payout', 'nft_transfer_payout', 'mt_transfer', 'mt_transfer_call', 'mt_batch_transfer', 'mt_batch_transfer_call', 'deposit', 'deposit_and_stake', 'stake', 'unstake', 'unstake_all',
   'withdraw', 'withdraw_all', 'stake_all', 'swap', 'add_liquidity', 'remove_liquidity', 'execute', 'add_proposal', 'act_proposal', 'confirm', 'add_request', 'delegate', 'undelegate', 'vote', 'ping']);

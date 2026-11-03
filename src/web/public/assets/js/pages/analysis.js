@@ -22,7 +22,7 @@ async function analysisPage(id, refresh) {
   h += `<div class="card ${a.flags.some((f) => f.level === 'high') ? 'err' : a.flags.some((f) => f.level === 'medium') ? 'warn' : ''}"><h2>Risk notes</h2>${a.flags.length ? `<ul class="flags">${a.flags.map((f) => `<li><span class="v ${FLAGCLS[f.level]}">${f.level}</span> ${esc(f.text)}</li>`).join('')}</ul>` : '<p class="muted">Nothing flagged.</p>'}</div>`;
   h += `<div id="anaAi">${anaAiBody(a)}</div>`;
   // launch + creator
-  const au = L.audit;
+  const au = auShown(L.audit);
   h += `<div class="grid2"><div class="card"><h2>Launch mechanics</h2><div class="tiles">${tile('Launchpad', esc(L.launchpad || '–'), when(L.live_ts))}${tile('Supply', n(L.supply, 0))}${tile('Dev buy', L.dev_buy_near != null ? n(L.dev_buy_near, 2) + ' N' : '–')}
       ${tile('Pool', esc(L.pool ? `${L.pool.dex} · ${L.pool.quote === 'wrap.near' ? 'wNEAR' : L.pool.quote}` : '–'), L.lp_locked === true ? 'liquidity locked' : L.lp_locked === false ? 'liquidity NOT locked' : '', L.lp_locked === false ? 'r' : '')}
       ${tile('Tax', L.transfer_fee_pct != null ? 'transfer ' + L.transfer_fee_pct + '%' : [L.buy_tax_pct != null ? 'buy ' + L.buy_tax_pct + '%' : '', L.sell_tax_pct != null ? 'sell ' + L.sell_tax_pct + '%' : ''].filter(Boolean).join(' / ') || '–')}

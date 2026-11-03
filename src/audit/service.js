@@ -71,6 +71,21 @@ export function summarizeAuto(auto) {
     headline: auto.summary?.headline || null };
 }
 
+// The automated audit is the verdict a user sees (the contract lists, Safety Check): the key-and-method checks are held to its level
+// when shown, so a contract the list calls High never shows a 100/100 trust score. The stored scores (and the scanner's gate) are unchanged.
+const FLOOR = { critical: 70, high: 45, medium: 20 }, CAP = { critical: 10, high: 39, medium: 69 };
+const riskLevel = (s) => (s >= 70 ? 'critical' : s >= 45 ? 'high' : s >= 20 ? 'medium' : 'low');
+const trustLevel = (s) => (s >= 70 ? 'high' : s >= 40 ? 'medium' : s >= 15 ? 'low' : 'unrated');
+/** The scores as shown, held to the automated audit's level, or null when they already agree. */
+export function syncedScores(doc) {
+  const a = doc?.auto;
+  if (!a?.level || a.no_code || doc.risk?.score == null || doc.trust?.score == null) return null;
+  const risk = Math.max(doc.risk.score, FLOOR[a.level] ?? 0), trust = Math.min(doc.trust.score, CAP[a.level] ?? 100);
+  if (risk === doc.risk.score && trust === doc.trust.score) return null;
+  const top = (a.findings || []).find((f) => f.severity === a.level);
+  return { level: a.level, risk_score: risk, risk_level: riskLevel(risk), trust_score: trust, trust_level: trustLevel(trust), why: top?.title || null };
+}
+
 export function summarizeAudit(doc) {
   if (!doc || doc.notFound || doc.risk?.score == null) return { available: false, reason: doc?.notFound ? 'account has no contract' : 'no audit', automated: summarizeAuto(doc?.auto) };
   const hits = doc.risk.factors.filter((f) => f.hit && f.weight > 0).sort((a, b) => b.weight - a.weight);
@@ -82,6 +97,6 @@ export function summarizeAudit(doc) {
     full_access_keys: doc.raw?.accessKeys?.filter((k) => k.access_key?.permission === 'FullAccess').length ?? null,
     privileged_methods: code?.privilegedNames?.slice(0, 8) || [], non_standard_methods: code?.nonStandard?.slice(0, 8) || [],
     sells: beh ? { ok: beh.sellOk, failed: beh.sellFail, blocked_wallets: beh.blockedSellers, buys: beh.buys } : null, audited_ts: doc.fetchedAt,
-    automated: summarizeAuto(doc.auto),
+    automated: summarizeAuto(doc.auto), synced: syncedScores(doc),
   };
 }

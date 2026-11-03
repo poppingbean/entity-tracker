@@ -13,7 +13,7 @@ import { startFetch, jobStatus, catchUp } from '../collect/ondemand.js';
 import { recomputeToken } from '../collect/rugs.js';
 import { redact } from './redact.js';
 import { creatorIndex, creatorBrief, creatorFlag, creatorNetwork } from '../evaluate/creators.js';
-import { auditNearContract, getCachedAudit, validNearAddress, summarizeAudit } from '../audit/service.js';
+import { auditNearContract, getCachedAudit, validNearAddress, summarizeAudit, syncedScores } from '../audit/service.js';
 import { TAGS, tagOf, ruggerGroup, ruggerWallet, BEHAVIOURS, TAG_GROUPS } from '../evaluate/tags.js';
 import { getAnalysis } from '../analysis/token.js';
 import { getNftAnalysis } from '../nft/analysis.js';
@@ -464,7 +464,8 @@ const routes = {
     if (!(fresh && !force) && !auditAllowed(req.socket.remoteAddress || 'ip')) return { error: 'too many audits, try again in a few minutes' };
     const doc = await auditNearContract(address, { force });
     const { _id, ...rest } = doc;
-    return { id: _id, ...rest, summary: summarizeAudit(doc), cached: !!(fresh && !force) };
+    const full = doc.auto ? doc : { ...doc, auto: (await getCachedAudit(address))?.auto }; // the automated audit lives on the same record
+    return { id: _id, ...rest, summary: summarizeAudit(full), synced: syncedScores(full), cached: !!(fresh && !force) };
   },
 
   /** Fetch a token the tracker has not seen: find its launch, read trades and early buyers, audit and analyse it (background job). */
@@ -603,7 +604,7 @@ const routes = {
   },
   '/api/audits': async (u) => {
     const rows = await col('audits').find({}, { projection: { raw: 0, 'risk.factors': 0, 'trust.factors': 0 } }).sort({ fetchedAt: -1 }).limit(clamp(u.searchParams.get('limit'), 30, 100)).toArray();
-    return { rows: rows.map(strip) };
+    return { rows: rows.map((r) => ({ ...strip(r), synced: syncedScores(r), auto: undefined, auto_level: r.auto?.level || null })) };
   },
 
   '/api/wallets': async (u) => {
