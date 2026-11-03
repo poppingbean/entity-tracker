@@ -14,7 +14,7 @@ import { deliverPending } from './alerts/deliver.js';
 import { pollTelegram } from './alerts/telegram.js';
 import { evaluateAccuracy } from './accuracy/run.js';
 import { watchDeploys, processAuditQueue } from './audit/watcher.js';
-import { processIncidentQueue } from './incident/service.js';
+import { processIncidentQueue, retractMoveAlerts } from './incident/service.js';
 import { refreshExchangeRegistry } from './incident/exchanges.js';
 import { reviewDetections } from './incident/detect.js';
 import { processDeepReview, backfillReviews } from './incident/deepreview.js';
@@ -78,7 +78,7 @@ export async function cycle({ evaluate = true } = {}) {
   // hacks the detector (or anyone) queued: traced one at a time, beside the rest (a trace takes a minute or two); unchecked drain reports first
   if (config.incidents.enabled && !runtime.incident && Date.now() - runtime.lastIncident > config.incidents.everyMs) {
     runtime.lastIncident = Date.now();
-    if (!runtime.reviewsBackfilled) { runtime.reviewsBackfilled = true; backfillReviews().catch(() => {}); } // findings from before the deep review
+    if (!runtime.reviewsBackfilled) { runtime.reviewsBackfilled = true; backfillReviews().catch(() => {}); retractMoveAlerts().catch(() => {}); } // findings from before the deep review; moves of cleared cases
     runtime.incident = reviewDetections(3).catch((e) => warn(`drain review: ${e.message}`)).then(() => processIncidentQueue()).catch((e) => warn(`incident queue: ${e.message}`)).finally(() => { runtime.incident = null; });
   }
   // deep reviews on their own lane: a slow investigation in the queue must not hold them up

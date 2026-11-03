@@ -125,7 +125,7 @@ A transaction where a contract paid out a lot gets an "Investigate as a hack" bu
 Beside the box, a **live feed** refreshes every 15 seconds. It shows:
 - where the chain watch is (block, lag);
 - every newly deployed contract as the automated audit checks it;
-- drains caught live, and traced hacks;
+- large transfers caught live (tagged Large transfer, then Normal or Watching; Hack, Exploited or Rugged only with proof), and traced hacks;
 - counts for the last 24 hours.
 
 Each investigation (`/firewall/<incident>`) rebuilds the incident from the chain, the way an investigator would by hand:
@@ -216,7 +216,7 @@ Detectors run beside the worker loop every minute (`ALERTS_EVERY_SECONDS`) and r
 
 Anyone can keep a **watchlist** (`watchlists`) of tokens, wallets, groups, creators and NFT collections:
 
-- **Dashboard:** ☆ Watch on any of those pages, or search on the **Alerts** page. The search only offers what the tracker has (tokens it follows, with their current market cap so look-alike symbols are easy to tell apart; groups, wallets, creators, NFT collections), so an unknown token can't be watched. Kept with an anonymous key in the browser.
+- **Dashboard:** ☆ Watch on any of those pages, or search on the **Monitoring** page. The search only offers what the tracker has (tokens it follows, with their current market cap so look-alike symbols are easy to tell apart; groups, wallets, creators, NFT collections), so an unknown token can't be watched. Kept with an anonymous key in the browser.
 - **Telegram:** open [@safenear_bot](https://t.me/safenear_bot) (`TELEGRAM_BOT_NAME`), press Start and send `/watch <symbol or account>` (e.g. `/watch THREE`); `/unwatch`, `/list`, `/alerts`, `/check <token>`, `/help`. One watchlist per chat (in a group, the whole group shares it). Long polling, no public endpoint. The Alerts page shows this guide.
 - **API:** `POST /api/watch/key {"kind":"api"}` for a key, `POST /api/watch {"key","id"}`, `GET /api/alerts?key=…`, `GET /api/alerts?severity=high&group=rug` for everything, `GET /api/watch/pick?q=…` for what can be watched; POSTs need the header `x-tracker: 1`.
 
@@ -243,13 +243,13 @@ The UI is organised around **tokens**, **wallets / groups** and **safety** (Safe
 
 | Section | Pages |
 |---|---|
-| **Explore** (`/explore`, home) | Headline counts (tokens, early wallets, winning and loss groups, rugged tokens, blacklisted creators, contracts audited and hacks in the last 24 h), then two columns: highest trading volume and latest launches; hacks & drains and new contracts with their audit level; latest alerts and an "Is it safe?" box with the live watch status. |
+| **Explore** (`/explore`, home) | Headline counts (tokens, early wallets, winning and loss groups, rugged tokens, blacklisted creators, contracts audited and hacks in the last 24 h), then two columns: highest trading volume and latest launches; large transfers & hacks and new contracts with their audit level; latest alerts and an "Is it safe?" box with the live watch status. |
+| **Safety Check** | `/firewall`: one box for anything pasted, with the hacks it is linked to and buttons to investigate a transaction or a contract as a hack; beside it the live feed (the chain watch, new contracts as they are audited, large transfers caught live, traced hacks, 24 h counts; refreshed every 15 s). `/firewall/<incident>`: one investigation (NEAR AI analyst report, losses, victims, money trail across chains, attacker accounts, what is still held, attack transactions, timeline). The old `/incidents` links open here. |
+| **Monitoring** | `/alerts`: the alert feed (all, high only, my watchlist), the watchlist with its search, and the Telegram bot guide. |
 | **Tokens & Scanner** (one menu) | `/analysis`, `/analysis/<token>`: the on-chain analysis and AI analyst report. `/tokens`: one page for every launch: the scanner's first check, gates and decision, the early-money bar by tag, outcome, rug flags (price crash / creator dump / dev-rug blacklist); tabs All · New (24 h) · Checked · Passed gates · Bought (sim) · Rugged, plus launchpad poll health. `/signals`: recent tokens with winners in / loss wallets in / mixed. `/tokens/<id>`: outcome tiles, why it counts as rugged, early money by tag, a **bubble map** of the early buyers clustered by group, early buyers with their tags, contract audit summary. `/sim` (simulated wallet with simulated sell buttons), `/scans` and `/scans/<id>` (gate checks and AI reviews), `/audit` and `/audit/<account>`. `/monitor` now opens `/tokens`. |
-| **Safety Check** | `/firewall`: one box for anything pasted, with the hacks it is linked to and buttons to investigate a transaction or a contract as a hack; beside it the live feed (the chain watch, new contracts as they are audited, drains caught live, traced hacks, 24 h counts; refreshed every 15 s). `/firewall/<incident>`: one investigation (NEAR AI analyst report, losses, victims, money trail across chains, attacker accounts, what is still held, attack transactions, timeline). The old `/incidents` links open here. |
-| **Alerts** | `/alerts`: the alert feed (all, high only, my watchlist), the watchlist with its search, and the Telegram bot guide. |
-| **Accuracy** | `/accuracy`: how often the gates, scores, AI analyst and group verdicts were right. |
 | **NFT Collectibles** | `/nfts`, `/nfts/<contract>`: collections, mint, team mints, minter groups, market and wash trades, holders, AI analyst. |
 | **Wallets & Groups** | `/groups`, `/groups/<id>`: linked groups (money only), tag, AI review, track record, tokens bought early, members, funding / money-flow graph, the linked wallets within 3 hops, why the wallets are linked, review history. `/wallets`, `/wallets/<id>`: group membership, track record, early entries, funders, funding chain, outflows. `/entities`, `/entities/<id>`: exchange wallets, services, funders and destinations. `/taggroups`: tag groups (wallets by what they do). `/creators`: token creators and their rug record. |
+| **Accuracy** | `/accuracy`: how often the gates, scores, AI analyst and group verdicts were right. |
 | **System** | `/logs`, `/config` (read-only settings). |
 
 **Launchpads.** `nearlytrade`, `justhoot` and `memecooking` get the full pipeline. `qlyphs` (migration tokens on a DCL pool quoted in QTC; the token goes live at its first real trade), `tkn` (plain FT factory `<symbol>.tkn.near`; the token waits as `awaiting_pool` until its owner adds liquidity on Ref DCL, found within 7 days) and `gaypad` (bonding curve inside `gaypad.j1-racing.near`; each `token_swap` event is a trade, valued from the change in its wNEAR reserve, with dust thresholds scaled down because a whole curve holds only a couple of NEAR) are tracked for their early investors only: no gates, AI analyst or simulated buys. `node src/cli.js backfill <launchpad> <hours>` replays history.

@@ -2,12 +2,12 @@
 // ================================================================== shell + router (History API: /tokens/<id>, /groups/<id>, no #)
 const SECTIONS = [
   { label: 'Explore', views: [['explore', 'Explore']] },
-  { label: 'Tokens & Scanner', views: [['tokens', 'Launches'], ['signals', 'Smart-money signals'], ...(SHOW_SIM ? [['sim', 'Simulated wallet']] : []), ['analysis', 'On-chain analysis'], ['scans', 'Evaluations'], ['audit', 'Contract audit']] },
-  { label: 'Alerts', views: [['alerts', 'Alerts']] },
   { label: 'Safety Check', views: [['firewall', 'Is it safe?']] },
-  { label: 'Accuracy', views: [['accuracy', 'Accuracy']] },
+  { label: 'Monitoring', views: [['alerts', 'Monitoring']] },
+  { label: 'Tokens & Scanner', views: [['tokens', 'Launches'], ['signals', 'Smart-money signals'], ...(SHOW_SIM ? [['sim', 'Simulated wallet']] : []), ['analysis', 'On-chain analysis'], ['scans', 'Evaluations'], ['audit', 'Contract audit']] },
   { label: 'NFT Collectibles', views: [['nfts', 'Collections']] },
   { label: 'Wallets & Groups', views: [['groups', 'Linked groups'], ['taggroups', 'Tag groups'], ['wallets', 'Wallets'], ['creators', 'Creators'], ['entities', 'Funders & entities']] },
+  { label: 'Accuracy', views: [['accuracy', 'Accuracy']] },
 ];
 const TITLES = {
   explore: ['Explore', ''], tokens: ['Tokens & Scanner', "Every launch: who bought it early (by win-rate tag), the scanner's first check and gates, its outcome and whether it was rugged"],
@@ -16,7 +16,7 @@ const TITLES = {
   incidents: ['Hacks & incidents', 'Exploits and drainers traced from the chain: the attacker\'s accounts, the target, how much was taken and from whom, and where the money went, across chains'],
   firewall: ['Safety check', 'Is it safe? One answer for anything you paste, the hacks it is linked to, and a live watch of every new contract and every drain on NEAR'],
   accuracy: ['Measured accuracy', 'How often the gates, rule score, contract audit, AI analyst and group verdicts were right, scored against what happened afterwards'],
-  alerts: ['Alerts', 'Rugs in progress, contract changes, ruggers launching again, NFT team selling and wash trades, and everything on your watchlist'],
+  alerts: ['Monitoring', 'Rugs in progress, contract changes, ruggers launching again, NFT team selling and wash trades, and everything on your watchlist'],
   nfts: ['NFT Collectibles', 'NFT collections: who minted (and whether the team minted its own), minter groups linked by money, the secondary market with wash-trade checks, holders'],
   taggroups: ['Tag groups', 'Every early wallet by what it does: win-rate tag and behaviours, standalone or in a linked group'],
   creators: ['Creators', 'Who launched the tokens: launches, rugged launches and the dev-rug blacklist, and which groups they belong to'],

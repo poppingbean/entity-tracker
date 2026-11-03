@@ -516,8 +516,10 @@ const routes = {
   '/api/security/live': async (u) => {
     const only = u.searchParams.get('only'); // '' | hacks | contracts | risky
     const day = Date.now() - 86400e3;
+    // moves are shown only for cases still confirmed: a case cleared later (a false alarm) takes its moves with it
+    const proven = await col('incidents').distinct('_id', { status: 'confirmed' }).catch(() => []);
     const [moves, news, reports] = only === 'contracts' || only === 'risky' ? [[], [], []] : await Promise.all([
-      col('incident_moves').find({}).sort({ ts: -1 }).limit(20).toArray().catch(() => []),
+      col('incident_moves').find({ incident: { $in: proven } }).sort({ ts: -1 }).limit(20).toArray().catch(() => []),
       col('security_news').find({}).sort({ ts: -1 }).limit(10).toArray().catch(() => []),
       col('reports').find({}).sort({ last_ts: -1 }).limit(10).toArray().catch(() => []),
     ]);
@@ -527,7 +529,7 @@ const routes = {
       only === 'contracts' || only === 'risky' ? [] : col('incident_detections').find({}).sort({ ts: -1 }).limit(20).toArray(),
       only === 'contracts' || only === 'risky' ? [] : col('incidents').find({ status: 'confirmed' }, { projection: { status: 1, kind: 1, 'attacker.account': 1, 'target.account': 1, drain: 1, stolen_usd: 1, held_usd: 1, started_ts: 1, first_seen_ts: 1, 'ai.headline': 1, 'ai.attack_type': 1, 'trail.exit_usd': 1, detected: 1 } }).sort({ first_seen_ts: -1 }).limit(20).toArray(),
       Promise.all([col('contract_deploys').countDocuments({ ts: { $gt: day } }), col('audits').countDocuments({ 'auto.ts': { $gt: day } }), col('audits').countDocuments({ 'auto.ts': { $gt: day }, 'auto.level': { $in: ['high', 'critical'] } }),
-        col('incident_detections').countDocuments({ ts: { $gt: day } }), col('incidents').countDocuments({ first_seen_ts: { $gt: day }, status: 'confirmed' }), col('incident_moves').countDocuments({ ts: { $gt: day } }), col('firewall_flags').estimatedDocumentCount()]),
+        col('incident_detections').countDocuments({ ts: { $gt: day } }), col('incidents').countDocuments({ first_seen_ts: { $gt: day }, status: 'confirmed' }), col('incident_moves').countDocuments({ ts: { $gt: day }, incident: { $in: proven } }), col('firewall_flags').estimatedDocumentCount()]),
     ]);
     // a worker from before the live feed only moves the deploy cursor: that is enough to tell the watch is running
     const watch = watchMeta || (cursor ? { height: cursor.value, tick_ts: cursor.ts, behind: null } : null);

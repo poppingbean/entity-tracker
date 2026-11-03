@@ -62,7 +62,7 @@ views.explore = async () => {
   const watchLine = live?.live ? `<span class="dot ok"></span> Watching NEAR live · block ${Number(W.height).toLocaleString('en-US')} · checked ${since(W.tick_ts)}` : `<span class="dot bad"></span> The chain watch is not running`;
   const lvl = (l, audited) => `<span class="v ${l ? LIVE_LVL[l] || 'unrated' : 'unrated'}">${esc(l || (audited ? '–' : 'auditing'))}</span>`;
   const hackRow = (x) => x.type === 'drain' && (x.verdict === 'own_funds' || (x.tags || []).slice(-1)[0] === 'safe')
-    ? `<tr ${row('/firewall?q=' + encodeURIComponent(x.receiver))}><td>${since(x.ts)}</td><td>${tagTrail(x.tags?.length ? x.tags : ['drain?', 'safe'])}</td><td class="wrap"><b>${esc(short(x.protocol, 28))}</b><div class="muted small">not a hack: ${esc(short(x.own || x.why || '', 110))}</div></td><td class="num">${usd(x.usd)}</td></tr>`
+    ? `<tr ${row('/firewall?q=' + encodeURIComponent(x.receiver))}><td>${since(x.ts)}</td><td>${tagTrail(x.tags?.length ? x.tags : ['drain?', 'safe'])}</td><td class="wrap"><b>${esc(short(x.protocol, 28))}</b><div class="muted small">normal: ${esc(short(x.own || x.why || '', 110))}</div></td><td class="num">${usd(x.usd)}</td></tr>`
     : x.type === 'moved'
     ? `<tr ${row('/firewall/' + encodeURIComponent(x.incident))}><td>${since(x.ts)}</td><td><span class="v bad">moved</span></td><td class="wrap"><b>${amt(x.amount)} ${esc(x.symbol)} of stolen funds</b><div class="muted small">from ${esc(short(x.from, 22))}${x.idle_h >= 24 ? `, idle ${x.idle_h >= 48 ? Math.round(x.idle_h / 24) + ' days' : x.idle_h + ' h'}` : ''}${x.swap ? ` → ${esc(x.swap.asset)} on ${esc(x.swap.chain)}` : ''}</div></td><td class="num r">${usd(x.usd)}</td></tr>`
     : x.type === 'hack'
@@ -71,7 +71,7 @@ views.explore = async () => {
   return `<div class="hero"><h1>Know who is behind every NEAR launch</h1>
     <p class="muted">Safe Near follows the early money and the creators on NEAR launchpads, checks every new contract as it is deployed, and catches hacks as they happen: which wallet groups bought a token in its first minutes, whether its creator has rugged before, what a contract lets its owner do, and where stolen money went.</p>
     ${searchBox('heroSearch', 'big')}
-    <div class="tiles">${tile('Tokens tracked', n(o.tokens, 0))}${tile('Early wallets', n(o.wallets, 0), `${n(o.profiled, 0)} profiled · ${n(o.entries, 0)} entries`)}${tile('Winning groups', n((cv.win80?.n || 0) + (cv.win50?.n || 0), 0), `win80 ${n(cv.win80?.n || 0, 0)} · win50 ${n(cv.win50?.n || 0, 0)}`, 'g')}${gt('loss', 'loss groups', 'r')}${tile('Rugged tokens', n(o.rugged, 0), `of ${n(o.tokens, 0)} tracked`, o.rugged ? 'r' : '')}${tile('Blacklisted creators', n(o.blacklisted, 0), `${n(o.groupsWithCreators, 0)} groups contain a rugger`, o.blacklisted ? 'r' : '')}${tile('Contracts audited', n(C.audited || 0, 0), `last 24 h · ${n(C.risky || 0, 0)} high risk`, C.risky ? 'a' : '')}${tile('Hacks', n(C.hacks || 0, 0), `confirmed, 24 h · ${n(C.drains || 0, 0)} drains caught`, C.hacks ? 'r' : '')}</div></div>
+    <div class="tiles">${tile('Tokens tracked', n(o.tokens, 0))}${tile('Early wallets', n(o.wallets, 0), `${n(o.profiled, 0)} profiled · ${n(o.entries, 0)} entries`)}${tile('Winning groups', n((cv.win80?.n || 0) + (cv.win50?.n || 0), 0), `win80 ${n(cv.win80?.n || 0, 0)} · win50 ${n(cv.win50?.n || 0, 0)}`, 'g')}${gt('loss', 'loss groups', 'r')}${tile('Rugged tokens', n(o.rugged, 0), `of ${n(o.tokens, 0)} tracked`, o.rugged ? 'r' : '')}${tile('Blacklisted creators', n(o.blacklisted, 0), `${n(o.groupsWithCreators, 0)} groups contain a rugger`, o.blacklisted ? 'r' : '')}${tile('Contracts audited', n(C.audited || 0, 0), `last 24 h · ${n(C.risky || 0, 0)} high risk`, C.risky ? 'a' : '')}${tile('Hacks', n(C.hacks || 0, 0), `confirmed, 24 h · ${n(C.drains || 0, 0)} large transfers checked`, C.hacks ? 'r' : '')}</div></div>
   ${aiBanner(o.ai)}
   <div class="grid2">
     <div class="card"><div class="head"><h2>Highest trading volume <span class="muted">last 24 h</span></h2><a href="/tokens" onclick="ST.tokens.tab='volume';ST.tokens.offset=0;return navA(event,this)">All →</a></div>
@@ -82,7 +82,7 @@ views.explore = async () => {
       ${o.latest.slice(0, 8).map((t) => `<tr ${row(P.tok(t.id))}><td>${tokCell(t.id, t.symbol, t.launchpad, 18)}</td><td>${since(t.live_ts)}</td><td class="num">${t.entries_n ?? '–'}</td><td class="num">x${n(t.outcome?.peak_multiple, 1)}</td>${gateScore(t.scan)}<td class="${t.outcome?.rugged ? 'r' : 'muted'}">${t.outcome?.rugged ? 'RUG' : '–'}</td></tr>`).join('') || empty(6, 'no launches yet')}</table></div>
   </div>
   <div class="grid2">
-    <div class="card"><div class="head"><h2>Hacks &amp; drains <span class="muted">traced from the chain</span></h2>${ilink('/firewall', 'Safety Check →')}</div>
+    <div class="card"><div class="head"><h2>Large transfers &amp; hacks <span class="muted">checked from the chain</span></h2>${ilink('/firewall', 'Safety Check →')}</div>
       <table><tr><th>When</th><th></th><th>Target</th><th class="num">Taken</th></tr>${hacks.map(hackRow).join('') || empty(4, 'No hack or drain caught yet.')}</table>
       <p class="muted small" style="margin:8px 0 0">Every block is watched for money leaving a DeFi protocol for an account that looks like an attacker; each case is traced: attacker accounts, losses, victims and where the money went.</p></div>
     <div class="card"><div class="head"><h2>New contracts <span class="muted">audited as they are deployed</span></h2>${ilink('/audit', 'Contract audit →')}</div>
@@ -95,7 +95,7 @@ views.explore = async () => {
       <p class="muted small" style="margin-top:0">Paste a wallet, a token or its name, an NFT, a contract, a transaction or a website: one plain answer, and the hacks it is linked to.</p>
       <div class="bar" style="flex-wrap:nowrap;gap:8px"><input id="exSafe" placeholder="alice.near · BLACKDRAGON · a transaction hash · https://…" style="flex:1;padding:10px 12px" onkeydown="if(event.key==='Enter')exSafe()"><button class="cta" style="padding:10px 18px" onclick="exSafe()">Check</button></div>
       <p class="small" style="margin:12px 0 0">${watchLine}</p>
-      <div class="tiles" style="margin-top:8px">${tile('Contracts deployed', n(C.deploys || 0, 0), 'last 24 h')}${tile('High risk', n(C.risky || 0, 0), 'of those audited', C.risky ? 'a' : '')}${tile('Drains caught', n(C.drains || 0, 0), 'last 24 h', C.drains ? 'a' : '')}</div></div>
+      <div class="tiles" style="margin-top:8px">${tile('Contracts deployed', n(C.deploys || 0, 0), 'last 24 h')}${tile('High risk', n(C.risky || 0, 0), 'of those audited', C.risky ? 'a' : '')}${tile('Large transfers', n(C.drains || 0, 0), 'last 24 h', C.drains ? 'a' : '')}</div></div>
   </div>`;
 };
 function exSafe() { const q = $('exSafe').value.trim(); if (!q) return; history.pushState(null, '', '/firewall?q=' + encodeURIComponent(q)); render(); }

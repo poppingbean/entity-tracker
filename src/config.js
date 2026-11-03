@@ -83,6 +83,7 @@ export const config = {
     minUsd: num(process.env.INCIDENT_MIN_USD, 5000),           // a receiver must take at least this from one protocol within 30 min
     alwaysUsd: num(process.env.INCIDENT_ALWAYS_USD, 250000),   // ... and is traced whatever it looks like above this
     freshHours: num(process.env.INCIDENT_FRESH_HOURS, 72),      // an account younger than this is a suspect
+    aiPerDay: num(process.env.INCIDENT_AI_PER_DAY, 60),          // NEAR AI calls per day for incident reports and deep reviews (apart from the audits)
     everyMs: num(process.env.INCIDENT_EVERY_SECONDS, 60) * 1000, // investigations and deep reviews start at most this often (the chain watch keeps its own 15 s)
     investigateTimeoutMinutes: num(process.env.INCIDENT_INVESTIGATE_TIMEOUT_MINUTES, 10), // the worker moves on to the next case after this long
     reviewDelayMinutes: num(process.env.INCIDENT_REVIEW_DELAY_MINUTES, 3), // the deep review (re-trace + NEAR AI verdict) runs this long after a finding
