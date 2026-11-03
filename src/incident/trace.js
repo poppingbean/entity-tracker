@@ -239,14 +239,15 @@ export async function traceIncident(input, { depth = 2, log = () => {}, upstream
   const freshAtAttack = origin.created_ts && Number.isFinite(firstAttack) && firstAttack - origin.created_ts < config.incidents.freshHours * 3600e3;
   const ownCheck = kind === 'protocol_exploit' && target?.account && !fake.size ? await ownFunds(attacker, target.account, { beforeTs: Number.isFinite(firstAttack) ? firstAttack : Date.now(), withdrawnUsd: target.lost_usd || stolen }).catch(() => null) : null;
   const evidence = !ownCheck?.own_funds && (kind === 'exchange_drain' || (kind === 'protocol_exploit' && (fake.size > 0 || usedFake || freshAtAttack)) || (kind === 'wallet_drainer' && emptied.length >= 3 && drainerSign));
+  // the evidence, in plain words: it is shown for cases that are only watched too, so it states what happened, not a crime
   const signals = [
     ownCheck?.own_funds ? `not a hack: ${ownCheck.explanation}` : null,
     up.drain ? `${up.drain.victims.length} ${up.drain.exchange.split(', ')[0]} hot wallet${up.drain.victims.length > 1 ? 's' : ''} sent ${fmtUsd(up.drain.usd)} to ${attacker}, ${Math.min(...up.drain.victims.map((v) => v.first_ts)) - up.drain.root_created_ts < 60e3 ? 'an account created by the first of these transfers' : `${hoursBetween(up.drain.root_created_ts, Math.min(...up.drain.victims.map((v) => v.first_ts)))} after it was created`}${up.drain.victims[0].how ? ` (identified as such because it ${up.drain.victims[0].how})` : ''}` : null,
-    fake.size ? `deployed ${fake.size} token contract${fake.size > 1 ? 's' : ''} of its own (${[...fake].slice(0, 6).join(', ')})${usedFake ? ' and used them in the attack transactions' : ''}` : null,
-    origin.created_ts && Number.isFinite(firstAttack) ? `the account was ${hoursBetween(origin.created_ts, firstAttack)} old when the attack started` : null,
+    fake.size ? `deployed ${fake.size} token contract${fake.size > 1 ? 's' : ''} of its own (${[...fake].slice(0, 6).join(', ')})${usedFake ? ' and used them in the key transactions' : ''}` : null,
+    origin.created_ts && Number.isFinite(firstAttack) ? `the account was ${hoursBetween(origin.created_ts, firstAttack)} old when the large transfers started` : null,
     target && !up.drain ? `${target.account} paid out ${fmtUsd(target.lost_usd)} and got ${fmtUsd(target.returned_usd || 0)} back` : null,
-    emptied.length ? `${emptied.length} wallet${emptied.length > 1 ? 's were' : ' was'} emptied into it${sharedKey ? ', one key signing for several of them' : attackerSigned ? ', moved by the attacker itself' : youngAttacker ? '' : ' (each signed with its own key: consistent with a wallet consolidating its own funds)'}` : null,
-    trail.exits.length ? `the loot left: ${Object.entries(trail.exit_usd).map(([k, v]) => `${k} (~$${v.toLocaleString('en-US')})`).join(', ')}` : null,
+    emptied.length ? `${emptied.length} wallet${emptied.length > 1 ? 's were' : ' was'} emptied into it${sharedKey ? ', one key signing for several of them' : attackerSigned ? ', moved by the receiving account itself' : youngAttacker ? '' : ' (each signed with its own key: consistent with a wallet consolidating its own funds)'}` : null,
+    trail.exits.length ? `the money left: ${Object.entries(trail.exit_usd).map(([k, v]) => `${k} (~$${v.toLocaleString('en-US')})`).join(', ')}` : null,
   ].filter(Boolean);
 
   return {

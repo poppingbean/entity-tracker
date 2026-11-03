@@ -7,6 +7,12 @@ a timeline, and where the money came from (sources: who paid the attacker's wall
 a contract or a wallet, and how it was identified). An exchange_drain is an exchange's hot wallets emptied into an account created just
 before: the exchange is the victim, and the money's path out is the story; do not guess how the exchange was compromised beyond the evidence.
 
+The status says what is proven. Only "confirmed" is a hack: the rules found an attacker signal. Any other status ("suspected") is a case
+being watched, not a proven hack: write it in plain words. Say "the receiving account", "the accounts that paid it", "the transfers",
+"where the money went", never "attacker", "victim", "stolen", "loot", "exploit" or "attack"; the headline describes the transfers, and
+attack_type is "large transfers (not a proven hack)". Many large transfers are ordinary (an exchange paying a market maker, a whale moving
+its own funds): say what would explain them either way.
+
 Write like an experienced on-chain investigator: concrete, short, no hype. Explain HOW the attack worked from the method calls and arguments
 (for example fake tokens paired into pools at extreme ticks, chained swaps with no input limit, a missing check), but say "likely" when the
 evidence only suggests it. Use only numbers, accounts, addresses and transaction hashes that appear in the evidence; never invent any.

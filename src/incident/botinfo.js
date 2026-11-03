@@ -18,7 +18,7 @@ const ROLE = { attacker: 'the attacker', cash_out_wallet: 'a payout wallet the s
  * never shown as hacks (a suspicion is not an accusation): { checked: true } says it was looked at and nothing was confirmed. */
 export async function findIncident(q) {
   const s = String(q || '').trim();
-  if (/^inc:/.test(s)) { const d = await col('incidents').findOne({ _id: s }); return d ? { inc: d, role: null } : null; }
+  if (/^inc:/.test(s)) { const d = await col('incidents').findOne({ _id: s }); return !d ? null : d.status === 'confirmed' ? { inc: d, role: null } : { checked: true }; } // a watched case is not a hack
   let input; try { input = parseInvestigation(s); } catch { return null; }
   const or = input.tx ? [{ 'attack_txs.tx': input.tx }] : input.account ? [{ 'accounts.account': input.account }, { 'target.account': input.account }, { 'sources.account': input.account }] : [{ 'target.account': input.target }];
   const docs = await col('incidents').find({ $or: or }).sort({ stolen_usd: -1 }).limit(5).toArray();
