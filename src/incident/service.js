@@ -9,8 +9,10 @@ import { validNearAddress } from '../audit/service.js';
 import { traceIncident } from './trace.js';
 import { aiIncidentReport } from './ai.js';
 import { scheduleReview } from './deepreview.js';
+import { followUpIncident } from './followup.js';
 
-export const INCIDENT_V = 1;
+// a case traced by an older version is traced in full once more (the rules improve); after that, re-runs are follow-ups
+export const INCIDENT_V = 2;
 const TX_HASH = /^[1-9A-HJ-NP-Za-km-z]{43,44}$/;
 
 /** { account } | { tx } | { target } from what someone typed: an account, a tx hash, or "target:<contract>". */
@@ -43,14 +45,38 @@ async function flagAccounts(inc) {
   return rows.length;
 }
 
-/** Trace, write up, save, flag and alert. Returns the saved incident. */
-export async function investigate(input, { ai = true, detected = null, review = true, log = () => {} } = {}) {
+/** A saved case that a re-run can follow up rather than trace again: the account's own case, or the case it was re-rooted into. */
+async function followable(input) {
+  if (!input.account) return null;
+  const prev = await col('incidents').findOne({ $or: [{ _id: `inc:${input.account}` }, { pasted: input.account }] }, { projection: { _id: 1, v: 1, status: 1 } });
+  return prev && prev.v === INCIDENT_V && prev.status !== 'nothing_found' ? col('incidents').findOne({ _id: prev._id }) : null;
+}
+
+/**
+ * Trace, write up, save, flag and alert. Returns the saved incident. A case traced before is followed up (only what happened since, with a
+ * short NEAR AI note) unless `full` is asked for or the follow-up finds new money coming in.
+ */
+export async function investigate(input, { ai = true, detected = null, review = true, full = false, log = () => {} } = {}) {
+  const prior = full ? null : await followable(input).catch(() => null);
+  if (prior) {
+    const r = await followUpIncident(prior, { log }).catch((e) => ({ full: `follow-up failed: ${e.message}` }));
+    if (r.inc) {
+      const doc = { ...r.inc, detected: detected || prior.detected || null, updated_ts: Date.now() };
+      await col('incidents').replaceOne({ _id: doc._id }, doc);
+      const flagged = await flagAccounts(doc).catch(() => 0); // new cash-out wallets of a proven case are flagged too
+      const f = r.followup;
+      info(`incident ${doc._id}: follow-up, ${f.txs_read} new transactions, ${f.new_moves} new moves ($${f.moved_usd}), still held $${f.held_after}${f.note ? ' · NEAR AI note' : ''} (${flagged} accounts flagged)`);
+      return doc;
+    }
+    log(`full trace: ${r.full}`);
+    info(`incident ${prior._id}: full trace (${r.full})`);
+  }
   const inc = await traceIncident(input, { log });
-  const prev = await col('incidents').findOne({ _id: inc._id }, { projection: { first_seen_ts: 1, detected: 1, ai: 1, alerted: 1, review: 1, tags: 1, status: 1, cleared: 1 } });
+  const prev = await col('incidents').findOne({ _id: inc._id }, { projection: { followups: 1, first_seen_ts: 1, detected: 1, ai: 1, alerted: 1, review: 1, tags: 1, status: 1, cleared: 1 } });
   // cleared by a deep review and still not confirmed by the rules: it stays cleared
   if (prev?.status === 'cleared' && inc.status !== 'confirmed') inc.status = 'cleared';
   const report = ai && inc.status !== 'nothing_found' ? await aiIncidentReport(inc).catch((e) => { warn(`incident AI: ${e.message}`); return null; }) : null;
-  const doc = { ...inc, v: INCIDENT_V, ai: report || prev?.ai || null, detected: detected || prev?.detected || null, first_seen_ts: prev?.first_seen_ts || Date.now(), updated_ts: Date.now(), ...(prev?.alerted ? { alerted: true } : {}), ...(prev?.review ? { review: prev.review } : {}), ...(prev?.tags ? { tags: prev.tags } : {}), ...(prev?.cleared ? { cleared: prev.cleared } : {}) };
+  const doc = { ...inc, v: INCIDENT_V, ...(prev?.followups ? { followups: prev.followups } : {}), ai: report || prev?.ai || null, detected: detected || prev?.detected || null, first_seen_ts: prev?.first_seen_ts || Date.now(), updated_ts: Date.now(), ...(prev?.alerted ? { alerted: true } : {}), ...(prev?.review ? { review: prev.review } : {}), ...(prev?.tags ? { tags: prev.tags } : {}), ...(prev?.cleared ? { cleared: prev.cleared } : {}) };
   await col('incidents').replaceOne({ _id: doc._id }, doc, { upsert: true });
   if (review && !prev && !detected && ['confirmed', 'suspected'].includes(doc.status)) await scheduleReview(doc._id, 'incident').catch(() => {});
   // traced from one of its wallets and re-rooted: an earlier empty investigation of that wallet now points here
@@ -110,12 +136,12 @@ export async function processIncidentQueue() {
 
 // investigations started from the page (a web-only server has no worker)
 const jobs = new Map();
-export function startInvestigation(input) {
+export function startInvestigation(input, { full = false } = {}) {
   const key = JSON.stringify(input), cur = jobs.get(key);
   if (cur?.running) return cur;
   const j = { running: true, started: Date.now(), error: null, id: null, step: 'starting' };
   jobs.set(key, j);
-  investigate(input, { log: (m) => { j.step = m; } }).then((d) => { j.id = d._id; }).catch((e) => { j.error = e.message; }).finally(() => { j.running = false; });
+  investigate(input, { full, log: (m) => { j.step = m; } }).then((d) => { j.id = d._id; }).catch((e) => { j.error = e.message; }).finally(() => { j.running = false; });
   if (jobs.size > 200) for (const [k, v] of jobs) if (!v.running) { jobs.delete(k); if (jobs.size < 150) break; }
   return j;
 }

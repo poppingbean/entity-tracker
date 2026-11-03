@@ -583,7 +583,7 @@ const routes = {
     let job = investigationJob(input);
     if (u.searchParams.get('run') === '1' && !job?.running && (!fresh || u.searchParams.get('force') === '1')) {
       if (!auditAllowed(req.socket.remoteAddress || 'ip')) return { error: 'too many investigations, try again in a few minutes' };
-      job = startInvestigation(input);
+      job = startInvestigation(input, { full: u.searchParams.get('full') === '1' });
     }
     return { input, existing: existing?._id || null, job: job ? { running: job.running, started: job.started, error: job.error, id: job.id, step: job.step } : null };
   },

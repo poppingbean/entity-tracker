@@ -166,10 +166,10 @@ async function followStolen(blocks) {
       out.push(move);
     }
   }
-  // the trail grows: re-trace each incident that moved (the queue skips one traced in the last hour)
+  // the trail grows: follow up each incident that moved (a quick look at what is new, at most every 10 minutes per case)
   for (const id of retrace) {
     const d = await col('incidents').findOne({ _id: id }, { projection: { 'attacker.account': 1, updated_ts: 1 } });
-    if (d && Date.now() - (d.updated_ts || 0) > 3600e3) await enqueueIncident({ account: d.attacker.account }, { reason: 'funds moved' });
+    if (d && Date.now() - (d.updated_ts || 0) > 600e3) await enqueueIncident({ account: d.attacker.account }, { reason: 'funds moved' });
   }
   return out;
 }
