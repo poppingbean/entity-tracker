@@ -3,7 +3,9 @@
 import { config } from '../../config.js';
 
 export const aiEnabled = () => !!config.ai.key;
-export const aiStatus = { ok: null, checkedTs: 0, error: null, model: config.ai.model, calls: 0, failures: 0, promptTokens: 0, completionTokens: 0 };
+// ok/error: can we reach NEAR AI (network, key, outages)? A single answer that could not be read (cut off, not JSON) is not an outage:
+// it goes to lastBad and is counted, but leaves ok alone, so one long answer cannot paint the whole site as "NEAR AI error"
+export const aiStatus = { ok: null, checkedTs: 0, error: null, model: config.ai.model, calls: 0, failures: 0, badAnswers: 0, lastBad: null, promptTokens: 0, completionTokens: 0 };
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const redact = (s) => String(s).split(config.ai.key || '\u0000').join('[key]');
@@ -49,7 +51,8 @@ async function readStream(res) {
  */
 export async function chatJSON({ system, user, model = config.ai.model, maxTokens = config.ai.maxTokens, temperature = 0.2, timeoutMs = config.ai.timeoutMs, attempts = 3, stream = false }) {
   if (!aiEnabled()) throw new Error('NEAR_AI_API_KEY is not set');
-  let lastErr;
+  let lastErr, unreadable = false, budget = maxTokens;
+  const ceiling = Math.min(16000, maxTokens * 4);
   for (let attempt = 0; attempt < attempts; attempt++) {
     const ctl = new AbortController(), timer = setTimeout(() => ctl.abort(), timeoutMs);
     try {
@@ -57,7 +60,7 @@ export async function chatJSON({ system, user, model = config.ai.model, maxToken
       const res = await fetch(`${config.ai.baseUrl}/chat/completions`, {
         method: 'POST', signal: ctl.signal,
         headers: { 'content-type': 'application/json', authorization: `Bearer ${config.ai.key}` },
-        body: JSON.stringify({ model, messages: [{ role: 'system', content: system }, { role: 'user', content: user }], temperature, max_tokens: maxTokens, response_format: { type: 'json_object' },
+        body: JSON.stringify({ model, messages: [{ role: 'system', content: system }, { role: 'user', content: user }], temperature, max_tokens: budget, response_format: { type: 'json_object' },
           ...(stream ? { stream: true, stream_options: { include_usage: true } } : {}) }),
       });
       if (!res.ok) { const raw = await res.text(); lastErr = new Error(`NEAR AI ${res.status}: ${redact(raw).slice(0, 300)}`); if (res.status === 429 || res.status >= 500) { await sleep(2000 * (attempt + 1) ** 2); continue; } throw lastErr; }
@@ -65,15 +68,22 @@ export async function chatJSON({ system, user, model = config.ai.model, maxToken
       aiStatus.promptTokens += j.usage?.prompt_tokens || 0; aiStatus.completionTokens += j.usage?.completion_tokens || 0;
       const msg = j.choices?.[0]?.message || {};
       const parsed = extractJson(msg.content) || extractJson(msg.reasoning_content);
-      if (!parsed || typeof parsed !== 'object') { lastErr = new Error(`NEAR AI returned no JSON (finish_reason ${j.choices?.[0]?.finish_reason})`); continue; }
+      if (!parsed || typeof parsed !== 'object') {
+        const finish = j.choices?.[0]?.finish_reason;
+        lastErr = new Error(`NEAR AI returned no JSON (finish_reason ${finish}${finish === 'length' ? `, max_tokens ${budget}` : ''})`); unreadable = true;
+        // cut off before the JSON was complete: the same request would be cut off the same way, so the next one gets twice the room
+        if (finish === 'length') budget = Math.min(ceiling, budget * 2);
+        continue;
+      }
       aiStatus.ok = true; aiStatus.error = null; aiStatus.checkedTs = Date.now();
       return { json: parsed, model: j.model || model, usage: j.usage || null };
     } catch (e) {
-      lastErr = e.name === 'AbortError' ? new Error(`NEAR AI timed out after ${timeoutMs / 1000}s`) : e;
+      lastErr = e.name === 'AbortError' ? new Error(`NEAR AI timed out after ${timeoutMs / 1000}s`) : e; unreadable = false;
       if (/NEAR AI 4\d\d/.test(lastErr.message) && !/429/.test(lastErr.message)) break; // auth / request errors will not improve on retry
     } finally { clearTimeout(timer); }
   }
-  aiStatus.failures++; aiStatus.ok = false; aiStatus.error = redact(lastErr?.message || 'unknown error'); aiStatus.checkedTs = Date.now();
+  if (unreadable) { aiStatus.badAnswers++; aiStatus.lastBad = { error: redact(lastErr.message), ts: Date.now() }; } // reachable, the answer was the problem
+  else { aiStatus.failures++; aiStatus.ok = false; aiStatus.error = redact(lastErr?.message || 'unknown error'); aiStatus.checkedTs = Date.now(); }
   throw lastErr;
 }
 

@@ -61,7 +61,7 @@ const CHANGE_SYSTEM = prompt('audit-change');
 /** Stage 5 (Haiku): what a redeploy changed. */
 export async function aiExplainChange(change) {
   if (!(await aiBudget())) return null;
-  const { json, model } = await ask(CHANGE_SYSTEM, 'Before and after the redeploy:', change, { maxTokens: 500 });
+  const { json, model } = await ask(CHANGE_SYSTEM, 'Before and after the redeploy:', change, { maxTokens: 1200 });
   return { explanation: String(json.explanation || '').slice(0, 800), severity: SEV.includes(json.severity) ? (json.severity === 'critical' ? 'high' : json.severity) : 'medium', model, ts: Date.now() };
 }
 
@@ -71,6 +71,6 @@ export async function aiWriteUp(account, auto) {
   if (!(await aiBudget())) return null;
   const evidence = { account, type: auto.label, standards: auto.standards, level: auto.level, control: auto.control?.summary, controllers: (auto.control?.controllers || []).map((c) => ({ account: c.account, kind: c.kind, via: c.via, flags: c.flags })),
     findings: auto.findings.filter((f) => f.severity !== 'info').map((f) => ({ severity: f.severity, title: f.title, detail: f.detail })).slice(0, 20), facts: auto.facts, deploy: auto.deploy };
-  const { json, model } = await ask(WRITE_SYSTEM, 'Audit to summarise:', evidence, { maxTokens: 700 });
+  const { json, model } = await ask(WRITE_SYSTEM, 'Audit to summarise:', evidence, { maxTokens: 1500 });
   return { headline: String(json.headline || '').slice(0, 200), summary: String(json.summary || '').slice(0, 1000), risks_for_users: (Array.isArray(json.risks_for_users) ? json.risks_for_users : []).map((x) => String(x).slice(0, 200)).slice(0, 4), model, ts: Date.now() };
 }
