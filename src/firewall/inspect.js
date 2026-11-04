@@ -116,6 +116,12 @@ async function withIncidents(p, r) {
     return incRow(d, role);
   });
   const own = r.incidents.find((x) => ['attack_tx', 'attacker', 'fake_token', 'sub_account', 'contract', 'cash_out_wallet', 'intents_account'].includes(x.role) && x.status === 'confirmed');
+  // the receiving account of a case still being watched: not a proven hack, so never "danger", but never "looks safe" either
+  const watched = !own && r.incidents.find((x) => ['attacker', 'sub_account', 'intents_account'].includes(x.role) && x.status === 'suspected');
+  if (watched && ['safe', 'unknown'].includes(r.verdict)) {
+    r.verdict = 'caution';
+    r.headline = `Be careful: this account is part of a case Safe Near is watching (~$${Math.round(watched.stolen_usd || 0).toLocaleString('en-US')} in large transfers, not a proven hack).`;
+  }
   if (own) {
     r.verdict = 'danger';
     r.headline = own.role === 'attack_tx' ? `This transaction is part of a hack: ${own.target || 'wallets'} lost ~$${Math.round(own.stolen_usd).toLocaleString('en-US')}.` : `Part of a hack: ${own.headline || `~$${Math.round(own.stolen_usd).toLocaleString('en-US')} taken from ${own.target || 'wallets'}`}`;

@@ -176,6 +176,14 @@ try {
   } else if (cmd === 'check-ai') {
     const s = await checkAi();
     console.log(JSON.stringify({ enabled: aiEnabled(), model: config.ai.model, baseUrl: config.ai.baseUrl, ok: s.ok, error: s.error, calls: s.calls }, null, 1));
+  } else if (cmd === 'confirm-incident') {
+    // node src/cli.js confirm-incident <account> <source url | -> "<reason>": a hack confirmed outside the chain (the rules cannot prove it alone);
+    // run it again with the link to add one
+    const { confirmIncident } = await import('./incident/service.js');
+    // optional, from the report: --kind protocol_exploit --target contract.main.burrow.near --loss 18400000 --accounts a,b,c
+    const opt = (k) => { const i = args.indexOf(`--${k}`); return i > 0 ? args[i + 1] : null; };
+    const d = await confirmIncident(args[0], { source: args[1] === '-' ? null : args[1], reason: args[2], kind: opt('kind'), target: opt('target'), loss_usd: opt('loss'), accounts: (opt('accounts') || '').split(',').filter(Boolean) });
+    info(`incident ${d._id}: confirmed (${d.confirmed_by?.source || 'no link yet'}) · ${d.kind} $${d.stolen_usd}`);
   } else if (cmd === 'flag') {
     // node src/cli.js flag <account> critical|high|medium "<reason>" ["<detail>"]: the transaction firewall warns about it from now on
     await flagAccount(args[0], args[1], args[2] || 'reported', args[3] || '');

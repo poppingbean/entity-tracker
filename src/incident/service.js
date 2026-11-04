@@ -12,7 +12,7 @@ import { scheduleReview } from './deepreview.js';
 import { followUpIncident } from './followup.js';
 
 // a case traced by an older version is traced in full once more (the rules improve); after that, re-runs are follow-ups
-export const INCIDENT_V = 2;
+export const INCIDENT_V = 3;
 const TX_HASH = /^[1-9A-HJ-NP-Za-km-z]{43,44}$/;
 
 /** { account } | { tx } | { target } from what someone typed: an account, a tx hash, or "target:<contract>". */
@@ -30,9 +30,9 @@ async function flagAccounts(inc) {
   if (inc.status !== 'confirmed') return 0;
   const what = `${inc.kind === 'wallet_drainer' ? 'drained wallets' : inc.kind === 'exchange_drain' ? `received the money drained from ${inc.drain?.exchange || 'an exchange'}'s hot wallets` : `exploited ${inc.target?.account || 'a contract'}`}${inc.started_ts ? ` on ${new Date(inc.started_ts).toISOString().slice(0, 10)}` : ''} (~$${Math.round(inc.stolen_usd).toLocaleString('en-US')} taken)`;
   const reason = what;
-  const DETAIL = { attacker: `This account ${what}. Do not send anything to it or trade with it.`, sub_account: `A sub-account of the attacker that ${what}.`, contract: `A contract deployed by the attacker that ${what}.`,
+  const DETAIL = { accomplice: `One of the attacker's own accounts (named in public reports): it ${what}. Do not send anything to it or trade with it.`, attacker: `This account ${what}. Do not send anything to it or trade with it.`, sub_account: `A sub-account of the attacker that ${what}.`, contract: `A contract deployed by the attacker that ${what}.`,
     fake_token: `A fake token made by the attacker that ${what}. It has no value.`, intents_account: `A NEAR Intents account of the attacker that ${what}.`, cash_out_wallet: `Received money from an attacker that ${what}.`, funder: `Funded the account that ${what}.` };
-  const sev = { attacker: 'critical', fake_token: 'critical', sub_account: 'critical', intents_account: 'high', cash_out_wallet: 'high', funder: 'medium' };
+  const sev = { accomplice: 'critical', attacker: 'critical', fake_token: 'critical', sub_account: 'critical', intents_account: 'high', cash_out_wallet: 'high', funder: 'medium' };
   const swapAddrs = new Set((inc.trail?.moves || []).filter((m) => m.swap).map((m) => m.to));
   const rows = (inc.accounts || []).filter((a) => sev[a.role] && !swapAddrs.has(a.account) && a.account !== inc.target?.account);
   // the flags follow the latest trace: an account no longer in the attacker's set loses this incident's flag
@@ -72,9 +72,11 @@ export async function investigate(input, { ai = true, detected = null, review = 
     info(`incident ${prior._id}: full trace (${r.full})`);
   }
   const inc = await traceIncident(input, { log });
-  const prev = await col('incidents').findOne({ _id: inc._id }, { projection: { followups: 1, first_seen_ts: 1, detected: 1, ai: 1, alerted: 1, review: 1, tags: 1, status: 1, cleared: 1 } });
+  const prev = await col('incidents').findOne({ _id: inc._id }, { projection: { confirmed_by: 1, followups: 1, first_seen_ts: 1, detected: 1, ai: 1, alerted: 1, review: 1, tags: 1, status: 1, cleared: 1 } });
+  // confirmed by a public report (an operator, with its source): it stays a hack whatever the chain alone can prove
+  if (prev?.confirmed_by) applyConfirmation(inc, prev.confirmed_by);
   // cleared by a deep review and still not confirmed by the rules: it stays cleared
-  if (prev?.status === 'cleared' && inc.status !== 'confirmed') inc.status = 'cleared';
+  else if (prev?.status === 'cleared' && inc.status !== 'confirmed') inc.status = 'cleared';
   const report = ai && inc.status !== 'nothing_found' ? await aiIncidentReport(inc).catch((e) => { warn(`incident AI: ${e.message}`); return null; }) : null;
   const doc = { ...inc, v: INCIDENT_V, ...(prev?.followups ? { followups: prev.followups } : {}), ai: report || prev?.ai || null, detected: detected || prev?.detected || null, first_seen_ts: prev?.first_seen_ts || Date.now(), updated_ts: Date.now(), ...(prev?.alerted ? { alerted: true } : {}), ...(prev?.review ? { review: prev.review } : {}), ...(prev?.tags ? { tags: prev.tags } : {}), ...(prev?.cleared ? { cleared: prev.cleared } : {}) };
   await col('incidents').replaceOne({ _id: doc._id }, doc, { upsert: true });
@@ -89,7 +91,12 @@ export async function investigate(input, { ai = true, detected = null, review = 
     await retractMoveAlerts([doc._id]);
     if (r.deletedCount) info(`incident ${doc._id}: no longer confirmed, ${r.deletedCount} flags removed`);
   }
-  if (doc.status === 'confirmed' && !prev?.alerted) {
+  // found long after the attack (an April hack reported today): it is history, not news. No alert; only new moves of its money warn
+  const old = doc.started_ts && Date.now() - doc.started_ts > config.incidents.alertMaxAgeDays * 86400e3;
+  if (doc.status === 'confirmed' && !prev?.alerted && old) {
+    await col('incidents').updateOne({ _id: doc._id }, { $set: { alerted: true, alert_skipped: `the attack was on ${new Date(doc.started_ts).toISOString().slice(0, 10)}, found ${new Date().toISOString().slice(0, 10)}` } });
+    info(`incident ${doc._id}: confirmed, but the attack is from ${new Date(doc.started_ts).toISOString().slice(0, 10)}: no alert`);
+  } else if (doc.status === 'confirmed' && !prev?.alerted) {
     const t = doc.target?.account || 'wallets';
     const exits = Object.entries(doc.trail?.exit_usd || {}).map(([k, v]) => `${k}: $${v.toLocaleString('en-US')}`).join(', ');
     const from = doc.kind === 'exchange_drain' ? `${doc.drain?.exchange || 'an exchange'} (${doc.victims.filter((v) => v.exchange).length} hot wallets)` : t;
@@ -99,6 +106,45 @@ export async function investigate(input, { ai = true, detected = null, review = 
     await col('incidents').updateOne({ _id: doc._id }, { $set: { alerted: true } });
   }
   info(`incident ${doc._id}: ${doc.status} ${doc.kind} $${doc.stolen_usd} (${flagged} accounts flagged)`);
+  return doc;
+}
+
+/**
+ * What a public report establishes, laid over what the chain alone could trace (a collector account seen alone looks like a receiver, its
+ * master like a victim): the status, the kind, the target and the reported loss, and the attacker's other accounts the report names, which
+ * become the case's own (flagged, followed, never victims). Accounts that only delivered the attacker's swaps (NEAR Intents solvers) are not
+ * victims either.
+ */
+function applyConfirmation(inc, cb) {
+  const known = new Set(cb.accounts || []), services = new Set((inc.sources || []).filter((x) => x.kind === 'service').map((x) => x.account));
+  inc.confirmed_by = cb;
+  inc.status = 'confirmed';
+  if (cb.kind) inc.kind = cb.kind;
+  inc.accounts = [...(inc.accounts || []).filter((a) => !known.has(a.account)), ...[...known].map((account) => ({ account, role: 'accomplice' }))];
+  inc.victims = (inc.victims || []).filter((v) => !known.has(v.account) && !services.has(v.account));
+  inc.sources = (inc.sources || []).map((x) => (known.has(x.account) ? { ...x, kind: 'attacker', name: 'the attacker\'s own account (public report)' } : x));
+  if (cb.target) inc.target = { ...(inc.target?.account === cb.target ? inc.target : {}), account: cb.target, contract: true, ...(cb.loss_usd ? { lost_usd: cb.loss_usd } : {}) };
+  // the report names who lost the money: that is the victim; the accounts the trace saw paying the collector are kept apart (its swaps,
+  // its other counterparties), never shown as people who lost money to it
+  if (cb.target) { inc.counterparties = inc.victims; inc.victims = [{ account: cb.target, contract: true, label: 'named in public reports', lost_usd: cb.loss_usd ? Math.round(cb.loss_usd) : null, tokens: [], txs: [] }]; }
+  if (cb.loss_usd) { inc.stolen_usd = Math.round(cb.loss_usd); inc.prices_note = 'as reported publicly'; }
+  inc.signals = [`confirmed by public reports: ${cb.reason}`, ...(inc.signals || []).filter((s) => !/^confirmed by public reports/.test(s))];
+}
+
+/**
+ * Confirm a case from outside the chain: a hack the rules cannot prove alone (a key compromise, signed intents), confirmed by public reports.
+ * `source` is the link (an X post, a news story), `reason` one line. The case is traced again and stays confirmed from then on: the rules
+ * cannot un-confirm it and NEAR AI cannot clear it. Its attacker's accounts are flagged and followed (never the accounts that paid in).
+ */
+export async function confirmIncident(account, { source, reason, by = 'operator', kind = null, target = null, loss_usd = null, accounts = [] }) {
+  if (source && !/^https?:\/\//.test(String(source))) throw new Error('source: a link to the public report (an X post or a news story), or none'); // a link can be added later
+  const id = `inc:${account}`;
+  if (!(await col('incidents').findOne({ _id: id }, { projection: { _id: 1 } }))) throw new Error(`no case ${id}: investigate the account first`);
+  const confirmed_by = { by, source: source ? String(source).slice(0, 300) : null, reason: String(reason || 'confirmed by public reports').slice(0, 200), ts: Date.now(),
+    kind: kind || null, target: target || null, loss_usd: loss_usd ? Number(loss_usd) : null, accounts: [...new Set((accounts || []).map((a) => String(a).toLowerCase()))].filter((a) => a !== account).slice(0, 100) };
+  await col('incidents').updateOne({ _id: id }, { $set: { confirmed_by }, $push: { tags: { $each: [{ tag: 'hack', ts: Date.now(), why: confirmed_by.reason, by: 'public report' }], $slice: -10 } } });
+  const doc = await investigate({ account }, { full: true });
+  await col('deep_reviews').updateOne({ _id: id }, { $set: { status: 'done', done_ts: Date.now(), result: { tag: 'hack', why: confirmed_by.reason, status: 'confirmed' } } }).catch(() => {});
   return doc;
 }
 

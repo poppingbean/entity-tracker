@@ -176,7 +176,8 @@ export async function traceIncident(input, { depth = 2, log = () => {}, upstream
 
   // ---- 3. the loot's trail out of the attacker's accounts
   log('following the money');
-  const trail = await followMoney(ownSet, flows, { since: Number.isFinite(firstAttack) ? firstAttack - 60e3 : 0, depth, own, fake });
+  const payers = new Set([...victims.map((v) => v.account), ...(up.sources || []).map((x) => x.account)]);
+  const trail = await followMoney(ownSet, flows, { since: Number.isFinite(firstAttack) ? firstAttack - 60e3 : 0, depth, own, fake, payers });
   // a "wallet" whose money only went on to bridge-mng.near is a 1Click deposit address whose status could not be read: a service, not the attacker's
   const oneClickAddr = new Set(trail.wallets.filter((w) => { const outs = trail.moves.filter((m) => m.from === w.account); return outs.length && outs.every((m) => m.to === 'bridge-mng.near'); }).map((w) => w.account));
   for (const w of trail.wallets) if (!own.has(w.account) && !oneClickAddr.has(w.account)) own.set(w.account, { account: w.account, role: 'cash_out_wallet' });
@@ -288,7 +289,7 @@ function destKind(id) {
 }
 
 /** Follow value out of the attacker's accounts: hop by hop through new wallets, up to exchanges / bridges / NEAR Intents. */
-export async function followMoney(ownSet, flows, { since, depth, own, fake }) {
+export async function followMoney(ownSet, flows, { since, depth, own, fake, payers = new Set() }) {
   const moves = [], exits = [], wallets = [], seen = new Set(ownSet);
   const keep = (f) => f.ts >= since && !fake.has(baseToken(f.token)) && !/^nft:|^mint:|^burn:/.test(f.token) && !(PSEUDO.test(f.to) && !f.to.startsWith('chain:'));
   let frontier = flows.filter((f) => keep(f) && ownSet.has(f.from) && !ownSet.has(f.to));
@@ -319,7 +320,8 @@ export async function followMoney(ownSet, flows, { since, depth, own, fake }) {
       if (!k && !PSEUDO.test(r.to) && !/^[0-9a-f]{64}$|^0x[0-9a-f]{40}$/.test(r.to)) { const st = await isContract(r.to); if (st) k = 'contract'; }
       moves.push({ tx: r.tx, ts: r.ts, from: r.from, to: r.to, token: baseToken(r.token), symbol: r.symbol, amount: r.amount, usd: r.usd != null ? Math.round(r.usd) : null, hop, dest_kind: k || 'wallet' });
       if (k && k !== 'DEX' && k !== 'contract') exits.push({ to: r.to, kind: k.startsWith('exchange') ? 'an exchange' : k, label: k, usd: r.usd, token: baseToken(r.token), symbol: r.symbol, amount: r.amount, tx: r.tx, ts: r.ts });
-      else if (!k && !PSEUDO.test(r.to) && !seen.has(r.to) && (r.usd ?? 0) >= 200) next.set(r.to, (next.get(r.to) || 0) + (r.usd || 0));
+      // money going back to an account that paid in (a victim, a source, a solver it traded with) is that account's again: never followed
+      else if (!k && !PSEUDO.test(r.to) && !seen.has(r.to) && !payers.has(r.to) && (r.usd ?? 0) >= 200) next.set(r.to, (next.get(r.to) || 0) + (r.usd || 0));
     }
     if (hop === depth) break;
     // follow the wallets that took the most

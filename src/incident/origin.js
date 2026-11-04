@@ -30,7 +30,10 @@ export async function identify(id) {
   const [ent, lab, first, state, reg] = await Promise.all([col('entities').findOne({ _id: id }, { projection: { kind: 1, label: 1, label_source: 1 } }).catch(() => null), col('labels').findOne({ _id: id }).catch(() => null),
     firstTx(id), viewAccount(id).catch(() => null), col('exchange_wallets').findOne({ _id: id }).catch(() => null)]);
   let out;
-  if (reg) out = { kind: 'exchange', name: `${reg.exchange || 'Unnamed exchange'} ${reg.kind === 'cold' ? 'cold' : 'hot'} wallet`, how: reg.how || 'in the exchange wallet registry' };
+  // an entry the registry found only by being busy (not by hand, no sweep to an exchange's cold wallet) may be a solver
+  const solver = !b && (!reg || (reg.source !== 'manual' && !reg.cold)) && ((first?.total || 0) >= 20000 || reg || ent?.kind === 'hub') ? await intentsSolver(id) : null;
+  if (solver) out = { kind: 'service', name: 'NEAR Intents solver', how: solver };
+  else if (reg) out = { kind: 'exchange', name: `${reg.exchange || 'Unnamed exchange'} ${reg.kind === 'cold' ? 'cold' : 'hot'} wallet`, how: reg.how || 'in the exchange wallet registry' };
   else if (lab?.label) out = { kind: lab.type === 'exchange' ? 'exchange' : 'wallet', name: lab.label, how: 'named by hand' };
   else if (b?.type === 'exchange') out = { kind: 'exchange', name: b.label, how: 'account name' };
   const contract = !!state && (state.code_hash !== '11111111111111111111111111111111' || !!state.global_contract_hash || !!state.global_contract_account_id);
@@ -51,6 +54,22 @@ export async function identify(id) {
   if (cache.size > 2000) cache.delete(cache.keys().next().value);
   return out;
 }
+/**
+ * A NEAR Intents solver (a market maker that fills swaps): its name says so, or most of its latest transactions go through intents.near.
+ * A solver paying an account is how every 1Click / Intents swap delivers (the user paid on the other side, often on another chain), so
+ * it is a service, never an exchange hot wallet whose payment to a new account would be a drain. Returns how it was recognised, or null.
+ */
+export async function intentsSolver(id) {
+  if (/(^|[.-])solver([.-]|$)/.test(id)) return 'a NEAR Intents solver (account name)';
+  const j = await txIndexer('/v0/account', { account_id: id, limit: 40, desc: true }).catch(() => null);
+  const hashes = (j?.account_txs || []).map((r) => r.transaction_hash);
+  if (hashes.length < 10) return null;
+  const got = [];
+  for (let i = 0; i < hashes.length; i += 20) got.push(...((await txIndexer('/v0/transactions', { tx_hashes: hashes.slice(i, i + 20) }).catch(() => null))?.transactions || []));
+  const viaIntents = got.filter((x) => x.transaction.receiver_id === 'intents.near' || x.transaction.signer_id === 'intents.near').length;
+  return got.length && viaIntents / got.length >= 0.6 ? `a NEAR Intents solver (${viaIntents} of its latest ${got.length} transactions settle through intents.near)` : null;
+}
+
 /** The exchange-named account a busy wallet sends its NEAR to (its own cold wallet), from its latest 60 transactions it signed. */
 async function sweepTarget(id) {
   const j = await txIndexer('/v0/account', { account_id: id, limit: 60, desc: true, is_signer: true }).catch(() => null);

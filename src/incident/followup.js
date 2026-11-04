@@ -13,8 +13,8 @@ import { flowsOfTx } from './flows.js';
 import { valueOf, baseToken } from './prices.js';
 import { fetchTxs, followMoney, heldBy, isRouter } from './trace.js';
 
-const WATCH = new Set(['attacker', 'sub_account', 'intents_account', 'cash_out_wallet']); // the accounts whose money is followed
-const SOURCE = new Set(['attacker', 'sub_account', 'intents_account']);                    // money coming in here may be a new victim
+const WATCH = new Set(['attacker', 'accomplice', 'sub_account', 'intents_account', 'cash_out_wallet']); // the accounts whose money is followed
+const SOURCE = new Set(['attacker', 'accomplice', 'sub_account', 'intents_account']);                    // money coming in here may be a new victim
 const PER_ACCOUNT = 400, MAX_ACCOUNTS = 15;
 const SYSTEM = prompt('incident-followup'); // src/ai/prompts/incident-followup.md
 
@@ -73,7 +73,7 @@ export async function followUpIncident(prev, { log = () => {} } = {}) {
   // the new money out, one hop on (a case found to be ordinary is not followed: its accounts are not the attacker's)
   const own = new Map((prev.accounts || []).map((a) => [a.account, a]));
   const open = ['confirmed', 'suspected'].includes(prev.status);
-  const trail = open ? await followMoney(ownSet, flows, { since, depth: 1, own, fake }) : { moves: [], exits: [], wallets: [], capped: null };
+  const trail = open ? await followMoney(ownSet, flows, { since, depth: 1, own, fake, payers: new Set([...(prev.victims || []).map((v) => v.account), ...(prev.sources || []).filter((x) => x.kind !== 'attacker').map((x) => x.account)]) }) : { moves: [], exits: [], wallets: [], capped: null };
   const old = prev.trail || { moves: [], exits: [], wallets: [] };
   const known = new Set((old.moves || []).map(key));
   const newMoves = trail.moves.filter((m) => !known.has(key(m)));

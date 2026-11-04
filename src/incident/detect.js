@@ -117,16 +117,17 @@ async function scanExchanges(blocks) {
 }
 
 // ---- stolen money on the move: every transfer out of a confirmed incident's accounts, as it happens
-const FOLLOW_ROLES = new Set(['attacker', 'sub_account', 'intents_account', 'cash_out_wallet']);
+const FOLLOW_ROLES = new Set(['attacker', 'accomplice', 'sub_account', 'intents_account', 'cash_out_wallet']);
 let followCache = { ts: 0, map: new Map() };
 /** account -> { incident, role, last_out_ts } for every confirmed incident (cached 5 minutes). */
 async function followed() {
   if (Date.now() - followCache.ts < 300e3) return followCache.map;
-  const docs = await col('incidents').find({ status: 'confirmed' }, { projection: { accounts: 1, 'trail.moves': 1, 'attacker.account': 1, drain: 1 } }).limit(500).toArray().catch(() => []);
+  const docs = await col('incidents').find({ status: 'confirmed' }, { projection: { accounts: 1, 'trail.moves': 1, 'attacker.account': 1, drain: 1, 'victims.account': 1, 'sources.account': 1, 'sources.kind': 1 } }).limit(500).toArray().catch(() => []);
   const map = new Map();
   for (const d of docs) {
     const last = new Map(); for (const m of d.trail?.moves || []) last.set(m.from, Math.max(last.get(m.from) || 0, m.ts || 0));
-    for (const a of d.accounts || []) if (FOLLOW_ROLES.has(a.role) && !map.has(a.account)) map.set(a.account, { incident: d._id, role: a.role, root: d.attacker?.account, last_out_ts: last.get(a.account) || null });
+    const payers = new Set([...(d.victims || []).map((v) => v.account), ...(d.sources || []).filter((x) => x.kind !== 'attacker').map((x) => x.account)]); // their money is theirs
+    for (const a of d.accounts || []) if (FOLLOW_ROLES.has(a.role) && !payers.has(a.account) && !map.has(a.account)) map.set(a.account, { incident: d._id, role: a.role, root: d.attacker?.account, last_out_ts: last.get(a.account) || null });
   }
   const moves = await col('incident_moves').aggregate([{ $group: { _id: '$from', ts: { $max: '$ts' } } }]).toArray().catch(() => []);
   for (const m of moves) if (map.has(m._id)) map.get(m._id).last_out_ts = Math.max(map.get(m._id).last_out_ts || 0, m.ts);

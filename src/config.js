@@ -86,6 +86,7 @@ export const config = {
     aiPerDay: num(process.env.INCIDENT_AI_PER_DAY, 60),          // NEAR AI calls per day for incident reports and deep reviews (apart from the audits)
     everyMs: num(process.env.INCIDENT_EVERY_SECONDS, 60) * 1000, // investigations and deep reviews start at most this often (the chain watch keeps its own 15 s)
     investigateTimeoutMinutes: num(process.env.INCIDENT_INVESTIGATE_TIMEOUT_MINUTES, 10), // the worker moves on to the next case after this long
+    alertMaxAgeDays: num(process.env.INCIDENT_ALERT_MAX_AGE_DAYS, 7), // a hack whose attack is older than this when found is history: no alert, only new moves
     reviewDelayMinutes: num(process.env.INCIDENT_REVIEW_DELAY_MINUTES, 3), // the deep review (re-trace + NEAR AI verdict) runs this long after a finding
     exchangeMinUsd: num(process.env.INCIDENT_EXCHANGE_MIN_USD, 50000), // an exchange hot-wallet outflow worth checking for a drain
     followMinUsd: num(process.env.INCIDENT_FOLLOW_MIN_USD, 500),  // a move of stolen funds worth an alert
