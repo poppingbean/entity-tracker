@@ -103,9 +103,9 @@ const setStatus = (w, now, ai) => {
   const alive = w && now - w.ts < 5 * 60e3;
   const [cls, txt, why] = !ai.enabled ? ['', 'NEAR AI off', 'No NEAR AI key: groups get rule-based verdicts only']
     : !alive ? ['bad', 'NEAR AI paused', w ? `The background worker has not reported since ${when(w.ts)}` : 'The background worker has not started yet']
-    : ai.ok === false ? ['bad', 'NEAR AI error', 'The last NEAR AI call failed; it is retried automatically']
+    : ai.ok === false ? ['bad', 'NEAR AI unreachable', `NEAR AI could not be reached: ${ai.error || 'unknown error'}. It is retried automatically`]
     : ['ok', 'NEAR AI evaluating', `Last report ${ago(now - w.ts)} ago`];
   $('statusDot').className = 'dot ' + cls; $('status').textContent = txt; $('statusBox').title = why;
 };
-const aiBanner = (ai) => (!ai.enabled ? '<div class="card warn">NEAR AI is off (set NEAR_AI_API_KEY). Groups get rule-based verdicts only.</div>' : ai.ok === false ? `<div class="card err">NEAR AI error: ${esc(ai.error || '')}</div>` : '');
+const aiBanner = (ai) => (!ai.enabled ? '<div class="card warn">NEAR AI is off (set NEAR_AI_API_KEY). Groups get rule-based verdicts only.</div>' : ai.ok === false ? `<div class="card err">NEAR AI cannot be reached right now (${esc(ai.error || 'unknown error')}). Checks keep running on the rules; AI write-ups resume when it is back.</div>` : '');
 const views = {};
