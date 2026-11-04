@@ -73,7 +73,7 @@ export async function followUpIncident(prev, { log = () => {} } = {}) {
   // the new money out, one hop on (a case found to be ordinary is not followed: its accounts are not the attacker's)
   const own = new Map((prev.accounts || []).map((a) => [a.account, a]));
   const open = ['confirmed', 'suspected'].includes(prev.status);
-  const trail = open ? await followMoney(ownSet, flows, { since, depth: 1, own, fake }) : { moves: [], exits: [], wallets: [], capped: null };
+  const trail = open ? await followMoney(ownSet, flows, { since, depth: 1, own, fake, payers: new Set([...(prev.victims || []).map((v) => v.account), ...(prev.sources || []).map((x) => x.account)]) }) : { moves: [], exits: [], wallets: [], capped: null };
   const old = prev.trail || { moves: [], exits: [], wallets: [] };
   const known = new Set((old.moves || []).map(key));
   const newMoves = trail.moves.filter((m) => !known.has(key(m)));

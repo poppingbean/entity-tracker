@@ -12,7 +12,7 @@ import { scheduleReview } from './deepreview.js';
 import { followUpIncident } from './followup.js';
 
 // a case traced by an older version is traced in full once more (the rules improve); after that, re-runs are follow-ups
-export const INCIDENT_V = 2;
+export const INCIDENT_V = 3;
 const TX_HASH = /^[1-9A-HJ-NP-Za-km-z]{43,44}$/;
 
 /** { account } | { tx } | { target } from what someone typed: an account, a tx hash, or "target:<contract>". */
