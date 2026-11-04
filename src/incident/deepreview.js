@@ -80,7 +80,8 @@ export async function reviewIncident(inc) {
   const ai = await aiVerdict(inc, facts);
   const aiClears = ai?.verdict === 'not_hack' && ai.confidence !== 'low';
   let status = inc.status, tag;
-  if (inc.status === 'confirmed') {
+  if (inc.confirmed_by) tag = 'hack'; // confirmed by public reports: NEAR AI informs, it does not overrule
+  else if (inc.status === 'confirmed') {
     // the rules found an attacker signal: only a confident "not a hack" puts it back under review (it is not cleared on the AI alone)
     if (ai?.verdict === 'not_hack' && ai.confidence === 'high') { tag = 'review'; } else tag = 'hack';
   } else if (routine || aiClears || ['nothing_found', 'dismissed', 'cleared'].includes(inc.status)) { status = 'cleared'; tag = 'safe'; }
