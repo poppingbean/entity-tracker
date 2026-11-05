@@ -140,12 +140,50 @@ export async function confirmIncident(account, { source, reason, by = 'operator'
   if (source && !/^https?:\/\//.test(String(source))) throw new Error('source: a link to the public report (an X post or a news story), or none'); // a link can be added later
   const id = `inc:${account}`;
   if (!(await col('incidents').findOne({ _id: id }, { projection: { _id: 1 } }))) throw new Error(`no case ${id}: investigate the account first`);
-  const confirmed_by = { by, source: source ? String(source).slice(0, 300) : null, reason: String(reason || 'confirmed by public reports').slice(0, 200), ts: Date.now(),
+  const confirmed_by = { by, source: source ? String(source).slice(0, 300) : null, reason: String(reason || 'confirmed by operator').slice(0, 200), ts: Date.now(),
     kind: kind || null, target: target || null, loss_usd: loss_usd ? Number(loss_usd) : null, accounts: [...new Set((accounts || []).map((a) => String(a).toLowerCase()))].filter((a) => a !== account).slice(0, 100) };
-  await col('incidents').updateOne({ _id: id }, { $set: { confirmed_by }, $push: { tags: { $each: [{ tag: 'hack', ts: Date.now(), why: confirmed_by.reason, by: 'public report' }], $slice: -10 } } });
+  await col('incidents').updateOne({ _id: id }, { $set: { confirmed_by }, $push: { tags: { $each: [{ tag: 'hack', ts: Date.now(), why: confirmed_by.reason, by }], $slice: -10 } } });
   const doc = await investigate({ account }, { full: true });
   await col('deep_reviews').updateOne({ _id: id }, { $set: { status: 'done', done_ts: Date.now(), result: { tag: 'hack', why: confirmed_by.reason, status: 'confirmed' } } }).catch(() => {});
   return doc;
+}
+
+/**
+ * Unconfirm a case: remove confirmation, revert status to suspected, strip firewall flags and retract alerts.
+ */
+export async function unconfirmIncident(account, { by = 'operator', reason = 'unconfirmed by operator' } = {}) {
+  const id = `inc:${account}`;
+  const inc = await col('incidents').findOne({ _id: id });
+  if (!inc) throw new Error(`no case ${id}`);
+  await col('incidents').updateOne({ _id: id }, {
+    $unset: { confirmed_by: '' },
+    $set: { status: 'suspected', updated_ts: Date.now() },
+    $push: { tags: { $each: [{ tag: 'review', ts: Date.now(), why: reason, by }], $slice: -10 } }
+  });
+  await col('deep_reviews').deleteOne({ _id: id }).catch(() => {});
+  const doc = await investigate({ account }, { full: true });
+  return doc;
+}
+
+/**
+ * Mark a case as cleared/normal (e.g. moved funds from solvers or hot wallet exchanges, routine transfer):
+ * sets status: 'cleared', tag: 'safe', removes flags and alerts.
+ */
+export async function clearIncident(account, { by = 'operator', reason = 'Normal fund movement / solver activity' } = {}) {
+  const id = `inc:${account}`;
+  const inc = await col('incidents').findOne({ _id: id });
+  if (!inc) throw new Error(`no case ${id}`);
+  const cleared = { ts: Date.now(), why: reason, by };
+  await col('incidents').updateOne({ _id: id }, {
+    $unset: { confirmed_by: '' },
+    $set: { status: 'cleared', cleared, updated_ts: Date.now() },
+    $push: { tags: { $each: [{ tag: 'safe', ts: Date.now(), why: reason, by }], $slice: -10 } }
+  });
+  await col('firewall_flags').deleteMany({ source: 'incident', incident: id });
+  await col('alerts').updateMany({ $or: [{ _id: `incident:${id}` }, { 'data.incident': id }, { 'related.wallets': account, type: { $in: ['drain_suspected', 'incident'] } }], title: { $not: /^(Not a hack|Retracted|Safe)/ } }, [{ $set: { title: { $concat: ['Safe after review: ', '$title'] }, severity: 'info' } }]).catch(() => {});
+  await retractMoveAlerts([id]);
+  await col('deep_reviews').deleteOne({ _id: id }).catch(() => {});
+  return col('incidents').findOne({ _id: id });
 }
 
 /** The "stolen funds moved" alerts of cases that are not (or no longer) confirmed say they were retracted. Returns how many. */

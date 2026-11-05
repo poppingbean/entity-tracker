@@ -107,14 +107,14 @@ async function liveFeed() {
   };
   // a refresh must not move what the reader is looking at: unchanged items only update the status and counts; new items keep the scroll
   const sig = LIVE.only + '|' + JSON.stringify(j.items.map((x) => [x.type, x.ts, x.id || x.account || x.receiver, x.verdict, (x.tags || []).join(), x.level, x.status]));
-  const tiles = `${tile('Contracts deployed', C.deploys, 'last 24 h')}${tile('Audited', C.audited, `${C.risky} high risk`, C.risky ? 'a' : '')}${tile('Large transfers', C.drains, 'last 24 h', C.drains ? 'a' : '')}${tile('Hacks', C.hacks, `confirmed · ${C.moves || 0} moves of stolen funds`, C.hacks || C.moves ? 'r' : '')}`;
+  const tiles = `${tile('Contracts deployed', C.deploys, 'last 24 h')}${tile('Audited', C.audited, `${C.risky} high risk`, C.risky ? 'a' : '')}${tile('Large transfers', C.drains, '≥ $100k · last 24 h', C.drains ? 'a' : '')}${tile('Hacks', C.hacks, `confirmed · ${C.moves || 0} moves ≥ $100k`, C.hacks || C.moves ? 'r' : '')}`;
   const list = $('liveList');
   if (list && LIVE.sig === sig) { $('liveStatus').innerHTML = status; $('liveTiles').innerHTML = tiles; for (const t of list.querySelectorAll('.lvt')) if (t.dataset.ts) t.textContent = since(+t.dataset.ts).replace(' ago', ''); return; }
   const keep = list && LIVE.sigOnly === LIVE.only ? { top: list.scrollTop, height: list.scrollHeight } : null;
   LIVE.sig = sig; LIVE.sigOnly = LIVE.only;
   el.innerHTML = `<div class="card"><div class="bar"><h2 style="margin:0">Live</h2><span class="small" id="liveStatus">${status}</span></div>
     <div class="tiles" id="liveTiles" style="margin:10px 0">${tiles}</div>
-    <div class="bar small" style="gap:6px">${tab('', 'Everything')}${tab('hacks', 'Large transfers & hacks')}${tab('risky', 'High-risk contracts')}${tab('contracts', 'New contracts')}<span class="spacer"></span><span class="muted">updates every 15 s</span></div>
+    <div class="bar small" style="gap:6px">${tab('', 'Everything')}${tab('hacks', 'Large transfers (≥ $100k) & hacks')}${tab('risky', 'High-risk contracts')}${tab('contracts', 'New contracts')}<span class="spacer"></span><span class="muted">updates every 15 s</span></div>
     <div id="liveList" style="max-height:720px;overflow:auto;margin-top:6px">${j.items.map((x) => `<div style="display:flex;gap:10px;padding:8px 2px;border-bottom:1px solid var(--line)"><span class="muted small lvt" data-ts="${x.ts || ''}" style="width:64px;flex:none" title="${esc(when(x.ts))}">${esc(since(x.ts).replace(' ago', ''))}</span><div style="flex:1;min-width:0">${item(x)}</div></div>`).join('') || '<p class="muted small">Nothing yet.</p>'}</div></div>`;
   if (keep && keep.top > 0) { const nl = $('liveList'); if (nl) nl.scrollTop = keep.top + Math.max(0, nl.scrollHeight - keep.height); }
 }
@@ -130,8 +130,13 @@ async function incidentPage(id) {
   const isHack = incTag(d) === 'hack';
   let h = pasted && pasted !== d.attacker.account ? `<div class="banner neutral" style="display:block"><b>${esc(short(pasted, 40))}</b> is part of this ${isHack ? 'incident' : 'case'}: ${esc((isHack ? INC_ROLE_TXT : INC_ROLE_TXT_N)[(d.accounts || []).find((a) => a.account === pasted)?.role] || 'one of its wallets')}. The investigation follows the money from where it first arrived.</div>` : '';
   h = `<div style="margin-bottom:10px"><a href="/firewall" onclick="return navA(event,this)" class="cta" style="padding:7px 14px;font-size:13px">← Safety Check</a></div>` + h;
+  const manualControls = d.status === 'confirmed'
+    ? `<button onclick="incUnconfirm('${esc(d.attacker.account)}')" class="button" style="border-color:var(--bad);color:var(--bad);margin-left:8px" title="Revoke hack confirmation">Revoke Hack Confirmation</button>`
+    : `<button onclick="incConfirmModal('${esc(d.attacker.account)}')" class="cta" style="background:var(--bad);color:#fff;border:none;margin-left:8px;padding:6px 12px" title="Manually confirm this case as a hack">Confirm as Hack</button><button onclick="incClearModal('${esc(d.attacker.account)}')" class="button" style="margin-left:6px" title="Mark as normal moved funds / solver activity">Mark Normal / Moved Funds</button>`;
+
   h += `<div class="card"><div class="bar"><h2 style="margin:0">${esc(incTag(d) === 'safe' ? `Normal activity${d.review?.ai?.what_it_is ? `: ${d.review.ai.what_it_is}` : ''}` : !isHack ? `${INC_KIND_N[d.kind] || 'Large transfers'}` : drain ? `${INC_KIND[d.kind] || 'Incident'}` : A?.attack_type || INC_KIND[d.kind] || 'Incident')}${drain ? ` from ${esc(d.drain?.exchange || 'an exchange')}` : d.target?.account ? ` ${isHack ? 'on' : 'from'} ${esc(d.target.account)}` : ''}</h2>${incStatus(d.status, d)}${d.detected ? '<span class="chip">caught live</span>' : ''}${foundLate(d.started_ts, d.first_seen_ts) ? lateChip(d.started_ts, d.first_seen_ts) : ''}<span class="spacer"></span>
-      <span class="muted small">traced ${since(d.traced_ts)} · ${d.stats?.txs || 0} transactions read${d.followed_ts ? ` · followed up ${since(d.followed_ts)}` : ''}</span><button onclick="incRetrace('${esc(d.attacker.account)}', this)" ${retracing ? 'disabled' : ''} title="A quick look at what happened since the last run">${retracing ? 'Working …' : 'Follow up'}</button><button onclick="incRetrace('${esc(d.attacker.account)}', this, true)" ${retracing ? 'disabled' : ''} title="Trace the whole case again and write a new report (1-3 minutes)">Full re-trace</button></div>
+      <span class="muted small">traced ${since(d.traced_ts)} · ${d.stats?.txs || 0} transactions read${d.followed_ts ? ` · followed up ${since(d.followed_ts)}` : ''}</span><button onclick="incRetrace('${esc(d.attacker.account)}', this)" ${retracing ? 'disabled' : ''} title="A quick look at what happened since the last run">${retracing ? 'Working …' : 'Follow up'}</button><button onclick="incRetrace('${esc(d.attacker.account)}', this, true)" ${retracing ? 'disabled' : ''} title="Trace the whole case again and write a new report (1-3 minutes)">Full re-trace</button>${manualControls}</div>
+    ${!isHack && d.status !== 'cleared' && d.status !== 'nothing_found' ? '<div class="banner neutral" style="display:block;margin:10px 0"><b>Awaiting Human Confirmation</b>: Large fund movements from solvers or hot wallets are traced as standard activity. A case is flagged as a Hack only after human operator confirmation.</div>' : ''}
     <p style="font-size:16px;margin:10px 0"><b>${esc(incTag(d) === 'safe' ? `Checked: normal activity. ${d.review?.why || ''}` : A?.headline || d.signals?.[0] || '')}</b></p>
     <div class="tiles">${tile(isHack ? 'Taken' : 'Moved', usd(d.stolen_usd), esc(d.prices_note || ''), isHack ? 'r' : '')}${tile(isHack ? 'Victims' : 'Paid by', (d.victims || []).length, (d.victims || []).filter((v) => !v.contract).length ? `${(d.victims || []).filter((v) => !v.contract).length} wallets` : 'contracts')}${tile(isHack ? 'Attacker accounts' : 'Accounts', (d.accounts || []).length, `${(d.accounts || []).filter((a) => a.role === 'fake_token').length} ${isHack ? 'fake tokens' : 'tokens it made'}`)}
       ${tile('Sent off NEAR', usd(offNear), [...new Set(ex.filter((e) => e.chain && e.chain !== 'NEAR').map((e) => e.chain))].join(', ') || 'nothing yet', offNear ? 'r' : '')}${tile('Still held', usd(d.held_usd), isHack ? 'on the attacker\'s NEAR accounts' : 'on these NEAR accounts')}${tile('Freezable', usd(freezeUsd), freezeUsd ? 'an issuer can freeze it' : 'nothing an issuer can freeze', freezeUsd ? 'g' : '')}</div>
@@ -212,4 +217,41 @@ async function incRetrace(account, btn, full = false) {
     if (r.job?.error) { status(`The trace failed: ${r.job.error}`); return; }
     render();
   } finally { retracing = null; }
+}
+
+async function incConfirmModal(account) {
+  const reason = prompt('Confirm this case as a HACK:\nEnter reason (e.g. "Public exploit announcement / verified key drain"):', 'Confirmed by operator');
+  if (reason == null) return;
+  const source = prompt('Source URL (link to public report, X post, news, or leave blank):', '') || '';
+  if (source && !/^https?:\/\//i.test(source)) { alert('Source must be a valid https:// URL or left empty'); return; }
+  const r = await fetch('/api/incident/confirm', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ account, reason, source, by: 'operator' })
+  }).then(x => x.json()).catch(e => ({ error: e.message }));
+  if (r.error) alert('Error confirming hack: ' + r.error);
+  else render();
+}
+
+async function incUnconfirm(account) {
+  if (!confirm(`Revoke hack confirmation for ${account}? The case will be set to suspected / under review.`)) return;
+  const r = await fetch('/api/incident/unconfirm', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ account, by: 'operator' })
+  }).then(x => x.json()).catch(e => ({ error: e.message }));
+  if (r.error) alert('Error unconfirming: ' + r.error);
+  else render();
+}
+
+async function incClearModal(account) {
+  const reason = prompt('Mark this case as Normal / Moved funds (solver, hot wallet, routine consolidation):\nEnter reason:', 'Normal fund movement / solver activity');
+  if (reason == null) return;
+  const r = await fetch('/api/incident/clear', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ account, reason, by: 'operator' })
+  }).then(x => x.json()).catch(e => ({ error: e.message }));
+  if (r.error) alert('Error clearing: ' + r.error);
+  else render();
 }

@@ -251,8 +251,12 @@ export async function traceIncident(input, { depth = 2, log = () => {}, upstream
     trail.exits.length ? `the money left: ${Object.entries(trail.exit_usd).map(([k, v]) => `${k} (~$${v.toLocaleString('en-US')})`).join(', ')}` : null,
   ].filter(Boolean);
 
+  // Any hack must be manually confirmed by a human (operator); before that, all movements are traced
+  // only as large fund moves / suspected transfers without automatically flagging accounts or raising hack alarms.
+  const status = stolen > 0 ? 'suspected' : 'nothing_found';
+
   return {
-    _id: `inc:${attacker}`, status: stolen >= 1000 && evidence ? 'confirmed' : stolen > 0 ? 'suspected' : 'nothing_found', kind, input,
+    _id: `inc:${attacker}`, status, has_evidence: !!evidence, kind, input,
     attacker: { account: attacker, ...origin, created_ts: origin.created_ts, funders: origin.funders.map((f) => ({ account: f.from, tx: f.tx, ts: f.ts, raw: f.raw })) },
     accounts: [...own.values()], service_accounts: service, target, victims, sources: up.sources, source_path: up.path, drain: up.drain ? { exchange: up.drain.exchange, usd: up.drain.usd, root: up.drain.root } : null, attack_txs: attackRows, stolen_usd: Math.round(stolen), losses: target?.tokens || [],
     trail, held, held_usd: Math.round(held.reduce((s, h) => s + (h.usd || 0), 0)), freezable: held.flatMap((h) => h.tokens.filter((t) => t.freeze).map((t) => ({ holder: h.account, ...t }))),

@@ -184,6 +184,21 @@ try {
     const opt = (k) => { const i = args.indexOf(`--${k}`); return i > 0 ? args[i + 1] : null; };
     const d = await confirmIncident(args[0], { source: args[1] === '-' ? null : args[1], reason: args[2], kind: opt('kind'), target: opt('target'), loss_usd: opt('loss'), accounts: (opt('accounts') || '').split(',').filter(Boolean) });
     info(`incident ${d._id}: confirmed (${d.confirmed_by?.source || 'no link yet'}) · ${d.kind} $${d.stolen_usd}`);
+  } else if (cmd === 'unconfirm-incident') {
+    // node src/cli.js unconfirm-incident <account> ["<reason>"]
+    const { unconfirmIncident } = await import('./incident/service.js');
+    const d = await unconfirmIncident(args[0], { reason: args[1] || 'unconfirmed via CLI' });
+    info(`incident ${d._id}: unconfirmed (status reverted to ${d.status})`);
+  } else if (cmd === 'clear-incident') {
+    // node src/cli.js clear-incident <account> ["<reason>"]
+    const { clearIncident } = await import('./incident/service.js');
+    const d = await clearIncident(args[0], { reason: args[1] || 'cleared via CLI' });
+    info(`incident ${d._id}: cleared as normal activity`);
+  } else if (cmd === 'reflag-incidents') {
+    // node src/cli.js reflag-incidents: re-flag all auto-confirmed incidents and clear false flags
+    const { reflagIncidents } = await import('./incident/reflag.js');
+    const res = await reflagIncidents({ log: (m) => info(m) });
+    console.log(JSON.stringify(res, null, 2));
   } else if (cmd === 'flag') {
     // node src/cli.js flag <account> critical|high|medium "<reason>" ["<detail>"]: the transaction firewall warns about it from now on
     await flagAccount(args[0], args[1], args[2] || 'reported', args[3] || '');
