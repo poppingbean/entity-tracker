@@ -31,7 +31,7 @@ import { checkRequest, accountReputation, FIREWALL_VERSION } from '../firewall/s
 import { AUTO_AUDIT_V } from '../audit/auto.js';
 import { contractReport, startAutoAudit, auditJob } from '../audit/report.js';
 import { inspect } from '../firewall/inspect.js';
-import { parseInvestigation, startInvestigation, investigationJob } from '../incident/service.js';
+import { parseInvestigation, startInvestigation, investigationJob, confirmIncident, unconfirmIncident, clearIncident } from '../incident/service.js';
 import { report } from '../incident/signals.js';
 import { walletView } from '../near/walletview.js';
 
@@ -97,6 +97,41 @@ const POSTS = {
     if (limited(feedbackHits, ip, 10)) return { error: 'too many reports, try again later' };
     try { const f = await addFeedback({ kind: b.kind, id: b.id, verdict: b.verdict, note: b.note, from: b.from }); return { ok: true, id: String(f._id) }; }
     catch (e) { return { error: e.message }; }
+  },
+  /** Manual confirm a hack by an operator / human reviewer. */
+  '/api/incident/confirm': async (b) => {
+    try {
+      const doc = await confirmIncident(String(b.account || '').toLowerCase().trim(), {
+        source: b.source || null,
+        reason: b.reason || 'Confirmed manually by operator',
+        by: b.by || 'operator',
+        kind: b.kind || null,
+        target: b.target || null,
+        loss_usd: b.loss_usd ? Number(b.loss_usd) : null,
+        accounts: b.accounts || [],
+      });
+      return { ok: true, incident: doc };
+    } catch (e) { return { error: e.message }; }
+  },
+  /** Revoke hack confirmation, reverting to suspected. */
+  '/api/incident/unconfirm': async (b) => {
+    try {
+      const doc = await unconfirmIncident(String(b.account || '').toLowerCase().trim(), {
+        reason: b.reason || 'Unconfirmed manually by operator',
+        by: b.by || 'operator',
+      });
+      return { ok: true, incident: doc };
+    } catch (e) { return { error: e.message }; }
+  },
+  /** Mark as normal fund movement (cleared), removing all flags and alerts. */
+  '/api/incident/clear': async (b) => {
+    try {
+      const doc = await clearIncident(String(b.account || '').toLowerCase().trim(), {
+        reason: b.reason || 'Normal moved funds / solver activity (cleared)',
+        by: b.by || 'operator',
+      });
+      return { ok: true, incident: doc };
+    } catch (e) { return { error: e.message }; }
   },
 };
 /** Market cap now of some tokens: the last trade's price x total supply (from the first check, else read once and kept on the token) x NEAR in USD.
@@ -545,20 +580,21 @@ const routes = {
   '/api/security/live': async (u) => {
     const only = u.searchParams.get('only'); // '' | hacks | contracts | risky
     const day = Date.now() - 86400e3;
+    const minLiveUsd = config.incidents.liveMinUsd || 100000;
     // moves are shown only for cases still confirmed: a case cleared later (a false alarm) takes its moves with it
     const proven = await col('incidents').distinct('_id', { status: 'confirmed' }).catch(() => []);
     const [moves, news, reports] = only === 'contracts' || only === 'risky' ? [[], [], []] : await Promise.all([
-      col('incident_moves').find({ incident: { $in: proven } }).sort({ ts: -1 }).limit(20).toArray().catch(() => []),
+      col('incident_moves').find({ incident: { $in: proven }, usd: { $gte: minLiveUsd } }).sort({ ts: -1 }).limit(20).toArray().catch(() => []),
       col('security_news').find({}).sort({ ts: -1 }).limit(10).toArray().catch(() => []),
       col('reports').find({}).sort({ last_ts: -1 }).limit(10).toArray().catch(() => []),
     ]);
     const [watchMeta, cursor, deploys, detections, incidents, counts] = await Promise.all([
       metaGet('security:watch'), col('meta').findOne({ _id: 'audit:deploy_cursor' }),
       only === 'hacks' ? [] : col('contract_deploys').find({}, { projection: { account: 1, kind: 1, by: 1, signer: 1, ts: 1 } }).sort({ ts: -1 }).limit(only === 'risky' ? 400 : 60).toArray(),
-      only === 'contracts' || only === 'risky' ? [] : col('incident_detections').find({}).sort({ ts: -1 }).limit(20).toArray(),
-      only === 'contracts' || only === 'risky' ? [] : col('incidents').find({ status: 'confirmed' }, { projection: { status: 1, kind: 1, 'attacker.account': 1, 'target.account': 1, drain: 1, stolen_usd: 1, held_usd: 1, started_ts: 1, first_seen_ts: 1, 'ai.headline': 1, 'ai.attack_type': 1, 'trail.exit_usd': 1, detected: 1 } }).sort({ first_seen_ts: -1 }).limit(20).toArray(),
+      only === 'contracts' || only === 'risky' ? [] : col('incident_detections').find({ usd: { $gte: minLiveUsd } }).sort({ ts: -1 }).limit(20).toArray(),
+      only === 'contracts' || only === 'risky' ? [] : col('incidents').find({ status: 'confirmed', stolen_usd: { $gte: minLiveUsd } }, { projection: { status: 1, kind: 1, 'attacker.account': 1, 'target.account': 1, drain: 1, stolen_usd: 1, held_usd: 1, started_ts: 1, first_seen_ts: 1, 'ai.headline': 1, 'ai.attack_type': 1, 'trail.exit_usd': 1, detected: 1 } }).sort({ first_seen_ts: -1 }).limit(20).toArray(),
       Promise.all([col('contract_deploys').countDocuments({ ts: { $gt: day } }), col('audits').countDocuments({ 'auto.ts': { $gt: day } }), col('audits').countDocuments({ 'auto.ts': { $gt: day }, 'auto.level': { $in: ['high', 'critical'] } }),
-        col('incident_detections').countDocuments({ ts: { $gt: day } }), col('incidents').countDocuments({ status: 'confirmed', $or: [{ started_ts: { $gt: day } }, { started_ts: null, first_seen_ts: { $gt: day } }] }) /* hacks that happened in the last 24 h, not old ones found today */, col('incident_moves').countDocuments({ ts: { $gt: day }, incident: { $in: proven } }), col('firewall_flags').estimatedDocumentCount()]),
+        col('incident_detections').countDocuments({ ts: { $gt: day }, usd: { $gte: minLiveUsd } }), col('incidents').countDocuments({ status: 'confirmed', stolen_usd: { $gte: minLiveUsd }, $or: [{ started_ts: { $gt: day } }, { started_ts: null, first_seen_ts: { $gt: day } }] }) /* hacks >= $100k that happened in the last 24 h */, col('incident_moves').countDocuments({ ts: { $gt: day }, incident: { $in: proven }, usd: { $gte: minLiveUsd } }), col('firewall_flags').estimatedDocumentCount()]),
     ]);
     // a worker from before the live feed only moves the deploy cursor: that is enough to tell the watch is running
     const watch = watchMeta || (cursor ? { height: cursor.value, tick_ts: cursor.ts, behind: null } : null);

@@ -80,7 +80,7 @@ export const config = {
   // hacks and scams: live detection of protocol drains (beside the deploy watcher) and the incident tracer
   incidents: {
     enabled: process.env.INCIDENTS_ENABLED !== 'false',
-    minUsd: num(process.env.INCIDENT_MIN_USD, 5000),           // a receiver must take at least this from one protocol within 30 min
+    minUsd: num(process.env.INCIDENT_MIN_USD, 100000),          // a receiver must take at least this from one protocol within 30 min (only >= $100k)
     alwaysUsd: num(process.env.INCIDENT_ALWAYS_USD, 250000),   // ... and is traced whatever it looks like above this
     freshHours: num(process.env.INCIDENT_FRESH_HOURS, 72),      // an account younger than this is a suspect
     aiPerDay: num(process.env.INCIDENT_AI_PER_DAY, 60),          // NEAR AI calls per day for incident reports and deep reviews (apart from the audits)
@@ -88,8 +88,9 @@ export const config = {
     investigateTimeoutMinutes: num(process.env.INCIDENT_INVESTIGATE_TIMEOUT_MINUTES, 10), // the worker moves on to the next case after this long
     alertMaxAgeDays: num(process.env.INCIDENT_ALERT_MAX_AGE_DAYS, 7), // a hack whose attack is older than this when found is history: no alert, only new moves
     reviewDelayMinutes: num(process.env.INCIDENT_REVIEW_DELAY_MINUTES, 3), // the deep review (re-trace + NEAR AI verdict) runs this long after a finding
-    exchangeMinUsd: num(process.env.INCIDENT_EXCHANGE_MIN_USD, 50000), // an exchange hot-wallet outflow worth checking for a drain
-    followMinUsd: num(process.env.INCIDENT_FOLLOW_MIN_USD, 500),  // a move of stolen funds worth an alert
+    exchangeMinUsd: num(process.env.INCIDENT_EXCHANGE_MIN_USD, 100000), // an exchange hot-wallet outflow worth checking for a drain (only >= $100k)
+    followMinUsd: num(process.env.INCIDENT_FOLLOW_MIN_USD, 100000),  // a move of stolen funds worth an alert (only >= $100k)
+    liveMinUsd: num(process.env.INCIDENT_LIVE_MIN_USD, 100000),     // safety live feed / caught live threshold (only >= $100k)
     registryEveryHours: num(process.env.EXCHANGE_REGISTRY_EVERY_HOURS, 24), // rediscover exchange wallets and their baselines
     newsEveryMinutes: num(process.env.NEWS_EVERY_MINUTES, 15),     // security news feeds (0 = off)
     newsFeeds: (process.env.NEWS_FEEDS || 'https://cointelegraph.com/rss,https://www.theblock.co/rss.xml,https://decrypt.co/feed,https://rekt.news/rss/feed.xml,https://cryptoslate.com/feed/').split(',').map((s) => s.trim()).filter(Boolean),
