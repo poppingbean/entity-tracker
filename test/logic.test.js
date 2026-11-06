@@ -448,7 +448,8 @@ test('AI analyst updates: diffPackets reports only what moved since the previous
 
 // ---------------------------------------------------------------- linked groups vs tag groups
 import { tagVerdict, walletBehaviours, earlyBucket } from '../src/evaluate/tags.js';
-import { RUGGER_MAX_POINTS } from '../src/scanner/rules.js';
+import { RUGGER_MAX_POINTS, SOFT_GATES, isHardGate } from '../src/scanner/rules.js';
+import { config } from '../src/config.js';
 import { ruggerFlag } from '../src/analysis/token.js';
 test('linked groups: services never link; a shared funder links at most 10 wallets; a member funding members always does', () => {
   const W = (id, funder) => ({ _id: id, funders: [{ account: funder, kind: 'wallet' }], chain: [{ account: funder, kind: 'wallet', hop: 1 }], flow_out: [] });
@@ -537,6 +538,31 @@ test('scanner rules: rugger early money is a warning with a light cut, never a g
   assert.equal(bad.gates.find((g) => g.id === 'bad_groups_not_dominant').ok, false);
   assert.equal(clean.score - bad.score, 15);
   assert.deepEqual(bad.warnings, []);
+});
+
+test('scanner rules: min_buyers and not_overextended are soft gates, warnings that never fail the check on their own', () => {
+  const f = (trading, market = { mcapUsd: 50000 }) => ({ pool: { quoteAccepted: true, route: 'direct', lpLocked: true, nearReserve: 200, quoteSymbol: 'wNEAR', quoteForBuy: { tokensOut: 1 } }, contract: { matchesTemplate: true }, market,
+    trading: { uniqueBuyers: 30, creatorSold: false, priceMultipleSinceFirstTrade: 1, buyNear: 100, sellNear: 10, syncBuyClusters: 0, ...trading }, launch: { tax: null }, wallets: { linkedBuyerShare: 0, creatorFundedBuyers: [], creator: null },
+    audit: { available: false }, intel: null });
+  assert.deepEqual([...SOFT_GATES].sort(), ['min_buyers', 'not_overextended']);
+  const both = applyRules(f({ uniqueBuyers: 3, priceMultipleSinceFirstTrade: 50 }));
+  assert.equal(both.gates.find((g) => g.id === 'min_buyers').ok, false, 'the gate still records the miss');
+  assert.equal(both.gates.find((g) => g.id === 'not_overextended').ok, false);
+  assert.deepEqual(both.failed, [], 'but neither is a failed gate');
+  assert.equal(both.pass, both.score >= config.rules.minScore, 'pass depends only on the score now');
+  assert.deepEqual(both.warnings.map((w) => [w.id, w.level]), [['min_buyers', 'warning'], ['not_overextended', 'warning']]);
+  assert.ok(both.warnings.every((w) => !/[<>]/.test(w.why)), 'warnings never show the threshold (they are not redacted)');
+  assert.match(both.warnings[0].why, /only 3 distinct external buyer/);
+  assert.match(both.warnings[1].why, /50x since the first trade/);
+  // a soft miss next to a hard one: the hard one fails, the soft one stays a warning
+  const withHard = applyRules(f({ uniqueBuyers: 3, creatorSold: true }));
+  assert.deepEqual(withHard.failed.map((g) => g.id), ['creator_not_selling']);
+  assert.equal(withHard.pass, false);
+  assert.deepEqual(withHard.warnings.map((w) => w.id), ['min_buyers']);
+  // stored / imported failed lists: soft ids do not count
+  assert.equal(isHardGate('min_buyers'), false); assert.equal(isHardGate({ id: 'not_overextended' }), false);
+  assert.equal(isHardGate('creator_not_selling'), true); assert.equal(isHardGate({ id: 'min_mcap' }), true);
+  assert.deepEqual(applyRules(f({})).warnings, []);
 });
 
 test('token analysis: a rugger group among the early buyers is a medium warning flag, so the AI risk floor is medium, not high', () => {

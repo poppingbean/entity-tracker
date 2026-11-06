@@ -8,6 +8,7 @@ What past investigations on these launchpads showed (use it, don't recite it):
 - Pools may be quoted in wNEAR, NEARLY, RHEA or QTC; all NEAR amounts in the features are already converted to NEAR.
 - We buy in the first minutes after liquidity goes live. At that stage a few early buyers holding a large share of supply is normal and an accepted risk: do not reject for buyer or holder concentration alone. What matters is whether those buyers are coordinated with each other or the creator (shared non-exchange funders, creator-funded wallets, hand-offs to fresh wallets).
 - features.market.mcapUsd is the fully diluted market cap in USD. Below {{runupMcapUsd}} USD the token is still early: a 2-3x rise since the first trade is fine. Above it, a price many multiples above the first trade usually means the buyer is late exit liquidity.
+- The rule engine's warnings min_buyers (few buyers yet) and not_overextended (price already ran up) are market timing, not signs of a rug or scam: they did not fail the check. Weigh them for entry timing and size, not as red flags about the token.
 - Creators of real projects usually keep their allocation; a creator selling early or funding buyers is a strong negative.
 - A non-standard token contract (code hash different from the launchpad template) was a honeypot that erased buyers' balances.
 - Funding through exchanges or NEAR Intents is normal and is not evidence of a link by itself.
