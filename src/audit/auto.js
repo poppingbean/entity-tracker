@@ -14,12 +14,13 @@ import { powerInventory, unknownWrites, powerSeverity, POWERS, SEV } from './pow
 import { controlOf, reputationOf } from './control.js';
 import { typeChecks, recentBehaviour } from './checks.js';
 import { auditFindings, controlSummary } from './findings.js';
-import { codeCapabilities, codeEffects, DANGEROUS } from './wasm.js';
+import { codeCapabilities, codeEffects, codeGuards, DANGEROUS } from './wasm.js';
+import { applyOwnerBound } from './destination.js';
 import { describeFunctions, aiFunctionReview, mergeFunctions } from './functions.js';
 import { reviewSource } from './source.js';
 import { aiCodeReview, aiDeepReview, aiExplainChange, aiWriteUp } from './ai.js';
 
-export const AUTO_AUDIT_V = 5; // bump when the audit logic changes: older code audits are redone
+export const AUTO_AUDIT_V = 6; // bump when the audit logic changes: older code audits are redone
 const STANDARD_METHODS = new Set([...STANDARD, 'nft_transfer', 'nft_transfer_call', 'nft_token', 'nft_approve', 'nft_revoke', 'nft_revoke_all', 'nft_is_approved', 'nft_resolve_transfer',
   'nft_payout', 'nft_transfer_payout', 'mt_transfer', 'mt_transfer_call', 'mt_batch_transfer', 'mt_batch_transfer_call', 'deposit', 'deposit_and_stake', 'stake', 'unstake', 'unstake_all',
   'withdraw', 'withdraw_all', 'stake_all', 'swap', 'add_liquidity', 'remove_liquidity', 'execute', 'add_proposal', 'act_proposal', 'confirm', 'add_request', 'delegate', 'undelegate', 'vote', 'ping']);
@@ -55,10 +56,11 @@ export async function auditCode(account, acc = null, { force = false, ai = true 
   let unknown = unknownWrites(exports, powers, STANDARD_METHODS).slice(0, 40);
   const prev = await col('code_audits').findOne({ _id: key }, { projection: { ai: 1, ai_deep: 1, ai_functions: 1, first_seen_ts: 1, source_review: 1 } });
   const effects = code ? await codeEffects(code) : null;
+  const rawGuards = code ? await codeGuards(code, writes) : null; // which methods are bound to a committed owner / check the caller (destination.js)
   const doc = {
     _id: key, v: AUTO_AUDIT_V, first_account: account, kb: code ? Math.round(code.length / 1024) : null, exports_n: exports?.length ?? null, exports: exports?.slice(0, 400) || null,
     role: cls.role, label: cls.label, standards: cls.standards, confidence: cls.confidence, candidates: cls.candidates || [], why: cls.why || null, role_source: 'rules',
-    powers, capabilities, fake_storage: stat?.fakeStorage || [], owner_guard: !!stat?.ownerGuard, unknown_writes: unknown, strings: strings.slice(0, 40),
+    powers, capabilities, guards: rawGuards, fake_storage: stat?.fakeStorage || [], owner_guard: !!stat?.ownerGuard, unknown_writes: unknown, strings: strings.slice(0, 40),
     source: src ? { version: src.version || null, link: src.link || null, standards: (src.standards || []).map((s) => s.standard) } : null,
     audited_ts: Date.now(),
   };
@@ -87,16 +89,26 @@ export async function auditCode(account, acc = null, { force = false, ai = true 
     doc.powers = powers;
     doc.unknown_writes = unknown = unknown.filter((m) => !aiReview.powers.some((p) => p.method === m));
   }
+  // where withdrawals go: a withdrawal-type method (sweep, exit_to_owner, ...) that the code binds to a committed owner address is not "moves
+  // users' funds" (the name alone says nothing about the destination); methods NOT shown to be bound stay in the power, at its severity
+  if (rawGuards) {
+    const ab = applyOwnerBound(powers, rawGuards.owner_bound);
+    doc.powers = powers = ab.powers;
+    doc.owner_bound = ab.bound;
+    doc.guards = { owner_bound: ab.bound, caller_checked: rawGuards.caller_checked };
+  }
   // the claimed source (stage 4, deterministic part): does it define the deployed methods?
   if (doc.source?.link) {
     const sr = prev?.source_review?.link === doc.source.link ? prev.source_review : await reviewSource(doc.source.link, writes, powers.flatMap((p) => p.methods)).catch(() => null);
     if (sr) doc.source_review = { link: sr.link, ref: sr.ref || null, files_read: sr.files_read || 0, missing: sr.missing || [], error: sr.error || null, excerpts: (sr.excerpts || []).slice(0, 8) };
   }
-  if (prev?.ai_deep) doc.ai_deep = prev.ai_deep;
+  // a cached deep review is kept, except one written before the guard facts existed for a code that has some (it may contradict them)
+  const hasGuards = !!(rawGuards?.owner_bound?.length || rawGuards?.caller_checked?.length);
+  if (prev?.ai_deep && (!hasGuards || prev.ai_deep.audit_v === AUTO_AUDIT_V)) doc.ai_deep = prev.ai_deep;
   // the function review: what each method does (rules from the code), and NEAR AI's reading of each one for contracts the rules
   // could not place (or when someone asks for a fresh audit); once per code
   if (exports?.length) {
-    const rules = describeFunctions(exports.slice(0, 200), effects);
+    const rules = describeFunctions(exports.slice(0, 200), effects, doc.guards);
     let aiFn = !force && prev?.ai_functions ? prev.ai_functions : null;
     if (ai && !aiFn && exports.length <= 200 && (force || doc.role === 'unknown' || doc.confidence === 'low')) aiFn = await aiFunctionReview(doc, rules, strings).catch((e) => { warn(`audit AI function review ${key}: ${e.message}`); return null; });
     if (aiFn) doc.ai_functions = aiFn;
@@ -157,7 +169,7 @@ export async function autoAudit(account, { deploy = null, force = false, ai = tr
   const risky = ['critical', 'high'].includes(level) || findings.some((f) => ['hidden_power', 'unguarded_power', 'source_mismatch'].includes(f.key));
   if (ai && !code.ai_deep && (risky || (HOLDS_VALUE.has(code.role) && (code.unknown_writes?.length || code.source_review?.excerpts?.length)))) {
     const deep = await aiDeepReview(code, auto, code.strings || [], code.source_review).catch((e) => { warn(`audit AI deep review ${account}: ${e.message}`); return null; });
-    if (deep) { code.ai_deep = deep; await col('code_audits').updateOne({ _id: code._id }, { $set: { ai_deep: deep } }); }
+    if (deep) { deep.audit_v = AUTO_AUDIT_V; code.ai_deep = deep; await col('code_audits').updateOne({ _id: code._id }, { $set: { ai_deep: deep } }); }
   }
   if (code.ai_deep) { auto.ai_deep = { summary: code.ai_deep.summary, model: code.ai_deep.model, dropped: code.ai_deep.dropped }; findings.push(...code.ai_deep.findings); }
   // the level again with the AI findings (they can only add risk) and the change, worst first

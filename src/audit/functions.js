@@ -21,7 +21,7 @@ const CONTROL = new Set(['add_full_access_key', 'add_function_call_key', 'delete
 const RISK = ['none', 'low', 'medium', 'high'];
 
 /** The rules' view of each method: kind, what it does, a risk from its effects. Pure (exported for tests). */
-export function describeFunctions(exports, effects) {
+export function describeFunctions(exports, effects, guards = null) {
   return (exports || []).map((m) => {
     const e = new Set(effects?.[m]?.effects || []);
     const writes = e.has('writes_state') || e.has('deletes_state') || [...MONEY, ...CONTROL].some((x) => e.has(x));
@@ -29,6 +29,8 @@ export function describeFunctions(exports, effects) {
     const kind = /^(new|init|migrate)$|^new_/.test(m) ? 'setup' : e.has('callback') && /^(on_|resolve|.*_callback)|_callback$|^ft_resolve|^nft_resolve/.test(m) ? 'callback'
       : !writes || (STD_VIEW.test(m) && ![...MONEY, ...CONTROL, 'reads_deposit'].some((x) => e.has(x))) ? 'view' : 'call';
     const does = [...e].map((x) => SAY[x]).filter(Boolean);
+    if (guards?.owner_bound?.includes(m)) does.push('pays only the owner address committed at creation');
+    if (guards?.caller_checked?.includes(m)) does.push('refuses callers that are not allowed (panic message in the code)');
     const risk = [...CONTROL].some((x) => e.has(x)) ? 'high' : kind !== 'view' && e.has('send_near') ? 'medium' : kind !== 'view' && (e.has('call_contracts') || e.has('generic_promise') || e.has('reads_deposit')) ? 'low' : 'none';
     return { method: m, kind, effects: [...e], does: kind === 'view' ? (does.filter((d) => !/emits/.test(d)).length ? does : ['reads data, changes nothing']) : does.length ? does : ['runs logic without lasting effects'], size: effects?.[m]?.size ?? null, risk };
   });

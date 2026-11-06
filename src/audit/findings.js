@@ -37,6 +37,8 @@ export function auditFindings({ code, control = {}, checks = [], deploy = null }
     if (sev === 'info') continue;
     add(sev, `power_${p.power}`, `${p.label}${p.normal_for_role ? ' (normal for this kind of contract)' : ''}`, `${p.methods.join(', ')}; ${who}.`);
   }
+  // withdrawal methods the code binds to a committed owner address: reported, so a reader sees why the name alone did not make them a power
+  if (code.owner_bound?.length) add('info', 'owner_bound_exit', `${code.owner_bound.join(', ')} can only pay the owner address committed at creation`, 'The code hashes the receiver and compares it with a stored owner hash before paying, so the caller cannot pick another destination. Who that owner is still has to be checked on the chain.');
   if (control.full_keys > 0) {
     const sev = HOLDS_FUNDS.has(code.role) ? 'high' : code.role === 'token' || code.role === 'nft' ? 'high' : 'medium';
     add(sev, 'full_access_key', `${control.full_keys} full-access key${control.full_keys > 1 ? 's' : ''} on the contract`, 'Whoever holds it can replace the code or move everything the contract holds, whatever the code says.');

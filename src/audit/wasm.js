@@ -3,6 +3,7 @@
 // whether it ever reads who the caller is. Names lie; host calls don't. Calls through function tables (call_indirect) can't be followed
 // statically: such methods are marked `dynamic`, and an absent capability is then never taken as proof.
 import wabtInit from 'wabt';
+import { guardsFromWat } from './destination.js';
 
 let wabtP = null;
 const wabt = () => (wabtP ||= wabtInit());
@@ -131,5 +132,17 @@ export async function codeCapabilities(code, methods) {
     const text = m.toText({ foldExprs: false, inlineExport: true });
     m.destroy();
     return capabilitiesFromWat(text, methods);
+  } catch { return null; }
+}
+
+/** Which exports are bound to a committed owner / check the caller (destination.js), from WASM bytes. null when it can't be decompiled. */
+export async function codeGuards(code, methods = null) {
+  try {
+    const w = await wabt();
+    const m = w.readWasm(new Uint8Array(code), { readDebugNames: true });
+    m.generateNames(); m.applyNames();
+    const text = m.toText({ foldExprs: false, inlineExport: true });
+    m.destroy();
+    return guardsFromWat(text, methods);
   } catch { return null; }
 }
