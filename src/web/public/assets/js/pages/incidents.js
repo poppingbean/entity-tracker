@@ -219,27 +219,22 @@ async function incRetrace(account, btn, full = false) {
   } finally { retracing = null; }
 }
 
+// the server only takes same-origin POSTs that carry x-tracker: 1
+const incPost = (path, body) => fetch(path, { method: 'POST', headers: { 'content-type': 'application/json', 'x-tracker': '1' }, body: JSON.stringify(body) }).then((x) => x.json()).catch((e) => ({ error: e.message }));
+
 async function incConfirmModal(account) {
   const reason = prompt('Confirm this case as a HACK:\nEnter reason (e.g. "Public exploit announcement / verified key drain"):', 'Confirmed by operator');
   if (reason == null) return;
   const source = prompt('Source URL (link to public report, X post, news, or leave blank):', '') || '';
   if (source && !/^https?:\/\//i.test(source)) { alert('Source must be a valid https:// URL or left empty'); return; }
-  const r = await fetch('/api/incident/confirm', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ account, reason, source, by: 'operator' })
-  }).then(x => x.json()).catch(e => ({ error: e.message }));
+  const r = await incPost('/api/incident/confirm', { account, reason, source });
   if (r.error) alert('Error confirming hack: ' + r.error);
   else render();
 }
 
 async function incUnconfirm(account) {
   if (!confirm(`Revoke hack confirmation for ${account}? The case will be set to suspected / under review.`)) return;
-  const r = await fetch('/api/incident/unconfirm', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ account, by: 'operator' })
-  }).then(x => x.json()).catch(e => ({ error: e.message }));
+  const r = await incPost('/api/incident/unconfirm', { account });
   if (r.error) alert('Error unconfirming: ' + r.error);
   else render();
 }
@@ -247,11 +242,7 @@ async function incUnconfirm(account) {
 async function incClearModal(account) {
   const reason = prompt('Mark this case as Normal / Moved funds (solver, hot wallet, routine consolidation):\nEnter reason:', 'Normal fund movement / solver activity');
   if (reason == null) return;
-  const r = await fetch('/api/incident/clear', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ account, reason, by: 'operator' })
-  }).then(x => x.json()).catch(e => ({ error: e.message }));
+  const r = await incPost('/api/incident/clear', { account, reason });
   if (r.error) alert('Error clearing: ' + r.error);
   else render();
 }

@@ -24,6 +24,21 @@ const AI_WAITS = 6;
 const delay = () => (config.incidents.reviewDelayMinutes ?? 3) * 60e3;
 
 /** Queue a finding for its deep review (once): `kind` is detection or incident, `foundTs` when it was found. */
+/**
+ * The verdict of a deep review: which tag the case gets and its status. A human confirmation is final; a case the rules found evidence for
+ * (has_evidence) is never cleared by routine history or the AI alone (only a human clears it); an unproven case is cleared by routine history
+ * or a (not low-confidence) "not a hack".
+ */
+export function decideReview(inc, { ai = null, routine = false } = {}) {
+  const aiClears = ai?.verdict === 'not_hack' && ai.confidence !== 'low' && !inc.has_evidence;
+  let status = inc.status, tag;
+  if (inc.confirmed_by) tag = 'hack'; // confirmed by an operator: NEAR AI informs, it does not overrule
+  else if (inc.status === 'confirmed') tag = ai?.verdict === 'not_hack' && ai.confidence === 'high' ? 'review' : 'hack';
+  else if ((routine && !inc.has_evidence) || aiClears || ['nothing_found', 'dismissed', 'cleared'].includes(inc.status)) { status = 'cleared'; tag = 'safe'; }
+  else tag = 'review';
+  return { status, tag };
+}
+
 export async function scheduleReview(subject, kind, foundTs = Date.now()) {
   await col('deep_reviews').updateOne({ _id: subject }, { $setOnInsert: { _id: subject, kind, found_ts: foundTs, due_ts: foundTs + delay(), status: 'pending', attempts: 0 } }, { upsert: true });
 }
@@ -78,14 +93,7 @@ export async function reviewIncident(inc) {
     routine_relationship: routine,
   };
   const ai = await aiVerdict(inc, facts);
-  const aiClears = ai?.verdict === 'not_hack' && ai.confidence !== 'low';
-  let status = inc.status, tag;
-  if (inc.confirmed_by) tag = 'hack'; // confirmed by public reports: NEAR AI informs, it does not overrule
-  else if (inc.status === 'confirmed') {
-    // the rules found an attacker signal: only a confident "not a hack" puts it back under review (it is not cleared on the AI alone)
-    if (ai?.verdict === 'not_hack' && ai.confidence === 'high') { tag = 'review'; } else tag = 'hack';
-  } else if (routine || aiClears || ['nothing_found', 'dismissed', 'cleared'].includes(inc.status)) { status = 'cleared'; tag = 'safe'; }
-  else tag = 'review';
+  const { status, tag } = decideReview(inc, { ai, routine });
   // NEAR AI did not answer (its budget for the day is spent, or it is down): the case is retried later rather than left under review
   const aiMissing = !ai && aiEnabled() && tag === 'review';
   const why = tag === 'safe' ? (routine ? `routine: the receiver had ${known.reduce((s, p) => s + p.n, 0)} earlier transfers from the same accounts` : ai?.what_it_is || 'no evidence of a hack') : tag === 'hack' ? (ai?.what_it_is || 'confirmed by the rules') : (ai?.what_it_is || (aiMissing ? 'not confirmed yet: waiting for NEAR AI' : 'not confirmed'));
