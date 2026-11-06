@@ -103,7 +103,7 @@ export async function runWorker() {
   info(`worker started · launchpads=${config.launchpads.join(',')} · early window ${config.entry.windowMinutes} min · outcomes at ${config.outcome.minutes.join('/')} min`);
   // heartbeat: report every minute, also in the middle of a long cycle (a catch-up can take a while), so the dashboard can tell busy from stopped
   let last = null;
-  const report = () => metaSet('worker', { ts: Date.now(), cycles: runtime.cycles, startedTs: runtime.startedTs, lastCycleTs: runtime.lastCycleTs, last, ai: { enabled: aiEnabled(), model: config.ai.model, ok: aiStatus.ok, error: aiStatus.error, calls: aiStatus.calls, failures: aiStatus.failures } }).catch(() => {});
+  const report = () => metaSet('worker', { ts: Date.now(), cycles: runtime.cycles, startedTs: runtime.startedTs, lastCycleTs: runtime.lastCycleTs, last, ai: { enabled: aiEnabled(), model: config.ai.model, ok: aiStatus.ok, error: aiStatus.error, calls: aiStatus.calls, failures: aiStatus.failures, bad_answers: aiStatus.badAnswers, last_bad: aiStatus.lastBad } }).catch(() => {});
   const beat = setInterval(report, 60e3); beat.unref?.();
   await report();
   while (!runtime.stopping) {
