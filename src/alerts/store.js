@@ -10,6 +10,7 @@ export const TYPES = {
   creator_blacklisted: { label: 'Creator dumped its supply', group: 'rug' },
   collapse: { label: 'Price collapse', group: 'rug' },
   rugger_launch: { label: 'Rugger launched again', group: 'activity' },
+  gate_pass: { label: 'Gate pass', group: 'scanner' },
   code_changed: { label: 'Contract code changed', group: 'contract' },
   full_access_key: { label: 'New full-access key', group: 'contract' },
   watched_buy: { label: 'Watched wallet bought', group: 'activity' },

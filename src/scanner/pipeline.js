@@ -8,6 +8,7 @@ import { syncTokenTrades } from '../collect/trades.js';
 import { aiEnabled } from '../ai/tools/nearai.js';
 import { collectFeatures } from './features.js';
 import { applyRules } from './rules.js';
+import { raiseGatePass } from './gatepass.js';
 import { analyse } from './analyst.js';
 import { simBuy, simSell, ensureAccount } from '../sim/portfolio.js';
 
@@ -74,6 +75,8 @@ export async function scanToken(t) {
     early = await saveScan(fresh, 'first', minutes, f, rules, null, pending, null, null, true);
     await col('tokens').updateOne({ _id: t._id }, { $set: tokenScan(early, pending, null, true) });
   }
+  // the gate-pass report goes out at once, before the AI review (which can take minutes)
+  if (rules.pass) await raiseGatePass(fresh, f, rules, { kind: 'first', minutes, scanId: early?.id ?? null });
   if (rules.pass) {
     if (aiEnabled()) { try { ai = await analyse(f, rules, { holding: null }); } catch (e) { warn(`AI analyst failed for ${t._id}: ${e.message}`); } }
     decision = decide(rules, ai);
@@ -120,6 +123,7 @@ async function followUp(t, minutes) {
   info(`FOLLOW-UP +${minutes}m ${t.symbol || ''} ${t._id}: rules ${rules.pass ? 'PASS' : 'FAIL'} (score ${rules.score})${open ? ' · holding' : ''}`);
   let ai = null, decision = { buy: false, action: null, why: open ? 'holding' : 'rules failed, no AI review' }, trade = null, early = null;
   if ((open || rules.pass) && aiEnabled()) early = await saveScan(fresh, 'followup', minutes, f, rules, null, { buy: false, action: null, why: `gates ${rules.pass ? 'passed' : 'failed'} · AI analyst reviewing` }, null, null, true);
+  if (rules.pass) await raiseGatePass(fresh, f, rules, { kind: 'followup', minutes, scanId: early?.id ?? null }); // once per token: nothing if the first check already passed
   if (!open && !rules.pass) { // a failed review cancels the later checkpoints
     for (const m of F.minutes) if (m > minutes) await col('followups').updateOne({ _id: `${t._id}|${m}` }, { $setOnInsert: { _id: `${t._id}|${m}`, token: t._id, minutes: m, status: 'cancelled', ts: Date.now(), note: `the +${minutes} min review failed` } }, { upsert: true });
   } else if (aiEnabled()) {

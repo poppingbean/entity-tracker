@@ -660,6 +660,27 @@ test('alerts: owner keys, alert matching, Telegram text is escaped', () => {
   const m = alertMessage({ severity: 'high', title: '<b>X</b> rugged', text: 'a & b <script>' });
   assert.ok(m.includes('&lt;b&gt;X&lt;/b&gt;') && m.includes('a &amp; b &lt;script&gt;') && !m.includes('<script>'));
 });
+test('alerts: the gate-pass report (chain facts, score, warnings, never a threshold) reaches every bot chat that did not opt out', async () => {
+  const { gatePassReport } = await import('../src/scanner/gatepass.js');
+  const { GATE_PASS_CHATS } = await import('../src/alerts/watch.js');
+  const { TYPES } = await import('../src/alerts/store.js');
+  const t = { _id: 'moon-1.nearlytrade.near', symbol: 'MOON', launchpad: 'nearlytrade', creator: 'dev.near' };
+  const f = { pool: { nearReserve: 231.4 }, market: { mcapUsd: 12400 }, trading: { uniqueBuyers: 4, buyNear: 180, sellNear: 20, priceMultipleSinceFirstTrade: 1.8 },
+    audit: { available: true, risk_score: 12, risk_level: 'low' }, intel: { early_buyer_groups: { good: { share: 0.2 }, bad: { share: 0 }, rugger: { wallets: 1, share: 0.05 } } } };
+  const rules = { pass: true, score: 66, warnings: [{ id: 'min_buyers', level: 'warning', why: 'only 4 distinct external buyer(s) at the time of the check' }] };
+  const r = gatePassReport(t, f, rules, { kind: 'first', minutes: 6 });
+  assert.equal(r.title, 'Gate pass: $MOON');
+  for (const s of ['Score 66/100', 'first check, 6 min after launch', 'nearly.trade · pool 231 NEAR · market cap $12,400', '4 buyers · bought 180 / sold 20 NEAR · price x1.8',
+    'Contract audit: risk 12/100 (low)', 'known good 20% · dangerous 0% · rug-linked 5%', '⚠️ only 4 distinct external buyer(s)', 'Contract: moon-1.nearlytrade.near', 'not a buy signal']) assert.ok(r.text.includes(s), s);
+  assert.ok(!/[<>]/.test(r.text) && r.text.length <= 1200, 'no thresholds, fits an alert');
+  assert.match(gatePassReport({ _id: 'x.near' }, {}, { score: 60 }).text, /Contract audit: not available yet/, 'missing features do not break it');
+  assert.equal(TYPES.gate_pass.group, 'scanner');
+  assert.ok(alertMessage({ type: 'gate_pass', severity: 'info', title: r.title, text: r.text }).startsWith('✅ <b>Gate pass: $MOON</b>'));
+  // who: Telegram bot chats only (tg_…), unless they sent /gatepass off
+  assert.deepEqual(GATE_PASS_CHATS, { _id: { $regex: '^tg_' }, gate_pass: { $ne: false } });
+  const re = new RegExp(GATE_PASS_CHATS._id.$regex);
+  assert.ok(re.test('tg_-1001234') && !re.test('web_abc') && !re.test('api_abc'));
+});
 test('NFT events: a transfer to the same account is never a sale (escrow / market bookkeeping)', () => {
   const C = 'c.near';
   const e = nftEventsOf({ signer: 'esc.near', receiver: 'esc.near', calls: [{ method: 'buy', depositNear: 3 }], inflows: [{ from: 'esc.near', to: 'esc.near', near: 3 }],

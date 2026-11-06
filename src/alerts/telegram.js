@@ -1,9 +1,9 @@
 // The Telegram bot: anyone can keep a watchlist from a chat (private or group) and get its alerts there. Long polling (getUpdates), so
-// no public endpoint is needed. Commands: /watch, /unwatch, /list, /alerts, /check, /hack, /hacks, /report, /help.
+// no public endpoint is needed. Commands: /watch, /unwatch, /list, /alerts, /check, /hack, /hacks, /report, /gatepass, /help.
 import { config } from '../config.js';
 import { metaGet, metaSet } from '../db.js';
 import { warn } from '../log.js';
-import { resolveTarget, findWatched, setWatch, getWatchlist, alertsFor, KINDS, MAX_ITEMS } from './watch.js';
+import { resolveTarget, findWatched, setWatch, getWatchlist, alertsFor, setGatePass, KINDS, MAX_ITEMS } from './watch.js';
 import { sendTelegram, sendTelegramDocument, alertMessage } from './deliver.js';
 import { findIncident, incidentMessage, evidenceFile, latestMessage } from '../incident/botinfo.js';
 import { getAnalysis } from '../analysis/token.js';
@@ -20,6 +20,7 @@ const HELP = `<b>Safe Near alerts</b>
 /hack &lt;wallet | transaction | link&gt; – is it part of a hack? Where the money came from and went, what is still held, and an evidence file to forward
 /hacks – the latest hacks on NEAR
 /report &lt;account | transaction hash&gt; [what happened] – report a hack, drainer or stolen funds: it is investigated from the chain
+/gatepass off|on – every chat that tracks something gets a report each time a new launch passes every hard gate of the scanner; turn it off or on
 Kinds are detected from the id (c_… is a group); force one with e.g. <code>/watch alice.near creator</code>. Up to ${MAX_ITEMS} items per chat.`;
 
 const hits = new Map(); // chat -> [ts] (30 commands / 10 min)
@@ -35,6 +36,14 @@ async function handle(msg) {
   if (cmd === '/list') {
     const w = await getWatchlist(owner);
     return sendTelegram(chat, w.items.length ? `<b>Watching ${w.items.length}</b>\n${w.items.map((x) => `• ${x.kind}: <code>${esc(x.id)}</code>`).join('\n')}` : 'This chat watches nothing yet. Try /watch &lt;id&gt;.');
+  }
+  if (cmd === '/gatepass') {
+    if (!config.alerts.gatePass) return sendTelegram(chat, 'Gate-pass reports are turned off on this server.');
+    const want = (arg || '').toLowerCase();
+    const w = await getWatchlist(owner), registered = !!w.created_ts;
+    if (want !== 'on' && want !== 'off') return sendTelegram(chat, registered ? `Gate-pass reports are <b>${w.gate_pass === false ? 'off' : 'on'}</b> for this chat. Use /gatepass off or /gatepass on.` : 'Gate-pass reports reach every chat that tracks something here: /watch a token, wallet or creator to start (or /gatepass on for the reports only).');
+    const on = await setGatePass(owner, want === 'on');
+    return sendTelegram(chat, on ? 'This chat gets a report each time a new launch passes every hard gate of the scanner. Passing the gates is not a buy signal. /gatepass off to stop.' : 'Gate-pass reports stopped for this chat. /gatepass on to get them again.');
   }
   if (cmd === '/alerts') {
     const list = await alertsFor(owner, { limit: 5 });

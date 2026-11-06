@@ -58,7 +58,7 @@ const utc = (ts) => new Date(ts).toISOString().slice(11, 16) + ' UTC';
 export const alertMessage = (a) => {
   const at = a.data?.event_ts ? `\n🕒 ${utc(a.data.event_ts)}` : '';
   const links = [a.url && config.alerts.siteUrl ? `<a href="${escHtml(config.alerts.siteUrl + a.url)}">Open on Safe Near</a>` : null, txUrl(a) ? `<a href="${escHtml(txUrl(a))}">Transaction on NearBlocks</a>` : null].filter(Boolean);
-  return `${ICON[a.severity] || ''} <b>${escHtml(a.title)}</b>\n${escHtml(a.text)}${at}${links.length ? '\n' + links.join(' · ') : ''}`;
+  return `${(a.type === 'gate_pass' ? '✅' : ICON[a.severity]) || ''} <b>${escHtml(a.title)}</b>\n${escHtml(a.text)}${at}${links.length ? '\n' + links.join(' · ') : ''}`;
 };
 /** A file to a chat (the evidence pack), with an optional caption. */
 export async function sendTelegramDocument(chatId, name, text, caption = '') {
@@ -88,12 +88,17 @@ export async function deliverPending(limit = 30) {
     if (isStale(a)) { await col('alerts').updateOne({ _id: a._id }, { $set: { delivered: true, delivery: { skipped: 'stale' }, delivered_ts: Date.now() } }); continue; }
     const out = { channel: 0, webhook: 0, chats: 0, hooks: 0, errors: [] };
     const tryIt = async (k, fn) => { try { await fn(); out[k]++; } catch (e) { out.errors.push(`${k}: ${e.message}`.slice(0, 160)); } };
-    if (atLeast(a.severity, config.alerts.publicSeverity)) {
-      if (config.alerts.telegramChannel) await tryIt('channel', () => sendTelegram(config.alerts.telegramChannel, alertMessage(a)));
+    const chatsSent = new Set(); // a chat gets an alert once, even when it is the channel and a subscriber too
+    const toChat = (k, chat) => { if (chatsSent.has(String(chat))) return; chatsSent.add(String(chat)); return tryIt(k, () => sendTelegram(chat, alertMessage(a))); };
+    if (a.type === 'gate_pass') {
+      // gate passes reach every bot chat through ownersFor (below); the optional gate-pass chat gets them too, whatever the channel's severity
+      if (config.alerts.gatePass && config.alerts.gatePassChat) await toChat('channel', config.alerts.gatePassChat);
+    } else if (atLeast(a.severity, config.alerts.publicSeverity)) {
+      if (config.alerts.telegramChannel) await toChat('channel', config.alerts.telegramChannel);
       if (config.alerts.webhookUrl) await tryIt('webhook', () => postWebhook(config.alerts.webhookUrl, alertPayload(a)));
     }
     for (const w of await ownersFor(a)) {
-      if (w._id.startsWith('tg_') && config.alerts.telegramToken) await tryIt('chats', () => sendTelegram(w._id.slice(3), alertMessage(a)));
+      if (w._id.startsWith('tg_') && config.alerts.telegramToken) await toChat('chats', w._id.slice(3));
       if (w.webhook) await tryIt('hooks', () => postWebhook(w.webhook, alertPayload(a)));
     }
     if (out.errors.length) warn(`alert ${a._id}: ${out.errors.join('; ')}`);
