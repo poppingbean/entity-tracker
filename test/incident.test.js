@@ -152,3 +152,21 @@ test('re-flag: an exchange hot-wallet drain is never cleared automatically; one 
   assert.equal(unretractTitle('Retracted (not a hack): Retracted (not a hack): Exchange hot-wallet drain: ~$51M'), 'Exchange hot-wallet drain: ~$51M');
   assert.equal(unretractTitle('Exchange hot-wallet drain'), 'Exchange hot-wallet drain');
 });
+
+test('human-confirmed hacks: automatic paths only add, never change or remove', async () => {
+  const { humanConfirmed, keepConfirmedAccounts } = await import('../src/incident/service.js');
+  const { reviewIncident } = await import('../src/incident/deepreview.js');
+  const { reflagDecision } = await import('../src/incident/reflag.js');
+  const human = { _id: 'inc:x', status: 'confirmed', kind: 'exchange_drain', drain: {}, confirmed_by: { by: 'operator', reason: 'Binance hot-wallet drain' } };
+  assert.equal(humanConfirmed(human), true); assert.equal(humanConfirmed({ status: 'confirmed' }), false); assert.equal(humanConfirmed(null), false);
+  // a re-trace that lost two accounts and found one: every earlier account stays with its role, the new one is added
+  const prev = [{ account: 'atk', role: 'attacker' }, { account: 'c1', role: 'cash_out_wallet' }, { account: 'c2', role: 'cash_out_wallet' }];
+  const now = [{ account: 'atk', role: 'attacker' }, { account: 'c3', role: 'cash_out_wallet' }];
+  assert.deepEqual(keepConfirmedAccounts(prev, now).map((a) => a.account), ['atk', 'c1', 'c2', 'c3']);
+  assert.deepEqual(keepConfirmedAccounts(prev, [{ account: 'c1', role: 'funder' }]).find((a) => a.account === 'c1').role, 'cash_out_wallet', 'earlier roles are kept');
+  // the deep review neither asks the AI nor writes anything (it returns before any database call)
+  const r = await reviewIncident(human);
+  assert.deepEqual(r, { tag: 'hack', why: 'Binance hot-wallet drain', status: 'confirmed', human: true });
+  // the re-flag leaves it alone, whatever its status says
+  for (const status of ['confirmed', 'suspected', 'cleared']) assert.equal(reflagDecision({ ...human, status, cleared: { by: 'system_reflag' } }), null, status);
+});

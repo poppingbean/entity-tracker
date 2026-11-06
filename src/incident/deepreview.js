@@ -66,6 +66,8 @@ async function aiVerdict(inc, facts) {
 
 /** The deep review of one incident (already re-traced). Writes `review` and the new status; returns the final tag. */
 export async function reviewIncident(inc) {
+  // a hack a human confirmed is not reviewed again: nothing about it is written, no AI is asked (see humanConfirmed in service.js)
+  if (inc.confirmed_by) return { tag: 'hack', why: inc.confirmed_by.reason || 'confirmed by a human', status: inc.status, human: true };
   const payers = inc.drain ? (inc.sources || []).filter((s) => s.kind === 'exchange').map((s) => s.account) : (inc.victims || []).slice(0, 5).map((v) => v.account);
   const before = (inc.started_ts || inc.first_seen_ts || Date.now()) - 86400e3;
   const past = payers.length ? await pastTransfers(inc.attacker.account, payers, before).catch(() => null) : null;

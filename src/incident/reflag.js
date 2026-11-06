@@ -86,20 +86,22 @@ export async function reflagIncidents({ log = info } = {}) {
     log(`Retracted ${moveAlertsCount} stolen_funds_moved alerts`);
   }
 
-  // Clean up any remaining incident firewall flags not tied to confirmed incidents
+  // Clean up any remaining incident firewall flags not tied to confirmed incidents (a case a human confirmed keeps its flags whatever
+  // its status says)
   const confirmedIncidentIds = await col('incidents').distinct('_id', { status: 'confirmed' });
+  const humanIds = await col('incidents').distinct('_id', { confirmed_by: { $exists: true, $ne: null } });
   const orphanedFlags = await col('firewall_flags').deleteMany({
     source: 'incident',
-    incident: { $nin: confirmedIncidentIds },
+    incident: { $nin: [...new Set([...confirmedIncidentIds, ...humanIds])] },
   });
   if (orphanedFlags.deletedCount) {
     deletedFlagsCount += orphanedFlags.deletedCount;
     log(`Deleted ${orphanedFlags.deletedCount} orphaned incident firewall flags`);
   }
 
-  // Clean up incident detections that had false hack tags
+  // Clean up incident detections that had false hack tags (not the detections of a hack a human confirmed)
   const updatedDetections = await col('incident_detections').updateMany(
-    { 'tags.tag': 'hack' },
+    { 'tags.tag': 'hack', 'review.incident': { $nin: humanIds } },
     { $pull: { tags: { tag: 'hack' } } }
   );
 

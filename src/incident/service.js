@@ -25,6 +25,19 @@ export function parseInvestigation(q) {
   throw new Error('give an attacker account, an attack transaction hash, or target:<contract>');
 }
 
+/**
+ * A hack a human confirmed (confirmed_by). Nothing automatic may change it: re-traces, follow-ups, the deep review and the re-flag can only
+ * add what they find (new cash-out wallets, new moves, current balances), never change its status, drop its accounts or flags, or retract
+ * its alerts. Only a human undoes it (unconfirmIncident), and it cannot be cleared before that.
+ */
+export const humanConfirmed = (inc) => !!inc?.confirmed_by;
+
+/** The accounts of a human-confirmed case after a re-trace: every earlier account stays (with its role), new ones are added. */
+export function keepConfirmedAccounts(prevAccounts = [], newAccounts = []) {
+  const seen = new Set(prevAccounts.map((a) => a.account));
+  return [...prevAccounts, ...newAccounts.filter((a) => !seen.has(a.account))];
+}
+
 /** Flag the attacker's own accounts (not 1Click deposit addresses or the target) so every check that touches them warns. */
 async function flagAccounts(inc) {
   if (inc.status !== 'confirmed') return 0;
@@ -35,8 +48,9 @@ async function flagAccounts(inc) {
   const sev = { accomplice: 'critical', attacker: 'critical', fake_token: 'critical', sub_account: 'critical', intents_account: 'high', cash_out_wallet: 'high', funder: 'medium' };
   const swapAddrs = new Set((inc.trail?.moves || []).filter((m) => m.swap).map((m) => m.to));
   const rows = (inc.accounts || []).filter((a) => sev[a.role] && !swapAddrs.has(a.account) && a.account !== inc.target?.account);
-  // the flags follow the latest trace: an account no longer in the attacker's set loses this incident's flag
-  await col('firewall_flags').deleteMany({ source: 'incident', incident: inc._id, _id: { $nin: rows.map((a) => a.account) } });
+  // the flags follow the latest trace: an account no longer in the attacker's set loses this incident's flag. Not for a case a human
+  // confirmed: its flags only grow, a human removes them (unconfirm)
+  if (!humanConfirmed(inc)) await col('firewall_flags').deleteMany({ source: 'incident', incident: inc._id, _id: { $nin: rows.map((a) => a.account) } });
   for (const a of rows) {
     // this incident's own flag is refreshed with the latest wording; a flag from another source (a hand report, another incident) is kept
     await col('firewall_flags').updateOne({ _id: a.account, source: 'incident', incident: inc._id }, { $set: { severity: sev[a.role], reason: `${a.role === 'funder' ? 'funded an attacker that ' : ''}${reason}`.slice(0, 120),
@@ -72,20 +86,21 @@ export async function investigate(input, { ai = true, detected = null, review = 
     info(`incident ${prior._id}: full trace (${r.full})`);
   }
   const inc = await traceIncident(input, { log });
-  const prev = await col('incidents').findOne({ _id: inc._id }, { projection: { confirmed_by: 1, followups: 1, first_seen_ts: 1, detected: 1, ai: 1, alerted: 1, review: 1, tags: 1, status: 1, cleared: 1 } });
-  // confirmed by a public report (an operator, with its source): it stays a hack whatever the chain alone can prove
-  if (prev?.confirmed_by) applyConfirmation(inc, prev.confirmed_by);
+  const prev = await col('incidents').findOne({ _id: inc._id }, { projection: { confirmed_by: 1, followups: 1, first_seen_ts: 1, detected: 1, ai: 1, alerted: 1, review: 1, tags: 1, status: 1, cleared: 1, accounts: 1 } });
+  // confirmed by a human (an operator, with its source): it stays a hack whatever the chain alone can prove, and keeps every account
+  // it had (a re-trace can only add); the confirmation itself is applied after the merge, so the accounts it names keep their role
+  if (humanConfirmed(prev)) { inc.accounts = keepConfirmedAccounts(prev.accounts, inc.accounts); applyConfirmation(inc, prev.confirmed_by); }
   // cleared by a deep review and still not confirmed by the rules: it stays cleared
   else if (prev?.status === 'cleared' && inc.status !== 'confirmed') inc.status = 'cleared';
   const report = ai && inc.status !== 'nothing_found' ? await aiIncidentReport(inc).catch((e) => { warn(`incident AI: ${e.message}`); return null; }) : null;
-  const doc = { ...inc, v: INCIDENT_V, ...(prev?.followups ? { followups: prev.followups } : {}), ai: report || prev?.ai || null, detected: detected || prev?.detected || null, first_seen_ts: prev?.first_seen_ts || Date.now(), updated_ts: Date.now(), ...(prev?.alerted ? { alerted: true } : {}), ...(prev?.review ? { review: prev.review } : {}), ...(prev?.tags ? { tags: prev.tags } : {}), ...(prev?.cleared ? { cleared: prev.cleared } : {}) };
+  const doc = { ...inc, v: INCIDENT_V, ...(prev?.followups ? { followups: prev.followups } : {}), ai: report || prev?.ai || null, detected: detected || prev?.detected || null, first_seen_ts: prev?.first_seen_ts || Date.now(), updated_ts: Date.now(), ...(prev?.alerted ? { alerted: true } : {}), ...(prev?.review ? { review: prev.review } : {}), ...(prev?.tags ? { tags: prev.tags } : {}), ...(prev?.cleared && !humanConfirmed(prev) ? { cleared: prev.cleared } : {}) };
   await col('incidents').replaceOne({ _id: doc._id }, doc, { upsert: true });
   if (review && !prev && !detected && ['confirmed', 'suspected'].includes(doc.status)) await scheduleReview(doc._id, 'incident').catch(() => {});
   // traced from one of its wallets and re-rooted: an earlier empty investigation of that wallet now points here
   if (doc.pasted && doc.pasted !== doc.attacker.account) await col('incidents').deleteOne({ _id: `inc:${doc.pasted}`, status: 'nothing_found' }).catch(() => {});
   const flagged = await flagAccounts(doc).catch(() => 0);
   // no longer confirmed (a re-trace with better evidence): its flags go, and its alert says it was retracted
-  if (doc.status !== 'confirmed') {
+  if (doc.status !== 'confirmed' && !humanConfirmed(doc)) {
     const r = await col('firewall_flags').deleteMany({ source: 'incident', incident: doc._id });
     if (prev?.alerted) await col('alerts').updateOne({ _id: `incident:${doc._id}`, title: { $not: /^Retracted/ } }, [{ $set: { title: { $concat: ['Retracted (not a hack): ', '$title'] }, severity: 'info' } }]).catch(() => {});
     await retractMoveAlerts([doc._id]);
@@ -169,12 +184,13 @@ export async function unconfirmIncident(account, { by = 'operator', reason = 'un
 
 /**
  * Mark a case as cleared/normal (e.g. moved funds from solvers or hot wallet exchanges, routine transfer):
- * sets status: 'cleared', tag: 'safe', removes flags and alerts.
+ * sets status: 'cleared', tag: 'safe', removes flags and alerts. A hack a human confirmed is refused: unconfirm it first, on purpose.
  */
 export async function clearIncident(account, { by = 'operator', reason = 'Normal fund movement / solver activity' } = {}) {
   const id = `inc:${account}`;
   const inc = await col('incidents').findOne({ _id: id });
   if (!inc) throw new Error(`no case ${id}`);
+  if (humanConfirmed(inc)) throw new Error(`${id} is a hack confirmed by a human (${inc.confirmed_by.by || 'operator'}: ${inc.confirmed_by.reason || 'no reason'}): it is not cleared. Unconfirm it first if that confirmation was wrong.`);
   const cleared = { ts: Date.now(), why: reason, by };
   await col('incidents').updateOne({ _id: id }, {
     $unset: { confirmed_by: '' },
