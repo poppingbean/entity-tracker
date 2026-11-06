@@ -2,6 +2,7 @@
 // Each returns findings [{ severity, key, title, detail }] and facts for the page.
 import { viewFunction } from './rpc.js';
 import { txIndexer } from '../near/rpc.js';
+import { corroborateOwnerChecks, payoutsOf } from './destination.js';
 
 const yocto = (y) => { try { return Number(BigInt(y) / 10n ** 18n) / 1e6; } catch { return null; } };
 const MUTABLE_HOST = /^https?:\/\/(?!ipfs\.|arweave\.net|[a-z0-9]+\.ipfs\.|[a-z0-9.-]*arweave)/i;
@@ -66,7 +67,7 @@ export async function typeChecks(account, role, exports, { owners = [] } = {}) {
  * Recent behaviour: calls to the contract's powerful methods (who, how often, when) and users' calls failing. Reads the newest pages
  * of the contract's history (FastNEAR indexer).
  */
-export async function recentBehaviour(account, powers) {
+export async function recentBehaviour(account, powers, { ownerHints = [], notPayees = [] } = {}) {
   const powerOf = new Map(powers.flatMap((p) => p.methods.map((m) => [m, p])));
   let rows = [];
   try { rows = ((await txIndexer('/v0/account', { account_id: account, desc: true, limit: 200 })).account_txs || []).slice(0, 200); } catch { return { findings: [], facts: { history: null } }; }
@@ -74,6 +75,9 @@ export async function recentBehaviour(account, powers) {
   const hashes = rows.slice(0, 60).map((r) => r.transaction_hash);
   let txs = [];
   try { for (let i = 0; i < hashes.length; i += 20) txs.push(...((await txIndexer('/v0/transactions', { tx_hashes: hashes.slice(i, i + 20) })).transactions || [])); } catch {}
+  // the owner-check hints from the code, checked against the chain: did every payout of those methods go to the address committed at creation?
+  const owner_payouts = ownerHints.length ? await ownerPayouts(account, ownerHints, txs, notPayees).catch(() => null) : null;
+  const confirmed = new Set(owner_payouts?.corroborated || []);
   const used = new Map(), userCalls = new Map();
   for (const t of txs) {
     const tx = t.transaction; if (tx?.receiver_id !== account) continue;
@@ -85,11 +89,40 @@ export async function recentBehaviour(account, powers) {
   }
   const f = [];
   for (const x of used.values()) {
-    if (x.power.power === 'move_user_funds' || x.power.power === 'account_control') f.push({ severity: x.power.severity === 'critical' ? 'critical' : 'high', key: `used_${x.power.power}`, title: `${x.method} was used ${x.n} time${x.n > 1 ? 's' : ''} recently`, detail: `By ${[...x.signers].slice(0, 3).join(', ')}. ${x.power.label}.` });
+    if (x.power.power === 'move_user_funds' || x.power.power === 'account_control') {
+      // a use whose every payout the chain shows went to the committed owner is one step milder (never more)
+      const ok = x.power.power === 'move_user_funds' && confirmed.has(x.method);
+      const sev = x.power.severity === 'critical' ? 'critical' : 'high';
+      f.push({ severity: ok ? (sev === 'critical' ? 'high' : 'medium') : sev, key: `used_${x.power.power}`, title: `${x.method} was used ${x.n} time${x.n > 1 ? 's' : ''} recently`,
+        detail: `By ${[...x.signers].slice(0, 3).join(', ')}. ${x.power.label}.${ok ? ' Every payout it made went to the address committed when the contract was set up (checked on the chain).' : ''}` });
+    }
     else if (x.power.power === 'upgrade' || x.power.power === 'set_admins') f.push({ severity: 'info', key: `used_${x.power.power}`, title: `${x.method} called recently`, detail: `By ${[...x.signers].slice(0, 3).join(', ')}${x.last ? `, last ${new Date(x.last).toISOString().slice(0, 10)}` : ''}.` });
   }
   // users' withdrawals / transfers failing for several wallets while few succeed: the honeypot pattern, for any kind of contract
   for (const [m, x] of userCalls) if (/withdraw|unstake|transfer|redeem|claim|sell|exit/.test(m) && x.failedSigners.size >= 3 && x.failed / x.n >= 0.6)
     f.push({ severity: 'high', key: 'user_calls_failing', title: `${m} fails for most users`, detail: `${x.failed} of ${x.n} recent ${m} calls failed, for ${x.failedSigners.size} different wallets.` });
-  return { findings: f, facts: { history: rows.length, sampled: txs.length, admin_calls: [...used.values()].map((x) => ({ method: x.method, n: x.n, signers: [...x.signers].slice(0, 3) })) } };
+  return { findings: f, facts: { history: rows.length, sampled: txs.length, ...(owner_payouts ? { owner_payouts } : {}), admin_calls: [...used.values()].map((x) => ({ method: x.method, n: x.n, signers: [...x.signers].slice(0, 3) })) } };
+}
+
+/**
+ * On-chain corroboration of owner-check hints (destination.js): the successful calls of `methods` among `txs` (the newest history), their payouts,
+ * and the arguments of the account's init call (its oldest transactions). The callers are added to `notPayees`.
+ * -> { corroborated: [method], seen: { method: { calls, paying, matched } }, init_found }
+ */
+export async function ownerPayouts(account, methods, txs, notPayees = []) {
+  const calls = [];
+  for (const t of txs) {
+    const tx = t.transaction; if (tx?.receiver_id !== account) continue;
+    const fc = (tx.actions || []).map((a) => a.FunctionCall).find(Boolean); if (!fc || !methods.includes(fc.method_name)) continue;
+    if ((t.receipts || []).some((r) => r.execution_outcome?.outcome?.executor_id === account && r.execution_outcome.outcome.status?.Failure)) continue;
+    calls.push({ method: fc.method_name, args: Buffer.from(fc.args || '', 'base64'), payouts: payoutsOf(t, account), signer: tx.signer_id });
+  }
+  if (!calls.length) return { corroborated: [], seen: {}, init_found: null };
+  const oldest = ((await txIndexer('/v0/account', { account_id: account, desc: false, limit: 10 })).account_txs || []).map((r) => r.transaction_hash);
+  const old = oldest.length ? ((await txIndexer('/v0/transactions', { tx_hashes: oldest })).transactions || []) : [];
+  const init = [];
+  for (const t of old) for (const r of t.receipts || []) if (r.receipt?.receiver_id === account)
+    for (const a of r.receipt.receipt?.Action?.actions || []) if (a.FunctionCall && /^(new|init|initialize|new_default_meta)$/.test(a.FunctionCall.method_name)) init.push(Buffer.from(a.FunctionCall.args || '', 'base64'));
+  const r = corroborateOwnerChecks({ init, calls, exclude: [...notPayees, ...calls.map((c) => c.signer)] });
+  return { ...r, init_found: init.length > 0 };
 }

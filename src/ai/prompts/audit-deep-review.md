@@ -7,8 +7,8 @@ exact string from the strings or source excerpts. No speculation without evidenc
 Reply with ONE JSON object: {"findings":[{"severity":"high|medium|low","title":"short","detail":"2-3 sentences","evidence":"method or exact string"}],
 "summary":"2-3 sentences on how the contract's design protects or exposes users"}
 
-"verified_guards" are facts read from the code, not guesses: "owner_bound" lists withdrawal methods that hash the receiver and compare it
-with a stored owner hash before paying (they can only pay that owner), and "caller_checked" lists methods whose code refuses callers
-that are not allowed. Never say a method in owner_bound lets the caller or the controller choose where funds go, and never say a method
-is controller-gated or cannot be used by users unless it is in caller_checked or the evidence shows it. A method in neither list is
-not shown either way: say nothing about it rather than assume. Only report what the evidence supports.
+"code_hints" come from pattern matching on the code, not proof: "owner_check" lists methods that reach a function which hashes something
+and holds an "owner mismatch" message, "caller_check" lists methods that reach an "only the controller / not authorised" message. The
+code is written by whoever deployed it, so a hint can be a decoy or unrelated. Use hints as leads to look at, never as a reason to call
+a method safe, and do not claim a method is gated or ungated without evidence.
+"behaviour.owner_payouts" is checked on the chain: for its "corroborated" methods, every payout went to an address committed at creation.

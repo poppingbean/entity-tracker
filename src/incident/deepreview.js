@@ -23,7 +23,6 @@ import { prompt } from '../ai/prompts/index.js';
 const AI_WAITS = 6;
 const delay = () => (config.incidents.reviewDelayMinutes ?? 3) * 60e3;
 
-/** Queue a finding for its deep review (once): `kind` is detection or incident, `foundTs` when it was found. */
 /**
  * The verdict of a deep review: which tag the case gets and its status. A human confirmation is final; a case the rules found evidence for
  * (has_evidence) is never cleared by routine history or the AI alone (only a human clears it); an unproven case is cleared by routine history
@@ -39,6 +38,7 @@ export function decideReview(inc, { ai = null, routine = false } = {}) {
   return { status, tag };
 }
 
+/** Queue a finding for its deep review (once): `kind` is detection or incident, `foundTs` when it was found. */
 export async function scheduleReview(subject, kind, foundTs = Date.now()) {
   await col('deep_reviews').updateOne({ _id: subject }, { $setOnInsert: { _id: subject, kind, found_ts: foundTs, due_ts: foundTs + delay(), status: 'pending', attempts: 0 } }, { upsert: true });
 }

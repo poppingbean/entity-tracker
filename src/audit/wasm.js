@@ -135,14 +135,15 @@ export async function codeCapabilities(code, methods) {
   } catch { return null; }
 }
 
-/** Which exports are bound to a committed owner / check the caller (destination.js), from WASM bytes. null when it can't be decompiled. */
-export async function codeGuards(code, methods = null) {
+/** Everything the audit reads from the code, from ONE decompile: { capabilities, effects, hints } (hints: destination.js, code patterns only).
+ *  null when it can't be decompiled. */
+export async function codeAnalysis(code, methods = null) {
   try {
     const w = await wabt();
     const m = w.readWasm(new Uint8Array(code), { readDebugNames: true });
     m.generateNames(); m.applyNames();
     const text = m.toText({ foldExprs: false, inlineExport: true });
     m.destroy();
-    return guardsFromWat(text, methods);
+    return { capabilities: capabilitiesFromWat(text, methods), effects: effectsFromWat(text), hints: guardsFromWat(text, methods) };
   } catch { return null; }
 }
