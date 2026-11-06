@@ -2,10 +2,30 @@ import { col } from '../db.js';
 import { info } from '../log.js';
 import { retractMoveAlerts } from './service.js';
 
+const isDrain = (inc) => inc.kind === 'exchange_drain' || !!inc.drain;
+
 /**
- * Re-flag all incidents that were auto-classified as hacks without human confirmation:
- * - Solvers and hot wallet exchange transfers (e.g. exchange_drain) are re-flagged as cleared / normal fund movement.
- * - Other unconfirmed cases are reverted to suspected (tracing large fund moves without hack flags).
+ * What the re-flag does with one incident: null (leave it), or { status, tag, reason }.
+ * - Confirmed by a human (confirmed_by): left alone.
+ * - An exchange hot-wallet drain is what a hack of the exchange looks like, never routine: it goes to suspected (a human confirms it),
+ *   never cleared. A drain an earlier version of this re-flag cleared is put back to suspected too.
+ * - Auto-confirmed money that only came through exchanges / solvers (not a drain): cleared as a normal fund movement.
+ * - Any other auto-confirmed case: suspected, it waits for a human.
+ */
+export function reflagDecision(inc) {
+  if (inc.confirmed_by) return null;
+  if (inc.status === 'cleared' && inc.cleared?.by === 'system_reflag' && isDrain(inc))
+    return { status: 'suspected', tag: 'review', reason: 'Re-flagged: an exchange hot-wallet drain is never cleared automatically - requires manual human confirmation' };
+  if (inc.status !== 'confirmed') return null;
+  if (isDrain(inc)) return { status: 'suspected', tag: 'review', reason: 'Re-flagged: exchange hot-wallet drain - requires manual human confirmation' };
+  if ((inc.sources || []).some((s) => s.kind === 'exchange' || s.kind === 'service'))
+    return { status: 'cleared', tag: 'safe', reason: 'Re-flagged: moved funds from exchange hot wallets / solvers (not confirmed as hack)' };
+  return { status: 'suspected', tag: 'review', reason: 'Re-flagged: large fund movement - requires manual human confirmation' };
+}
+
+/**
+ * Re-flag all incidents that were auto-classified as hacks without human confirmation (see reflagDecision):
+ * - Exchange hot-wallet drains and other unconfirmed cases go to suspected; only exchange / solver fund moves that are not a drain are cleared.
  * - Corresponding firewall_flags are deleted.
  * - Alerts are retracted.
  */
@@ -17,20 +37,13 @@ export async function reflagIncidents({ log = info } = {}) {
   const removedFlagIds = [];
 
   for (const inc of allIncidents) {
-    // If it has human confirmation (confirmed_by exists and has reason/by/source), preserve it as confirmed
     if (inc.confirmed_by) {
       log(`Preserving manually confirmed incident: ${inc._id} (${inc.confirmed_by.reason || 'by operator'})`);
       continue;
     }
-
-    // If it is currently confirmed without confirmed_by (auto-confirmed bug):
-    if (inc.status === 'confirmed') {
-      const isExchangeOrSolver = inc.kind === 'exchange_drain' || inc.drain || (inc.sources || []).some(s => s.kind === 'exchange' || s.kind === 'service');
-      const newStatus = isExchangeOrSolver ? 'cleared' : 'suspected';
-      const reason = isExchangeOrSolver
-        ? 'Re-flagged: moved funds from exchange hot wallets / solvers (not confirmed as hack)'
-        : 'Re-flagged: large fund movement - requires manual human confirmation';
-      const newTag = isExchangeOrSolver ? 'safe' : 'review';
+    const d = reflagDecision(inc);
+    if (d) {
+      const newStatus = d.status, reason = d.reason, newTag = d.tag, isExchangeOrSolver = d.status === 'cleared';
 
       const update = {
         $set: {
@@ -38,6 +51,7 @@ export async function reflagIncidents({ log = info } = {}) {
           updated_ts: Date.now(),
           ...(isExchangeOrSolver ? { cleared: { ts: Date.now(), why: reason, by: 'system_reflag' } } : {}),
         },
+        ...(isExchangeOrSolver ? {} : { $unset: { cleared: '' } }),
         $push: {
           tags: {
             $each: [{ tag: newTag, ts: Date.now(), why: reason, by: 'system_reflag' }],

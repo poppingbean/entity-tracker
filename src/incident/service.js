@@ -142,9 +142,11 @@ export async function confirmIncident(account, { source, reason, by = 'operator'
   if (!(await col('incidents').findOne({ _id: id }, { projection: { _id: 1 } }))) throw new Error(`no case ${id}: investigate the account first`);
   const confirmed_by = { by, source: source ? String(source).slice(0, 300) : null, reason: String(reason || 'confirmed by operator').slice(0, 200), ts: Date.now(),
     kind: kind || null, target: target || null, loss_usd: loss_usd ? Number(loss_usd) : null, accounts: [...new Set((accounts || []).map((a) => String(a).toLowerCase()))].filter((a) => a !== account).slice(0, 100) };
-  await col('incidents').updateOne({ _id: id }, { $set: { confirmed_by }, $push: { tags: { $each: [{ tag: 'hack', ts: Date.now(), why: confirmed_by.reason, by }], $slice: -10 } } });
+  // a human confirmation overrides an earlier clearing (e.g. by the automatic re-flag): the case must not stay "cleared"
+  await col('incidents').updateOne({ _id: id }, { $set: { confirmed_by }, $unset: { cleared: '' }, $push: { tags: { $each: [{ tag: 'hack', ts: Date.now(), why: confirmed_by.reason, by }], $slice: -10 } } });
   const doc = await investigate({ account }, { full: true });
   await col('deep_reviews').updateOne({ _id: id }, { $set: { status: 'done', done_ts: Date.now(), result: { tag: 'hack', why: confirmed_by.reason, status: 'confirmed' } } }).catch(() => {});
+  if (doc?.status === 'confirmed') await restoreRetractedAlerts(id);
   return doc;
 }
 
@@ -184,6 +186,18 @@ export async function clearIncident(account, { by = 'operator', reason = 'Normal
   await retractMoveAlerts([id]);
   await col('deep_reviews').deleteOne({ _id: id }).catch(() => {});
   return col('incidents').findOne({ _id: id });
+}
+
+/** An alert title without the "Retracted (not a hack): " prefix (once or repeated). */
+export const unretractTitle = (t) => String(t || '').replace(/^(Retracted \(not a hack\): )+/, '');
+/**
+ * A case confirmed after its alerts were retracted (e.g. by the automatic re-flag): the dashboard must not keep saying "not a hack". The
+ * incident alert is high again and the move alerts medium (they were already delivered: nothing is sent again). Returns how many.
+ */
+export async function restoreRetractedAlerts(id) {
+  const rows = await col('alerts').find({ $or: [{ _id: `incident:${id}` }, { type: 'stolen_funds_moved', 'data.incident': id }], title: { $regex: '^Retracted \\(not a hack\\): ' } }, { projection: { title: 1, type: 1 } }).toArray();
+  for (const a of rows) await col('alerts').updateOne({ _id: a._id }, { $set: { title: unretractTitle(a.title), severity: a.type === 'incident' ? 'high' : 'medium' } });
+  return rows.length;
 }
 
 /** The "stolen funds moved" alerts of cases that are not (or no longer) confirmed say they were retracted. Returns how many. */

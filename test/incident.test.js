@@ -134,3 +134,21 @@ test('bot: the evidence pack names wallets, sources and off-chain recipients, an
   assert.equal(seen.form.get('document').name, 'pack.md');
   assert.equal(await seen.form.get('document').text(), md);
 });
+
+test('re-flag: an exchange hot-wallet drain is never cleared automatically; one it cleared before goes back to suspected', async () => {
+  const { reflagDecision } = await import('../src/incident/reflag.js');
+  const { unretractTitle } = await import('../src/incident/service.js');
+  const drain = { kind: 'exchange_drain', drain: { exchange: 'Binance' }, sources: [{ kind: 'exchange' }] };
+  assert.equal(reflagDecision({ ...drain, status: 'confirmed' }).status, 'suspected', 'auto-confirmed drain: a human confirms it');
+  const before = { ...drain, status: 'cleared', cleared: { by: 'system_reflag', why: 'Re-flagged: moved funds from exchange hot wallets / solvers' } };
+  assert.equal(reflagDecision(before).status, 'suspected', 'the Binance case the old re-flag cleared is repaired');
+  assert.equal(reflagDecision({ ...drain, status: 'cleared', cleared: { by: 'operator' } }), null, 'a human clearing stays');
+  assert.equal(reflagDecision({ ...drain, status: 'confirmed', confirmed_by: { by: 'operator' } }), null, 'a human confirmation stays');
+  assert.equal(reflagDecision({ ...before, confirmed_by: { by: 'operator' } }), null);
+  // not a drain: money that only came through exchanges / solvers is still a normal fund move; anything else waits for a human
+  assert.equal(reflagDecision({ kind: 'wallet_drainer', status: 'confirmed', sources: [{ kind: 'service' }] }).status, 'cleared');
+  assert.equal(reflagDecision({ kind: 'protocol_exploit', status: 'confirmed', sources: [] }).status, 'suspected');
+  assert.equal(reflagDecision({ kind: 'protocol_exploit', status: 'suspected' }), null);
+  assert.equal(unretractTitle('Retracted (not a hack): Retracted (not a hack): Exchange hot-wallet drain: ~$51M'), 'Exchange hot-wallet drain: ~$51M');
+  assert.equal(unretractTitle('Exchange hot-wallet drain'), 'Exchange hot-wallet drain');
+});
