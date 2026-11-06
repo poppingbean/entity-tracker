@@ -48,7 +48,7 @@ export function decide(rules, ai) {
 async function saveScan(t, kind, minutes, f, rules, ai, decision, trade, prev = null, aiPending = false) {
   const ts = prev?.ts ?? Date.now();
   const id = prev?.id ?? `${t._id}|${ts}|${kind}`;
-  const doc = { _id: id, id, token: t._id, symbol: t.symbol || null, launchpad: t.launchpad, ts, kind, minutes, score: rules.score, pass: rules.pass, failed: rules.failed.map((g) => ({ id: g.id, why: g.why })), features: f,
+  const doc = { _id: id, id, token: t._id, symbol: t.symbol || null, launchpad: t.launchpad, ts, kind, minutes, score: rules.score, pass: rules.pass, failed: rules.failed.map((g) => ({ id: g.id, why: g.why })), warnings: rules.warnings?.length ? rules.warnings : undefined, features: f,
     ai: ai ? { action: ai.action, confidence: ai.confidence, risk_level: ai.risk_level, quality_score: ai.quality_score, reasons: ai.reasons, red_flags: ai.red_flags, model: ai.model } : null, decision: decision?.why || null, action: decision?.action || null, trade: trade || null };
   doc.ai_pending = aiPending || undefined;
   if (prev) doc.ai_done_ts = Date.now();
@@ -65,7 +65,7 @@ export async function scanToken(t) {
   let ai = null, decision = { buy: false, action: null, why: 'rules failed' }, trade = null;
   info(`SCAN ${fresh.symbol || ''} ${fresh._id}: rules ${rules.pass ? 'PASS' : 'FAIL'} (score ${rules.score}${rules.failed.length ? '; ' + rules.failed.map((g) => g.id).join(', ') : ''})`);
   const minutes = Math.round((Date.now() - fresh.live_ts) / MIN);
-  const tokenScan = (scan, d, tr, pending) => ({ scan: { ts: scan.ts, id: scan.id, score: rules.score, pass: rules.pass, decision: d.why, bought: tr?.status === 'bought', failed: rules.failed.map((g) => g.id), ...(pending ? { ai_pending: true } : {}) }, scan_done: true });
+  const tokenScan = (scan, d, tr, pending) => ({ scan: { ts: scan.ts, id: scan.id, score: rules.score, pass: rules.pass, decision: d.why, bought: tr?.status === 'bought', failed: rules.failed.map((g) => g.id), ...(rules.warnings?.length ? { warnings: rules.warnings } : {}), ...(pending ? { ai_pending: true } : {}) }, scan_done: true });
   // the gate result is shown at once; the AI analyst (which can take minutes) completes the same record afterwards
   const aiNext = rules.pass && aiEnabled();
   let early = null;

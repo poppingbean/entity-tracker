@@ -21,7 +21,7 @@ export function normaliseAnalysis(j) {
 
 /** ctx: { holding: {costNear} | null, followUpMinutes?: number, previous?: [earlier verdicts] } */
 export async function analyse(features, rules, ctx = {}) {
-  const { user, findings } = evidenceMessage(`Rule engine: score ${rules.score}/100, ${rules.failed.length ? 'failed gates: ' + rules.failed.map((g) => g.id).join(', ') : 'all gates passed'}.`,
+  const { user, findings } = evidenceMessage(`Rule engine: score ${rules.score}/100, ${rules.failed.length ? 'failed gates: ' + rules.failed.map((g) => g.id).join(', ') : 'all gates passed'}${rules.warnings?.length ? '; warnings: ' + rules.warnings.map((w) => w.id).join(', ') : ''}.`,
     { earlier_reviews: ctx.previous?.length ? ctx.previous : undefined, features });
   const { json, model, usage } = await chatJSON({ system: system(ctx) + UNTRUSTED_RULE, user, maxTokens: config.ai.maxTokens });
   const a = normaliseAnalysis(json);

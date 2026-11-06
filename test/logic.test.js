@@ -447,7 +447,9 @@ test('AI analyst updates: diffPackets reports only what moved since the previous
 });
 
 // ---------------------------------------------------------------- linked groups vs tag groups
-import { tagVerdict, walletBehaviours } from '../src/evaluate/tags.js';
+import { tagVerdict, walletBehaviours, earlyBucket } from '../src/evaluate/tags.js';
+import { RUGGER_MAX_POINTS } from '../src/scanner/rules.js';
+import { ruggerFlag } from '../src/analysis/token.js';
 test('linked groups: services never link; a shared funder links at most 10 wallets; a member funding members always does', () => {
   const W = (id, funder) => ({ _id: id, funders: [{ account: funder, kind: 'wallet' }], chain: [{ account: funder, kind: 'wallet', hop: 1 }], flow_out: [] });
   const c = { cobuySeconds: 15, cobuyMinTokens: 4, deepDepth: 0 };
@@ -496,6 +498,55 @@ test('tag groups: behaviours and the verdict the gate falls back to', () => {
   assert.equal(tagVerdict('win30', ['cobuy']), 'bots');
   assert.equal(tagVerdict('loss', []), 'bots');
   assert.equal(tagVerdict('unrated', []), null);
+});
+
+test('scanner buckets: rug-linked early buyers are "rugger" (a warning), insiders and sybil snipers stay "bad"', () => {
+  const farm = { _id: 'g1', rule: { tags: ['rug-farmer'] } }, sybil = { _id: 'g2', rule: { tags: ['sybil-sniper'] } };
+  assert.equal(earlyBucket({ cluster_id: 'g1', cluster_verdict: 'bad' }, farm), 'rugger', 'a rug-farmer group was "bad" before');
+  assert.equal(earlyBucket({ cluster_id: 'g1', cluster_verdict: 'bad' }, { _id: 'g1', ai: { archetype: 'rug-farmer' } }), 'rugger', 'AI-called rug farmers too');
+  assert.equal(earlyBucket({ cluster_id: 'g3', cluster_verdict: 'good' }, { _id: 'g3', creator_flag: 'rugger' }), 'rugger', 'a group with a rugging creator, even judged good');
+  assert.equal(earlyBucket({ creator: { rugged: 2 }, tag_verdict: 'dangerous', behaviours: ['rug-linked'] }, null), 'rugger', 'a creator that rugged, itself');
+  assert.equal(earlyBucket({ creator: { blacklisted: true }, tag_verdict: 'dangerous' }, null), 'rugger', 'blacklisted creator, older doc without behaviours');
+  assert.equal(earlyBucket({ cluster_id: 'g2', cluster_verdict: 'bad' }, sybil), 'bad', 'sybil snipers stay dangerous');
+  assert.equal(earlyBucket({ cluster_id: 'g1', cluster_verdict: 'bad' }, { _id: 'g1', rule: { tags: ['rug-farmer', 'insider'] } }), 'bad', 'insider beats rug-linked');
+  assert.equal(earlyBucket({ creator: { rugged: 1 }, tag_verdict: 'dangerous', behaviours: ['insider', 'rug-linked'] }, null), 'bad', 'an insider that also rugged stays dangerous');
+  assert.equal(earlyBucket({ tag_verdict: 'dangerous' }, null), 'bad', 'dangerous without a rug record = insider');
+  assert.equal(earlyBucket({ cluster_id: 'g4', cluster_verdict: 'bad' }, { _id: 'g4', rule: { tags: [] } }), 'bots_losers');
+  assert.equal(earlyBucket({ tag_verdict: 'good' }, null), 'good');
+  assert.equal(earlyBucket(undefined, null), 'unknown');
+});
+
+test('scanner rules: rugger early money is a warning with a light cut, never a gate or the heavy "bad" cut', () => {
+  const groups = (o) => ({ good: { wallets: 0, near: 0, share: 0 }, bad: { wallets: 0, near: 0, share: 0 }, rugger: { wallets: 0, near: 0, share: 0 }, bots_losers: { wallets: 0, near: 0, share: 0 }, neutral: { wallets: 0, near: 0, share: 0 }, unknown: { wallets: 0, near: 0, share: 0 }, ...o });
+  const f = (eg) => ({ pool: { quoteAccepted: true, route: 'direct', lpLocked: true, nearReserve: 200, quoteSymbol: 'wNEAR', quoteForBuy: { tokensOut: 1 } }, contract: { matchesTemplate: true }, market: { mcapUsd: 20000 },
+    trading: { uniqueBuyers: 30, creatorSold: false, priceMultipleSinceFirstTrade: 1, buyNear: 100, sellNear: 10, syncBuyClusters: 0 }, launch: { tax: null }, wallets: { linkedBuyerShare: 0, creatorFundedBuyers: [], creator: null },
+    audit: { available: false }, intel: { creator_prior_rugs_or_dumps: 0, creator_prior_launches: 0, early_buyer_groups: groups(eg) } });
+  const clean = applyRules(f({}));
+  const rug = applyRules(f({ rugger: { wallets: 6, near: 60, share: 0.6 } }));
+  const bad = applyRules(f({ bad: { wallets: 6, near: 60, share: 0.6 } }));
+  assert.deepEqual(clean.warnings, []);
+  assert.equal(rug.gates.find((g) => g.id === 'bad_groups_not_dominant').ok, true, '60 % rugger money does not fail the gate');
+  assert.equal(rug.failed.length, 0);
+  assert.equal(clean.score - rug.score, RUGGER_MAX_POINTS, 'at most 5 points off (was 15 when it counted as "bad")');
+  assert.equal(RUGGER_MAX_POINTS, 5);
+  assert.deepEqual(rug.warnings.map((w) => [w.id, w.level]), [['rugger_early_buyers', 'warning']]);
+  assert.match(rug.warnings[0].why, /6 early buyer\(s\) linked to rugs put in 60%/);
+  const small = applyRules(f({ rugger: { wallets: 1, near: 10, share: 0.1 } }));
+  assert.equal(clean.score - small.score, 1, '10 % rugger money costs 1 point');
+  // the same money judged dangerous (insiders / sybil snipers) keeps the gate and the heavy cut
+  assert.equal(bad.gates.find((g) => g.id === 'bad_groups_not_dominant').ok, false);
+  assert.equal(clean.score - bad.score, 15);
+  assert.deepEqual(bad.warnings, []);
+});
+
+test('token analysis: a rugger group among the early buyers is a medium warning flag, so the AI risk floor is medium, not high', () => {
+  assert.equal(ruggerFlag([{ id: 'g', rugger: false }]), null);
+  const fl = ruggerFlag([{ id: 'g1', label: 'farmers', rugger: true }, { id: 'g2', rugger: false }]);
+  assert.equal(fl.level, 'medium');
+  assert.equal(fl.kind, 'rugger_early_buyers');
+  assert.match(fl.text, /^Warning: 1 group\(s\) linked to rugs bought early \(farmers\)/);
+  assert.equal(riskFloor([fl]), 'medium', 'was high before');
+  assert.equal(riskFloor([fl, { level: 'high', text: 'creator sold' }]), 'high', 'real extraction still sets high');
 });
 
 // ---------------------------------------------------------------- NFT collectibles

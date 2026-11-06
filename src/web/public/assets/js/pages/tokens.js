@@ -24,6 +24,8 @@ const GATE_TEXT = {
 };
 const gateId = (g) => (typeof g === 'string' ? g : g?.id);
 const gateText = (g) => GATE_TEXT[gateId(g)] || String(gateId(g) || 'unknown check').replace(/_/g, ' ');
+/** Warnings the scanner noted (rug-linked early buyers): shown with the check, they never fail it. */
+const scanWarnings = (s) => ((s?.warnings || []).length ? `<ul class="flags small">${s.warnings.map((w) => `<li><span class="v neutral">warning</span> ${esc(w.why || w.id)}</li>`).join('')}</ul>` : '');
 /** The reasons a scanner check failed, readable: one line per failed gate, or the low score when every gate passed. */
 function failReasons(s) {
   if (!s) return '';
@@ -79,7 +81,7 @@ views.signals = async () => {
   const by = (a) => j.rows.filter((s) => s.assessment === a);
   const block = (a, title) => (by(a).length ? `<div class="card"><h2>${title} <span class="muted">${by(a).length}</span></h2><div class="tokgrid">${by(a).map(signalCard).join('')}</div></div>` : '');
   return `<div class="bar">${seg('signals', 'hours', [[24, '24 h'], [72, '72 h'], [168, '7 days']])}<span class="muted">${j.rows.length} tokens with rated wallets among the early buyers</span></div>
-    ${block('rugger', 'Ruggers in: wallets tied to rugs bought early')}${block('bullish', 'Winners in (win80 / win50 / sniper), little loss money')}${block('warning', 'Loss wallets hold 25 %+ of early NEAR')}${block('mixed', 'Mixed')}
+    ${block('rugger', 'Warning, ruggers in: wallets tied to rugs bought early')}${block('bullish', 'Winners in (win80 / win50 / sniper), little loss money')}${block('warning', 'Loss wallets hold 25 %+ of early NEAR')}${block('mixed', 'Mixed')}
     ${j.rows.length ? '' : '<div class="card muted">No signals yet: needs profiled wallets and evaluated groups.</div>'}`;
 };
 
@@ -176,7 +178,7 @@ async function tokenPage(id) {
     <div class="card"><h2>Bubble map <span class="muted">early buyers clustered by group · size = NEAR in · click a bubble</span></h2>${bubbleMap(es)}
       <div class="legend">${MIXV.map(([v, l]) => `<span><span class="lg-dot ${v}"></span>${l}</span>`).join('')}<span><span class="lg-dot" style="background:transparent;box-shadow:inset 0 0 0 2px var(--bad)"></span>creator</span></div></div></div>`;
   h += `<div class="card"><h2>Early buyers <span class="muted">${es.length} wallets, by entry rank</span></h2><table><tr><th>#</th><th>Wallet</th><th>Tag</th><th>Group</th><th class="num">Delay</th><th>Buy tx</th><th class="num">NEAR in</th><th class="num">Wallet age</th><th>Funded by</th><th class="num">ROI 1h</th><th class="num">ROI 24h</th><th class="num" title="${L?.last_multiple != null ? 'ROI at the latest price (full ledger)' : at24 ? 'trades after 24 h are not read yet: this is the ROI at 24 h' : 'ROI at the latest price'}">${L?.last_multiple == null && at24 ? 'At 24 h' : 'Now'}</th></tr>
-    ${es.map((e) => `<tr ${row(P.wal(e.wallet))}><td class="muted">${e.rank}</td><td>${walLink(e.wallet)}${e.is_creator ? ' <span class="v bad">creator</span>' : ''}${e.rugger ? ` <span class="v bad" title="a creator that rugged, or in a group that contains one or that are rug farmers">${RUG_ICON} rugger</span>` : ''}</td>
+    ${es.map((e) => `<tr ${row(P.wal(e.wallet))}><td class="muted">${e.rank}</td><td>${walLink(e.wallet)}${e.is_creator ? ' <span class="v bad">creator</span>' : ''}${e.rugger ? ` <span class="v neutral" title="warning: a creator that rugged, or in a group that contains one or that are rug farmers">${RUG_ICON} rugger</span>` : ''}</td>
       <td>${tg(e.wallet_tag)} <span class="muted small">${pct(e.wallet_profit_rate)}</span></td><td>${e.cluster ? `${tg(e.cluster.tag)} ${ilink(P.grp(e.cluster.id), esc(short(e.cluster.label || e.cluster.id, 26)))} <span class="muted">(${e.cluster.size})</span>` : '<span class="muted">unlinked</span>'}</td><td class="num">${e.delay_s}s</td><td>${txl(e.first_buy_hash)}</td><td class="num">${n(e.buy_near, 1)}</td>
       <td class="num">${e.wallet_age_days != null ? e.wallet_age_days + ' d' : '–'}</td><td>${esc(e.funder_kind || '–')}</td><td class="num ${roiCls(e.roi?.['60'])}">${pct(e.roi?.['60'])}</td><td class="num ${roiCls(e.roi?.['1440'])}">${pct(e.roi?.['1440'])}</td><td class="num ${roiCls(e.roi_now)}">${pct(e.roi_now)}</td></tr>`).join('') || empty(12, 'no early buyers recorded')}</table></div>`;
   if (t.creator_info && (t.creator_info.launches > 1 || t.creator_info.blacklisted || t.creator_info.rugged)) {
@@ -190,7 +192,7 @@ async function tokenPage(id) {
   if (t.scan && (t.scan.score != null || t.scan.stale || t.scan.error)) {
     const sc = t.scan;
     h += `<div class="card ${sc.pass === false ? 'err' : ''}"><div class="head"><h2>Scanner check ${sc.bought && SHOW_SIM ? '<span class="v good">bought (simulated)</span>' : sc.pass ? `<span class="v neutral">${SHOW_SIM ? 'passed, not bought' : 'gates passed'}</span>` : sc.pass === false ? '<span class="v bad">did not pass</span>' : ''}${sc.score != null ? ` <span class="muted">rule score ${esc(sc.score)}</span>` : ''}</h2>${sc.id ? ilink(P.scan(sc.id), 'Full evaluation →') : ''}</div>
-      ${sc.pass === false || sc.stale || sc.error ? failReasons(sc) : `<p class="muted" style="margin-bottom:0">${esc(sc.decision || 'Passed every check.')}</p>`}</div>`;
+      ${sc.pass === false || sc.stale || sc.error ? failReasons(sc) : `<p class="muted" style="margin-bottom:0">${esc(sc.decision || 'Passed every check.')}</p>`}${scanWarnings(sc)}</div>`;
   }
   if (t.creator && cn?.profiled) {
     const f = cn.funder, N = cn.network;

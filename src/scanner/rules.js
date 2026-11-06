@@ -3,6 +3,9 @@
 import { config } from '../config.js';
 import { looksLikeInjection } from '../ai/tools/untrusted.js';
 
+/** Most a rugger among the early buyers can take off the score (reached at 50 % of the early buying); dangerous money costs up to 15. */
+export const RUGGER_MAX_POINTS = 5;
+
 export function applyRules(f) {
   const R = config.rules;
   const gates = [];
@@ -35,6 +38,10 @@ export function applyRules(f) {
   if (R.maxNetworkRuggers >= 0 && cn?.traced) gate((cn.rugger_creators ?? 0) <= R.maxNetworkRuggers, 'creator_network_clean', `${cn.rugger_creators} other creator(s) tied to this creator by funding or payments rugged or dumped tokens (${(cn.ruggers || []).map((r) => `${r.account}: ${r.rugged}/${r.launches}${r.blacklisted ? ', blacklisted' : ''}`).join('; ')})`);
   const badShare = f.intel?.early_buyer_groups?.bad?.share ?? 0;
   gate(badShare <= R.maxBadGroupShare, 'bad_groups_not_dominant', `${(badShare * 100).toFixed(0)}% of early buying comes from groups judged bad (> ${(R.maxBadGroupShare * 100).toFixed(0)}%)`);
+  // rug-linked early buyers (rug farmers, creators that rugged, groups with one): a warning shown with the check, never a gate
+  const warnings = [];
+  const rug = f.intel?.early_buyer_groups?.rugger;
+  if (rug?.wallets > 0) warnings.push({ id: 'rugger_early_buyers', level: 'warning', why: `${rug.wallets} early buyer(s) linked to rugs put in ${(rug.share * 100).toFixed(0)}% of the early buying` });
 
   // soft score
   let score = 50;
@@ -46,11 +53,12 @@ export function applyRules(f) {
   score -= f.wallets.linkedBuyerShare * 20;
   score += Math.min(8, (f.intel?.early_buyer_groups?.good?.share ?? 0) * 16); // known good money among the early buyers
   score -= Math.min(15, badShare * 30);
+  score -= Math.min(RUGGER_MAX_POINTS, (rug?.share ?? 0) * RUGGER_MAX_POINTS * 2); // rug-linked early money: a warning, a light cut only
   score -= Math.min(15, (cn?.other_rugged_tokens ?? 0) * 3); // tokens rugged by creators tied to this one
   if (f.audit?.available) score -= Math.min(15, Math.round(f.audit.risk_score / 5)); // risk 0-100 costs up to 15 points
   if (f.audit?.available && f.audit.trust_score >= 70) score += 3;
   score = Math.max(0, Math.min(100, Math.round(score)));
 
   const failed = gates.filter((g) => !g.ok);
-  return { pass: failed.length === 0 && score >= R.minScore, score, failed, gates };
+  return { pass: failed.length === 0 && score >= R.minScore, score, failed, gates, warnings };
 }

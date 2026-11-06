@@ -17,6 +17,7 @@ STANDARDS
 READING THE PACKET
 - Tags: win80 / win50 / win30 = profitable in 80 / 50 / 30 %+ of the tokens they bought early; sniper = net profit from a few big wins; loss = lost money overall; unrated = too few tokens.
 - Groups are wallets the tracker links by money only (funding chains, transfers, shared non-exchange funders); co-buy partners are weak links.
+- A rugger among the early buyers (a wallet or group the tracker links to rugs: rugger: true) is a warning to report, not a high risk by itself. It is a medium flag; only on-chain extraction (the creator or insiders selling, funding buyers, hidden dumps) makes it high.
 - launch_windows = the first 15 / 60 / 1440 minutes after launch; recent_windows = the last 15 / 60 / 1440 minutes before data_to_ts (is it trading now?). history.launch_covered = false means the launch is not in the stored trades: no early-buyer data, and multiples are measured from the first stored trade.
 - A rug flag about a price crash means a fast fall from a peak; an old token far below an old all-time high is a long decline, not a rug.
 - TOKEN_FLOWS follows tokens that left the creator and early buyers by plain transfer, hop by hop (sold / passed on / kept / exchange). A creator or early buyer that "never sold" but handed tokens to wallets that then sold is a hidden dump: count both sides as one entity.
