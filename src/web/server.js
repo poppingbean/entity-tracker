@@ -139,7 +139,8 @@ const POSTS = {
 /** Market cap now of some tokens: the last trade's price x total supply (from the first check, else read once and kept on the token) x NEAR in USD.
  *  Returns Map(id -> { near, usd, last_ts }). */
 /** The AI is shown as NEAR AI: which model runs behind it stays on the server. */
-const noModel = (k, v) => (k === 'model' || k === 'models' ? undefined : v); // JSON.stringify replacer for every API response
+// JSON.stringify replacer for every API response: no model names, and no rescore_before (undo data of `rescore-gates`, it holds the old gate reasons)
+const noModel = (k, v) => (k === 'model' || k === 'models' || k === 'rescore_before' ? undefined : v);
 async function marketCapNow(ids) {
   const out = new Map();
   if (!ids.length) return out;

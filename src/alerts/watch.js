@@ -70,12 +70,21 @@ export async function watchedSets() {
   return out;
 }
 
+/** Who gets every gate-pass report: each Telegram bot chat with a watchlist (registered tracking), except those that turned it off. */
+export const GATE_PASS_CHATS = { _id: { $regex: '^tg_' }, gate_pass: { $ne: false } };
+
 /** Watchlists an alert reaches. */
 export async function ownersFor(alert) {
-  const targets = alertTargets(alert);
-  if (!targets.length) return [];
-  const ors = targets.map((t) => { const [kind, ...rest] = t.split(':'); return { items: { $elemMatch: { kind, id: rest.join(':') } } }; });
+  const ors = alertTargets(alert).map((t) => { const [kind, ...rest] = t.split(':'); return { items: { $elemMatch: { kind, id: rest.join(':') } } }; });
+  if (alert.type === 'gate_pass') ors.push(GATE_PASS_CHATS); // every chat registered on the Telegram bot, unless it sent /gatepass off
+  if (!ors.length) return [];
   return col('watchlists').find({ $or: ors }).toArray();
+}
+
+/** Turn the gate-pass reports on or off for a watchlist owner (bot chats have them on until they send /gatepass off). */
+export async function setGatePass(owner, on) {
+  await col('watchlists').updateOne({ _id: owner }, { $set: { gate_pass: !!on, kind: owner.split('_')[0], last_seen_ts: Date.now() }, $setOnInsert: { items: [], created_ts: Date.now() } }, { upsert: true });
+  return !!on;
 }
 
 /** Alerts for one watchlist (newest first). */

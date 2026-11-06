@@ -1,6 +1,6 @@
 // ================================================================== on-chain analysis (a report per token, like the hand-written investigations)
 const anaAcct = (a, known = true, k = 22) => (known ? walLink(a, k) : nb(a));
-const grpChip = (g) => (g ? `${ilink(P.grp(g.id), esc(short(g.label || g.rule_tag || g.id, 30)), g.id)} ${tg(g.tag)}${g.rugger ? ' <span class="v bad">rugger</span>' : ''}` : '<span class="muted">–</span>');
+const grpChip = (g) => (g ? `${ilink(P.grp(g.id), esc(short(g.label || g.rule_tag || g.id, 30)), g.id)} ${tg(g.tag)}${g.rugger ? ' <span class="v neutral" title="warning: linked to rugs">rugger</span>' : ''}` : '<span class="muted">–</span>');
 const mins = (m) => (m == null ? '–' : m < 90 ? m + ' min' : m < 2880 ? (m / 60).toFixed(1) + ' h' : (m / 1440).toFixed(1) + ' d');
 const FLAGCLS = { high: 'bad', medium: 'neutral', info: 'unrated' };
 views.analysis = async () => {
@@ -56,7 +56,7 @@ async function analysisPage(id, refresh) {
     <p class="small muted">Strong: a personal wallet funded them. Weak: an exchange or service wallet that funds many accounts.</p></div>`;
   // repeat actors
   h += `<div class="grid2"><div class="card"><h2>Repeat actors <span class="muted">early buyers seen early in other launches</span></h2><table><tr><th>Wallet</th><th class="num">#</th><th class="num">Other tokens</th><th class="num">In profit</th><th class="num">P&amp;L</th><th>Tag</th><th>Group</th></tr>
-    ${a.repeat.map((x) => `<tr><td>${anaAcct(x.wallet, true, 18)}${x.rugger ? ' <span class="v bad">rugger</span>' : ''}</td><td class="num">${x.rank}</td><td class="num">${x.other_tokens}</td><td class="num">${pct(x.profit_rate, 0)}</td><td class="num ${roiCls(x.pnl_near)}">${signed(x.pnl_near, 0)}</td><td>${tg(x.tag)}</td><td>${grpChip(x.group)}</td></tr>`).join('') || empty(7, 'none')}</table></div>`;
+    ${a.repeat.map((x) => `<tr><td>${anaAcct(x.wallet, true, 18)}${x.rugger ? ' <span class="v neutral" title="warning: linked to rugs">rugger</span>' : ''}</td><td class="num">${x.rank}</td><td class="num">${x.other_tokens}</td><td class="num">${pct(x.profit_rate, 0)}</td><td class="num ${roiCls(x.pnl_near)}">${signed(x.pnl_near, 0)}</td><td>${tg(x.tag)}</td><td>${grpChip(x.group)}</td></tr>`).join('') || empty(7, 'none')}</table></div>`;
   // sellers
   h += `<div class="card"><h2>Who sold <span class="muted">largest NEAR taken out</span></h2><table><tr><th>Account</th><th class="num">Bought</th><th class="num">Sold</th><th class="num">Net</th><th class="num">Early #</th><th>Group</th></tr>
     ${a.sellers.map((x) => `<tr><td>${anaAcct(x.account, x.known, 18)}${x.is_creator ? ' <span class="v bad">creator</span>' : ''}</td><td class="num">${n(x.buy_near, 1)}</td><td class="num">${n(x.sell_near, 1)}</td><td class="num ${roiCls(x.net_near)}">${signed(x.net_near)}</td><td class="num">${x.early_rank ?? '–'}</td><td>${grpChip(x.group)}</td></tr>`).join('') || empty(6, 'no sales yet')}</table></div></div>`;

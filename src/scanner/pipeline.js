@@ -8,6 +8,7 @@ import { syncTokenTrades } from '../collect/trades.js';
 import { aiEnabled } from '../ai/tools/nearai.js';
 import { collectFeatures } from './features.js';
 import { applyRules } from './rules.js';
+import { raiseGatePass } from './gatepass.js';
 import { analyse } from './analyst.js';
 import { simBuy, simSell, ensureAccount } from '../sim/portfolio.js';
 
@@ -48,7 +49,7 @@ export function decide(rules, ai) {
 async function saveScan(t, kind, minutes, f, rules, ai, decision, trade, prev = null, aiPending = false) {
   const ts = prev?.ts ?? Date.now();
   const id = prev?.id ?? `${t._id}|${ts}|${kind}`;
-  const doc = { _id: id, id, token: t._id, symbol: t.symbol || null, launchpad: t.launchpad, ts, kind, minutes, score: rules.score, pass: rules.pass, failed: rules.failed.map((g) => ({ id: g.id, why: g.why })), features: f,
+  const doc = { _id: id, id, token: t._id, symbol: t.symbol || null, launchpad: t.launchpad, ts, kind, minutes, score: rules.score, pass: rules.pass, failed: rules.failed.map((g) => ({ id: g.id, why: g.why })), warnings: rules.warnings?.length ? rules.warnings : undefined, features: f,
     ai: ai ? { action: ai.action, confidence: ai.confidence, risk_level: ai.risk_level, quality_score: ai.quality_score, reasons: ai.reasons, red_flags: ai.red_flags, model: ai.model } : null, decision: decision?.why || null, action: decision?.action || null, trade: trade || null };
   doc.ai_pending = aiPending || undefined;
   if (prev) doc.ai_done_ts = Date.now();
@@ -65,7 +66,7 @@ export async function scanToken(t) {
   let ai = null, decision = { buy: false, action: null, why: 'rules failed' }, trade = null;
   info(`SCAN ${fresh.symbol || ''} ${fresh._id}: rules ${rules.pass ? 'PASS' : 'FAIL'} (score ${rules.score}${rules.failed.length ? '; ' + rules.failed.map((g) => g.id).join(', ') : ''})`);
   const minutes = Math.round((Date.now() - fresh.live_ts) / MIN);
-  const tokenScan = (scan, d, tr, pending) => ({ scan: { ts: scan.ts, id: scan.id, score: rules.score, pass: rules.pass, decision: d.why, bought: tr?.status === 'bought', failed: rules.failed.map((g) => g.id), ...(pending ? { ai_pending: true } : {}) }, scan_done: true });
+  const tokenScan = (scan, d, tr, pending) => ({ scan: { ts: scan.ts, id: scan.id, score: rules.score, pass: rules.pass, decision: d.why, bought: tr?.status === 'bought', failed: rules.failed.map((g) => g.id), ...(rules.warnings?.length ? { warnings: rules.warnings } : {}), ...(pending ? { ai_pending: true } : {}) }, scan_done: true });
   // the gate result is shown at once; the AI analyst (which can take minutes) completes the same record afterwards
   const aiNext = rules.pass && aiEnabled();
   let early = null;
@@ -74,6 +75,8 @@ export async function scanToken(t) {
     early = await saveScan(fresh, 'first', minutes, f, rules, null, pending, null, null, true);
     await col('tokens').updateOne({ _id: t._id }, { $set: tokenScan(early, pending, null, true) });
   }
+  // the gate-pass report goes out at once, before the AI review (which can take minutes)
+  if (rules.pass) await raiseGatePass(fresh, f, rules, { kind: 'first', minutes, scanId: early?.id ?? null });
   if (rules.pass) {
     if (aiEnabled()) { try { ai = await analyse(f, rules, { holding: null }); } catch (e) { warn(`AI analyst failed for ${t._id}: ${e.message}`); } }
     decision = decide(rules, ai);
@@ -120,6 +123,7 @@ async function followUp(t, minutes) {
   info(`FOLLOW-UP +${minutes}m ${t.symbol || ''} ${t._id}: rules ${rules.pass ? 'PASS' : 'FAIL'} (score ${rules.score})${open ? ' · holding' : ''}`);
   let ai = null, decision = { buy: false, action: null, why: open ? 'holding' : 'rules failed, no AI review' }, trade = null, early = null;
   if ((open || rules.pass) && aiEnabled()) early = await saveScan(fresh, 'followup', minutes, f, rules, null, { buy: false, action: null, why: `gates ${rules.pass ? 'passed' : 'failed'} · AI analyst reviewing` }, null, null, true);
+  if (rules.pass) await raiseGatePass(fresh, f, rules, { kind: 'followup', minutes, scanId: early?.id ?? null }); // once per token: nothing if the first check already passed
   if (!open && !rules.pass) { // a failed review cancels the later checkpoints
     for (const m of F.minutes) if (m > minutes) await col('followups').updateOne({ _id: `${t._id}|${m}` }, { $setOnInsert: { _id: `${t._id}|${m}`, token: t._id, minutes: m, status: 'cancelled', ts: Date.now(), note: `the +${minutes} min review failed` } }, { upsert: true });
   } else if (aiEnabled()) {

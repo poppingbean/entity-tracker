@@ -10,7 +10,8 @@
 //   node src/cli.js creators [max]                      trace who funded every token creator (newest first), then rebuild entities
 //   node src/cli.js ledger [token]                      read done tokens' trades up to today (all due tokens, or one token to the end)
 //   node src/cli.js import-scanner [state.json] [--dry]  copy the live scanner's data (launches, evaluations, blacklist, positions) here
-//   node src/cli.js scan <token> [--features]          run the gates + AI analyst on any stored token (no buying)
+//   node src/cli.js rescore-gates [--apply|--undo]     re-score stored checks now that min_buyers / not_overextended are warnings (dry run by default)
+//   node src/cli.js scan <token> [--features]         run the gates + AI analyst on any stored token (no buying)
 //   node src/cli.js sim-reset                          reset the simulated wallet
 //   node src/cli.js entities                           rebuild the entity table
 //   node src/cli.js evaluate                           only regroup + rule verdicts
@@ -40,6 +41,7 @@ import { buildEntities } from './evaluate/entities.js';
 import { profileCreators } from './evaluate/creators.js';
 import { scanDry, blacklistCreator } from './scanner/pipeline.js';
 import { importScanner } from './import/scanner.js';
+import { rescoreGates } from './scanner/rescore.js';
 import { auditNearContract, summarizeAudit } from './audit/service.js';
 import { recomputeToken, flagRugs } from './collect/rugs.js';
 import { expandNetworks } from './graph/expand.js';
@@ -133,6 +135,8 @@ try {
       console.log('  passed:', doc.risk.factors.filter((x) => !x.hit && x.weight > 0).map((x) => x.key).join(', ') || '-');
       if (args.includes('--json')) console.log(JSON.stringify(summarizeAudit(doc), null, 1));
     }
+  } else if (cmd === 'rescore-gates') {
+    console.log(JSON.stringify(await rescoreGates({ apply: args.includes('--apply'), undo: args.includes('--undo') }), null, 1));
   } else if (cmd === 'import-scanner') {
     const file = args.find((a) => !a.startsWith('--')) || '../near-launch-scanner/data/state.json';
     const r = await importScanner(file, { dry: args.includes('--dry') });
