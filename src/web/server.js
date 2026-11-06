@@ -62,6 +62,8 @@ const aiRunning = new Map(); // token -> { started, error }
 const watchHits = new Map(), keyHits = new Map(), feedbackHits = new Map();
 /** Watchlist changes over POST (JSON body): create a key, add / remove an item, set an API key's webhook. */
 const reportHits = new Map();
+// these change what the Safety Check warns about: never open on a public deployment without DASHBOARD_PASSWORD
+const OPERATOR_POSTS = new Set(['/api/incident/confirm', '/api/incident/unconfirm', '/api/incident/clear']);
 const POSTS = {
   /** Report a hack, a drainer or stolen funds: it is investigated from the chain (never flagged on the report alone). */
   '/api/report': async (b, ip) => {
@@ -104,7 +106,7 @@ const POSTS = {
       const doc = await confirmIncident(String(b.account || '').toLowerCase().trim(), {
         source: b.source || null,
         reason: b.reason || 'Confirmed manually by operator',
-        by: b.by || 'operator',
+        by: 'operator',
         kind: b.kind || null,
         target: b.target || null,
         loss_usd: b.loss_usd ? Number(b.loss_usd) : null,
@@ -118,7 +120,7 @@ const POSTS = {
     try {
       const doc = await unconfirmIncident(String(b.account || '').toLowerCase().trim(), {
         reason: b.reason || 'Unconfirmed manually by operator',
-        by: b.by || 'operator',
+        by: 'operator',
       });
       return { ok: true, incident: doc };
     } catch (e) { return { error: e.message }; }
@@ -128,7 +130,7 @@ const POSTS = {
     try {
       const doc = await clearIncident(String(b.account || '').toLowerCase().trim(), {
         reason: b.reason || 'Normal moved funds / solver activity (cleared)',
-        by: b.by || 'operator',
+        by: 'operator',
       });
       return { ok: true, incident: doc };
     } catch (e) { return { error: e.message }; }
@@ -980,6 +982,7 @@ export function startWeb() {
         return;
       }
       if (req.method === 'POST' && POSTS[u.pathname]) {
+        if (OPERATOR_POSTS.has(u.pathname) && exposed() && !config.web.password) { res.writeHead(403, { 'content-type': 'application/json' }).end(JSON.stringify({ error: 'confirming or clearing a hack is disabled on a public deployment without DASHBOARD_PASSWORD' })); return; }
         const origin = req.headers.origin; // browsers: same origin and our header only; API clients send no Origin
         if (req.headers['x-tracker'] !== '1' || (origin && new URL(origin).host !== req.headers.host)) { res.writeHead(403, { 'content-type': 'application/json' }).end(JSON.stringify({ error: 'forbidden: send the header x-tracker: 1' })); return; }
         let body = ''; for await (const d of req) { body += d; if (body.length > 4000) break; }

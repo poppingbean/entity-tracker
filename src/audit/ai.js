@@ -32,7 +32,7 @@ const CODE_SYSTEM = prompt('audit-code-review', { roles: [...VALID_ROLES].join('
 export async function aiCodeReview(code, strings) {
   if (!(await aiBudget())) return null;
   const evidence = { rule: { role: code.role, confidence: code.confidence, candidates: code.candidates, powers: code.powers.map((p) => ({ power: p.power, methods: p.methods })) },
-    exports: (code.exports || []).slice(0, 250), unknown_writes: code.unknown_writes.slice(0, 30), capabilities: code.capabilities, strings: strings.slice(0, 40), source: code.source };
+    exports: (code.exports || []).slice(0, 250), unknown_writes: code.unknown_writes.slice(0, 30), capabilities: code.capabilities, code_hints: code.hints, strings: strings.slice(0, 40), source: code.source };
   const { json, model, injection } = await ask(CODE_SYSTEM, 'Contract to review:', evidence, { maxTokens: 3000 });
   const ex = new Set(code.exports || []);
   return {
@@ -48,7 +48,7 @@ const DEEP_SYSTEM = prompt('audit-deep-review');
 export async function aiDeepReview(code, auto, strings, sourceReview) {
   if (!(await aiBudget())) return null;
   const writes = Object.fromEntries(Object.entries(code.capabilities || {}).slice(0, 80));
-  const evidence = { type: { role: code.role, label: code.label, standards: code.standards }, exports: (code.exports || []).slice(0, 250), capabilities: writes,
+  const evidence = { type: { role: code.role, label: code.label, standards: code.standards }, exports: (code.exports || []).slice(0, 250), capabilities: writes, code_hints: code.hints,
     rule_findings: auto.findings.filter((f) => f.severity !== 'info').map((f) => ({ severity: f.severity, title: f.title, detail: f.detail })).slice(0, 25),
     control: auto.control, behaviour: auto.facts?.behaviour, strings: strings.slice(0, 40),
     source: sourceReview?.excerpts?.length ? { link: sourceReview.link, missing_methods: sourceReview.missing, admin_functions: sourceReview.excerpts.map((e) => ({ path: e.path, method: e.method, code: e.text.slice(0, 2500) })) } : null };

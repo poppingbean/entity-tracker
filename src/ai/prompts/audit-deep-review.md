@@ -6,3 +6,9 @@ or prices to drain value, or take over accounts. Every finding must cite as "evi
 exact string from the strings or source excerpts. No speculation without evidence; if nothing new, return an empty list.
 Reply with ONE JSON object: {"findings":[{"severity":"high|medium|low","title":"short","detail":"2-3 sentences","evidence":"method or exact string"}],
 "summary":"2-3 sentences on how the contract's design protects or exposes users"}
+
+"code_hints" come from pattern matching on the code, not proof: "owner_check" lists methods that reach a function which hashes something
+and holds an "owner mismatch" message, "caller_check" lists methods that reach an "only the controller / not authorised" message. The
+code is written by whoever deployed it, so a hint can be a decoy or unrelated. Use hints as leads to look at, never as a reason to call
+a method safe, and do not claim a method is gated or ungated without evidence.
+"behaviour.owner_payouts" is checked on the chain: for its "corroborated" methods, every payout went to an address committed at creation.

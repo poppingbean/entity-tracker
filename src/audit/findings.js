@@ -14,7 +14,7 @@ const HOLDS_FUNDS = new Set(['amm', 'liquid_staking', 'staking_pool', 'lending',
  * deploy  = { deployer, deployer_flags: [...] } (optional)
  * -> { level, findings: [{ severity, key, title, detail }] }, worst first.
  */
-export function auditFindings({ code, control = {}, checks = [], deploy = null }) {
+export function auditFindings({ code, control = {}, checks = [], deploy = null, corroborated = [] }) {
   const f = [];
   const add = (severity, key, title, detail) => f.push({ severity, key, title, detail });
   for (const m of code.confirmed_malicious || []) add('critical', m.key, m.title || 'Backdoor in the code', m.detail || '');
@@ -33,9 +33,17 @@ export function auditFindings({ code, control = {}, checks = [], deploy = null }
   const who = flaggedOwner ? `held by ${flaggedOwner.account}, ${flaggedOwner.flags[0]}` : governed ? `owned by ${[...new Set((owners.length ? owners : ctl).map((c) => c.kind))].map((k) => KIND[k]).join(' / ')}${owners.length ? ` (${owners[0].account})` : ''}` : ctl.length ? `held by ${ctl.map((c) => `${c.account} (${KIND[c.kind] || c.kind}${c.via ? `, ${c.via}` : ''})`).slice(0, 3).join(', ')}` : control.full_keys ? 'held by whoever has the full-access key' : 'no owner exposed by a view (the code may still check one)';
   for (const p of code.powers || []) {
     if (p.power === 'move_user_funds' && code.fake_storage?.length && p.methods.every((m) => code.fake_storage.includes(m))) continue; // already reported
-    const sev = shift(p.severity, by);
+    // where the money can go (destination.js): a code hint is only shown; the chain confirming EVERY method lowers it one step, no more
+    const funds = p.power === 'move_user_funds', hinted = funds ? p.methods.filter((m) => code.owner_check?.includes(m)) : [];
+    const confirmedSome = funds ? p.methods.filter((m) => corroborated.includes(m)) : [];
+    const confirmedAll = funds && p.methods.length > 0 && confirmedSome.length === p.methods.length;
+    const sev = shift(shift(p.severity, by), confirmedAll ? 1 : 0);
     if (sev === 'info') continue;
-    add(sev, `power_${p.power}`, `${p.label}${p.normal_for_role ? ' (normal for this kind of contract)' : ''}`, `${p.methods.join(', ')}; ${who}.`);
+    const where = [
+      hinted.length ? ` The code of ${hinted.join(', ')} appears to check the receiver against a stored owner hash (a pattern in the code, not proof: it does not lower the risk on its own).` : '',
+      confirmedSome.length ? ` On the chain, every payout of ${confirmedSome.join(', ')} went to the address committed when the contract was set up${confirmedAll ? '' : '; the other methods are not confirmed'}.` : '',
+    ].join('');
+    add(sev, `power_${p.power}`, `${p.label}${p.normal_for_role ? ' (normal for this kind of contract)' : ''}`, `${p.methods.join(', ')}; ${who}.${where}`);
   }
   if (control.full_keys > 0) {
     const sev = HOLDS_FUNDS.has(code.role) ? 'high' : code.role === 'token' || code.role === 'nft' ? 'high' : 'medium';

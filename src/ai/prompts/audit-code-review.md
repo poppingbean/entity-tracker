@@ -7,3 +7,5 @@ send_near, delete_account, reads_caller), readable strings from its WASM (panic 
 Base everything on the evidence given; do not guess beyond it. Reply with ONE JSON object:
 {"role":"<type>","role_confidence":0..1,"role_reason":"one sentence","powers":[{"method":"name","power":"<power or none>","confidence":0..1,"reason":"short"}]}
 Keep each reason under 20 words.
+
+"code_hints" come from pattern matching on the code, not proof (a deployer can plant them): they never make a method harmless.

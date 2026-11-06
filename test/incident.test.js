@@ -134,3 +134,33 @@ test('bot: the evidence pack names wallets, sources and off-chain recipients, an
   assert.equal(seen.form.get('document').name, 'pack.md');
   assert.equal(await seen.form.get('document').text(), md);
 });
+
+test('deep review: a case with rule evidence is never cleared by routine history or the AI alone; an unproven one can be', async () => {
+  const { decideReview } = await import('../src/incident/deepreview.js');
+  const notHack = { verdict: 'not_hack', confidence: 'high' };
+  // evidence found: stays under review whatever the AI or the history say
+  assert.deepEqual(decideReview({ status: 'suspected', has_evidence: true }, { ai: notHack, routine: true }), { status: 'suspected', tag: 'review' });
+  assert.deepEqual(decideReview({ status: 'suspected', has_evidence: true }, { ai: { verdict: 'not_hack', confidence: 'medium' } }), { status: 'suspected', tag: 'review' });
+  // no evidence: routine history or a medium-confidence "not a hack" clears it; a low-confidence one does not
+  assert.deepEqual(decideReview({ status: 'suspected', has_evidence: false }, { routine: true }), { status: 'cleared', tag: 'safe' });
+  assert.deepEqual(decideReview({ status: 'suspected', has_evidence: false }, { ai: { verdict: 'not_hack', confidence: 'medium' } }), { status: 'cleared', tag: 'safe' });
+  assert.deepEqual(decideReview({ status: 'suspected', has_evidence: false }, { ai: { verdict: 'not_hack', confidence: 'low' } }), { status: 'suspected', tag: 'review' });
+  // a human confirmation is final
+  assert.deepEqual(decideReview({ status: 'confirmed', confirmed_by: { by: 'operator' } }, { ai: notHack, routine: true }), { status: 'confirmed', tag: 'hack' });
+});
+
+test('the operator buttons send the x-tracker header the server requires', async () => {
+  const { readFileSync } = await import('node:fs');
+  const ui = readFileSync(new URL('../src/web/public/assets/js/pages/incidents.js', import.meta.url), 'utf8');
+  assert.match(ui, /const incPost = [^\n]*'x-tracker': '1'/);
+  for (const ep of ['confirm', 'unconfirm', 'clear']) assert.ok(ui.includes(`incPost('/api/incident/${ep}'`), ep);
+  assert.ok(!/fetch\('\/api\/incident\/(confirm|unconfirm|clear)/.test(ui), 'a raw fetch would miss the header');
+});
+
+test('the operator endpoints are closed on a public deployment without a password, and the actor is not taken from the request', async () => {
+  const { readFileSync } = await import('node:fs');
+  const srv = readFileSync(new URL('../src/web/server.js', import.meta.url), 'utf8');
+  assert.match(srv, /OPERATOR_POSTS = new Set\(\['\/api\/incident\/confirm', '\/api\/incident\/unconfirm', '\/api\/incident\/clear'\]\)/);
+  assert.match(srv, /OPERATOR_POSTS\.has\(u\.pathname\) && exposed\(\) && !config\.web\.password/);
+  assert.ok(!/by: b\.by/.test(srv), 'by comes from the server');
+});
