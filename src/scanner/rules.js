@@ -12,20 +12,28 @@ export const RUGGER_MAX_POINTS = 5;
 export const SOFT_GATES = new Set(['min_buyers', 'not_overextended']);
 /** A gate (or gate id) that fails the check: anything but a soft gate. */
 export const isHardGate = (g) => !SOFT_GATES.has(g?.id ?? g);
+/**
+ * What a failed soft gate says as a warning. Warnings reach the public API unredacted, so a note states chain facts, never the threshold.
+ * Without features (imported or older checks) the note is generic.
+ */
+export function softNote(id, f) {
+  const t = f?.trading;
+  if (id === 'min_buyers') return t?.uniqueBuyers != null ? `only ${t.uniqueBuyers} distinct external buyer(s) at the time of the check` : 'few distinct external buyers at the time of the check';
+  if (id === 'not_overextended') return `price already ${t?.priceMultipleSinceFirstTrade != null ? t.priceMultipleSinceFirstTrade + 'x' : 'well up'} since the first trade: a late entry, not a rug signal`;
+  return String(id).replace(/_/g, ' ');
+}
 
 export function applyRules(f) {
   const R = config.rules;
   const gates = [];
-  // `note`: what a failed soft gate says as a warning. Warnings reach the public API unredacted, so a note states chain facts, never the threshold.
-  const gate = (ok, id, why, note) => gates.push({ id, ok: !!ok, why, ...(SOFT_GATES.has(id) ? { soft: true, note } : {}) });
+  const gate = (ok, id, why) => gates.push({ id, ok: !!ok, why, ...(SOFT_GATES.has(id) ? { soft: true, note: softNote(id, f) } : {}) });
 
   gate(f.pool.quoteAccepted && f.pool.route, 'quote_accepted', `pool quote is ${f.pool.quoteSymbol}; only wNEAR / NEARLY / RHEA / QTC pools with a known route are tradable`);
   gate(f.contract.matchesTemplate === true, 'standard_contract', 'token code differs from the launchpad template (custom contract = honeypot risk)');
   gate(f.pool.lpLocked !== false, 'lp_locked', 'liquidity is not locked by the launchpad');
   gate(f.pool.nearReserve >= R.minPoolNear, 'min_pool_near', `pool has ${f.pool.nearReserve} NEAR (< ${R.minPoolNear})`);
   gate(f.market.mcapUsd != null && f.market.mcapUsd >= R.minMcapUsd, 'min_mcap', `market cap ${f.market.mcapUsd == null ? 'unknown' : '$' + f.market.mcapUsd.toLocaleString('en-US')} (< $${R.minMcapUsd.toLocaleString('en-US')})`);
-  gate(f.trading.uniqueBuyers >= R.minUniqueBuyers, 'min_buyers', `${f.trading.uniqueBuyers} distinct external buyers (< ${R.minUniqueBuyers})`,
-    `only ${f.trading.uniqueBuyers} distinct external buyer(s) at the time of the check`);
+  gate(f.trading.uniqueBuyers >= R.minUniqueBuyers, 'min_buyers', `${f.trading.uniqueBuyers} distinct external buyers (< ${R.minUniqueBuyers})`);
   gate(!f.trading.creatorSold, 'creator_not_selling', 'creator already sold');
   // a name / symbol that addresses an AI is an attempt to manipulate automated reviewers (this one included)
   gate(!looksLikeInjection(f.name, f.symbol), 'no_ai_manipulation', 'the token name or symbol contains instruction-like text aimed at AI reviewers');
@@ -35,8 +43,7 @@ export function applyRules(f) {
   gate(f.wallets.linkedBuyerShare <= R.maxLinkedBuyerShare, 'no_sybil_cluster', `${(f.wallets.linkedBuyerShare * 100).toFixed(0)}% of buying comes from wallets linked to each other or the creator`);
   gate(f.wallets.creatorFundedBuyers.length === 0, 'creator_not_funding_buyers', `creator funded buyers: ${f.wallets.creatorFundedBuyers.join(', ')}`);
   const early = f.market.mcapUsd != null && f.market.mcapUsd < R.ignoreRunupBelowMcapUsd;
-  gate(early || f.trading.priceMultipleSinceFirstTrade <= R.maxPriceMultipleSinceLaunch, 'not_overextended', `price already ${f.trading.priceMultipleSinceFirstTrade}x since first trade at market cap $${(f.market.mcapUsd ?? 0).toLocaleString('en-US')}`,
-    `price already ${f.trading.priceMultipleSinceFirstTrade}x since the first trade: a late entry, not a rug signal`);
+  gate(early || f.trading.priceMultipleSinceFirstTrade <= R.maxPriceMultipleSinceLaunch, 'not_overextended', `price already ${f.trading.priceMultipleSinceFirstTrade}x since first trade at market cap $${(f.market.mcapUsd ?? 0).toLocaleString('en-US')}`);
   gate(f.pool.quoteForBuy.tokensOut > 0, 'quote_available', 'no executable quote for the buy size');
   // contract audit: confirmed malicious findings (fake storage backdoor, sells failing, owner wiping holders ...) or a critical risk score
   const au = f.audit;

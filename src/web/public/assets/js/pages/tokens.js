@@ -49,7 +49,7 @@ const scanState = (t, scanCfg) => {
   if (s?.stale) return '<span class="muted">stale</span>';
   if (s?.error) return '<span class="r">error</span>';
   if (s?.score != null && s.ai_pending) return Date.now() - s.ts < 15 * 60e3 ? '<span class="v good">gates pass</span> <span class="b small">AI reviewing…</span>' : '<span class="v good">gates pass</span> <span class="muted small">AI review did not finish</span>';
-  if (s?.score != null) return s.bought && SHOW_SIM ? '<span class="v good">bought (sim)</span>' : s.pass ? `<span class="v neutral">${SHOW_SIM ? 'pass, no buy' : 'gates pass'}</span>` : '<span class="v bad">gates fail</span>';
+  if (s?.score != null) return s.bought && SHOW_SIM ? '<span class="v good">bought (sim)</span>' : s.pass ? `<span class="v neutral">${SHOW_SIM ? 'pass, no buy' : 'gates pass'}</span>${s.rescored_ts && !s.ai ? ' <span class="muted small" title="failed on few buyers or a price run-up at the time; those are warnings now, so it passes on re-score (not reviewed or bought then)">re-scored</span>' : ''}` : '<span class="v bad">gates fail</span>';
   const minAge = Math.max(scanCfg.observeSeconds, t.launchpad === 'justhoot' ? scanCfg.justhootMinAgeSeconds : 0) * 1000;
   const left = minAge - (Date.now() - t.live_ts);
   return left > 0 ? '<span class="b">observing</span>' : '<span class="b">checking…</span>';

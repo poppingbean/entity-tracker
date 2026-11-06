@@ -448,7 +448,8 @@ test('AI analyst updates: diffPackets reports only what moved since the previous
 
 // ---------------------------------------------------------------- linked groups vs tag groups
 import { tagVerdict, walletBehaviours, earlyBucket } from '../src/evaluate/tags.js';
-import { RUGGER_MAX_POINTS, SOFT_GATES, isHardGate } from '../src/scanner/rules.js';
+import { RUGGER_MAX_POINTS, SOFT_GATES, isHardGate, softNote } from '../src/scanner/rules.js';
+import { rescoreCheck } from '../src/scanner/rescore.js';
 import { config } from '../src/config.js';
 import { ruggerFlag } from '../src/analysis/token.js';
 test('linked groups: services never link; a shared funder links at most 10 wallets; a member funding members always does', () => {
@@ -563,6 +564,26 @@ test('scanner rules: min_buyers and not_overextended are soft gates, warnings th
   assert.equal(isHardGate('min_buyers'), false); assert.equal(isHardGate({ id: 'not_overextended' }), false);
   assert.equal(isHardGate('creator_not_selling'), true); assert.equal(isHardGate({ id: 'min_mcap' }), true);
   assert.deepEqual(applyRules(f({})).warnings, []);
+});
+
+test('rescore-gates: stored checks move soft gates to warnings; soft-only failures pass if the score is high enough', () => {
+  // a scan document: gate objects, the old reason holds the threshold
+  const onlySoft = { pass: false, score: 63, failed: [{ id: 'min_buyers', why: '3 distinct external buyers (< 11)' }, { id: 'not_overextended', why: 'x' }], features: { trading: { uniqueBuyers: 3, priceMultipleSinceFirstTrade: 12 } } };
+  const r = rescoreCheck(onlySoft, 55);
+  assert.equal(r.pass, true); assert.equal(r.became_pass, true); assert.deepEqual(r.failed, []);
+  assert.deepEqual(r.warnings.map((w) => w.id), ['min_buyers', 'not_overextended']);
+  assert.match(r.warnings[0].why, /only 3 distinct/); assert.match(r.warnings[1].why, /12x/);
+  assert.ok(!JSON.stringify(r.warnings).includes('< 11'), 'the old reason (threshold) is not copied into the warning');
+  assert.equal(rescoreCheck({ ...onlySoft, score: 40 }, 55).pass, false, 'a low score still fails');
+  assert.equal(rescoreCheck({ ...onlySoft, score: null }, 55).pass, false, 'no score: not a pass');
+  // a token's scan: plain ids, with a hard gate too
+  const tok = rescoreCheck({ pass: false, score: 70, failed: ['min_mcap', 'min_buyers'], warnings: [{ id: 'rugger_early_buyers', level: 'warning', why: 'w' }] }, 55);
+  assert.deepEqual(tok.failed, ['min_mcap']); assert.equal(tok.pass, false); assert.equal(tok.became_pass, false);
+  assert.deepEqual(tok.warnings.map((w) => w.id), ['rugger_early_buyers', 'min_buyers'], 'existing warnings are kept');
+  assert.match(tok.warnings[1].why, /few distinct external buyers/, 'no features: a generic note');
+  assert.equal(rescoreCheck({ pass: false, score: 70, failed: ['min_mcap'] }, 55), null, 'nothing soft: untouched');
+  assert.equal(rescoreCheck(rescoreCheck(onlySoft, 55), 55), null, 'running it twice changes nothing');
+  assert.match(softNote('not_overextended', null), /well up since the first trade/);
 });
 
 test('token analysis: a rugger group among the early buyers is a medium warning flag, so the AI risk floor is medium, not high', () => {
