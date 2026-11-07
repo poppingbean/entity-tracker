@@ -265,8 +265,7 @@ export async function buildAnalysis(id) {
   if (fundedByCreator.length) add('high', `${fundedByCreator.length} early buyer(s) were funded by the creator.`);
   const topGroup = groups.find((g) => g.members.length >= 2);
   if (topGroup?.early_near_share >= 0.2) add('medium', `One linked group (${topGroup.label || topGroup.id}, ${topGroup.members.length} wallets) put in ${(topGroup.early_near_share * 100).toFixed(0)}% of the early NEAR.`);
-  const ruggerGroups = groups.filter((g) => g.rugger);
-  if (ruggerGroups.length) add('high', `${ruggerGroups.length} group(s) linked to rugs bought early (${ruggerGroups.map((g) => g.label || g.id).slice(0, 3).join(', ')}).`);
+  const rf = ruggerFlag(groups); if (rf) flags.push(rf);
   const lossNear = groups.filter((g) => g.tag === 'loss').reduce((s, g) => s + g.near_in, 0);
   if (earlyNear && lossNear / earlyNear >= 0.25) add('medium', `Loss-tagged groups put in ${((lossNear / earlyNear) * 100).toFixed(0)}% of the early NEAR.`);
   const winners = groups.filter((g) => ['win80', 'win50'].includes(g.tag) && !g.rugger);
@@ -287,6 +286,15 @@ export async function buildAnalysis(id) {
 
   return { token: id, symbol: t.symbol || null, name: t.name || null, built_ts: Date.now(), age_min: Math.round((Date.now() - live) / MIN), data_to_ts: t.ledger?.synced_to_ts ?? trades.at(-1)?.ts ?? null,
     launch, creator: creatorSec, flows, early: { wallets: entries.length, near_in: r(earlyNear), rows: early }, groups, shared_funders: sharedFunders, repeat, sellers, holders: holdersSec, token_flows: tokenFlowsSec, flags };
+}
+
+/**
+ * The flag for early-buyer groups linked to rugs: a warning (medium), not high. On its own it raises the AI risk floor to medium only;
+ * the high-level flags are kept for on-chain extraction (the creator selling or funding buyers, hidden dumps, a confirmed rug).
+ */
+export function ruggerFlag(groups = []) {
+  const rg = groups.filter((g) => g.rugger);
+  return rg.length ? { level: 'medium', kind: 'rugger_early_buyers', text: `Warning: ${rg.length} group(s) linked to rugs bought early (${rg.map((g) => g.label || g.id).slice(0, 3).join(', ')}).` } : null;
 }
 
 /** Cached analysis (rebuilt when older than CACHE_MS or when `refresh`). */

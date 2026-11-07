@@ -447,7 +447,11 @@ test('AI analyst updates: diffPackets reports only what moved since the previous
 });
 
 // ---------------------------------------------------------------- linked groups vs tag groups
-import { tagVerdict, walletBehaviours } from '../src/evaluate/tags.js';
+import { tagVerdict, walletBehaviours, earlyBucket } from '../src/evaluate/tags.js';
+import { RUGGER_MAX_POINTS, SOFT_GATES, isHardGate, softNote } from '../src/scanner/rules.js';
+import { rescoreCheck } from '../src/scanner/rescore.js';
+import { config } from '../src/config.js';
+import { ruggerFlag } from '../src/analysis/token.js';
 test('linked groups: services never link; a shared funder links at most 10 wallets; a member funding members always does', () => {
   const W = (id, funder) => ({ _id: id, funders: [{ account: funder, kind: 'wallet' }], chain: [{ account: funder, kind: 'wallet', hop: 1 }], flow_out: [] });
   const c = { cobuySeconds: 15, cobuyMinTokens: 4, deepDepth: 0 };
@@ -496,6 +500,100 @@ test('tag groups: behaviours and the verdict the gate falls back to', () => {
   assert.equal(tagVerdict('win30', ['cobuy']), 'bots');
   assert.equal(tagVerdict('loss', []), 'bots');
   assert.equal(tagVerdict('unrated', []), null);
+});
+
+test('scanner buckets: rug-linked early buyers are "rugger" (a warning), insiders and sybil snipers stay "bad"', () => {
+  const farm = { _id: 'g1', rule: { tags: ['rug-farmer'] } }, sybil = { _id: 'g2', rule: { tags: ['sybil-sniper'] } };
+  assert.equal(earlyBucket({ cluster_id: 'g1', cluster_verdict: 'bad' }, farm), 'rugger', 'a rug-farmer group was "bad" before');
+  assert.equal(earlyBucket({ cluster_id: 'g1', cluster_verdict: 'bad' }, { _id: 'g1', ai: { archetype: 'rug-farmer' } }), 'rugger', 'AI-called rug farmers too');
+  assert.equal(earlyBucket({ cluster_id: 'g3', cluster_verdict: 'good' }, { _id: 'g3', creator_flag: 'rugger' }), 'rugger', 'a group with a rugging creator, even judged good');
+  assert.equal(earlyBucket({ creator: { rugged: 2 }, tag_verdict: 'dangerous', behaviours: ['rug-linked'] }, null), 'rugger', 'a creator that rugged, itself');
+  assert.equal(earlyBucket({ creator: { blacklisted: true }, tag_verdict: 'dangerous' }, null), 'rugger', 'blacklisted creator, older doc without behaviours');
+  assert.equal(earlyBucket({ cluster_id: 'g2', cluster_verdict: 'bad' }, sybil), 'bad', 'sybil snipers stay dangerous');
+  assert.equal(earlyBucket({ cluster_id: 'g1', cluster_verdict: 'bad' }, { _id: 'g1', rule: { tags: ['rug-farmer', 'insider'] } }), 'bad', 'insider beats rug-linked');
+  assert.equal(earlyBucket({ creator: { rugged: 1 }, tag_verdict: 'dangerous', behaviours: ['insider', 'rug-linked'] }, null), 'bad', 'an insider that also rugged stays dangerous');
+  assert.equal(earlyBucket({ tag_verdict: 'dangerous' }, null), 'bad', 'dangerous without a rug record = insider');
+  assert.equal(earlyBucket({ cluster_id: 'g4', cluster_verdict: 'bad' }, { _id: 'g4', rule: { tags: [] } }), 'bots_losers');
+  assert.equal(earlyBucket({ tag_verdict: 'good' }, null), 'good');
+  assert.equal(earlyBucket(undefined, null), 'unknown');
+});
+
+test('scanner rules: rugger early money is a warning with a light cut, never a gate or the heavy "bad" cut', () => {
+  const groups = (o) => ({ good: { wallets: 0, near: 0, share: 0 }, bad: { wallets: 0, near: 0, share: 0 }, rugger: { wallets: 0, near: 0, share: 0 }, bots_losers: { wallets: 0, near: 0, share: 0 }, neutral: { wallets: 0, near: 0, share: 0 }, unknown: { wallets: 0, near: 0, share: 0 }, ...o });
+  const f = (eg) => ({ pool: { quoteAccepted: true, route: 'direct', lpLocked: true, nearReserve: 200, quoteSymbol: 'wNEAR', quoteForBuy: { tokensOut: 1 } }, contract: { matchesTemplate: true }, market: { mcapUsd: 20000 },
+    trading: { uniqueBuyers: 30, creatorSold: false, priceMultipleSinceFirstTrade: 1, buyNear: 100, sellNear: 10, syncBuyClusters: 0 }, launch: { tax: null }, wallets: { linkedBuyerShare: 0, creatorFundedBuyers: [], creator: null },
+    audit: { available: false }, intel: { creator_prior_rugs_or_dumps: 0, creator_prior_launches: 0, early_buyer_groups: groups(eg) } });
+  const clean = applyRules(f({}));
+  const rug = applyRules(f({ rugger: { wallets: 6, near: 60, share: 0.6 } }));
+  const bad = applyRules(f({ bad: { wallets: 6, near: 60, share: 0.6 } }));
+  assert.deepEqual(clean.warnings, []);
+  assert.equal(rug.gates.find((g) => g.id === 'bad_groups_not_dominant').ok, true, '60 % rugger money does not fail the gate');
+  assert.equal(rug.failed.length, 0);
+  assert.equal(clean.score - rug.score, RUGGER_MAX_POINTS, 'at most 5 points off (was 15 when it counted as "bad")');
+  assert.equal(RUGGER_MAX_POINTS, 5);
+  assert.deepEqual(rug.warnings.map((w) => [w.id, w.level]), [['rugger_early_buyers', 'warning']]);
+  assert.match(rug.warnings[0].why, /6 early buyer\(s\) linked to rugs put in 60%/);
+  const small = applyRules(f({ rugger: { wallets: 1, near: 10, share: 0.1 } }));
+  assert.equal(clean.score - small.score, 1, '10 % rugger money costs 1 point');
+  // the same money judged dangerous (insiders / sybil snipers) keeps the gate and the heavy cut
+  assert.equal(bad.gates.find((g) => g.id === 'bad_groups_not_dominant').ok, false);
+  assert.equal(clean.score - bad.score, 15);
+  assert.deepEqual(bad.warnings, []);
+});
+
+test('scanner rules: min_buyers and not_overextended are soft gates, warnings that never fail the check on their own', () => {
+  const f = (trading, market = { mcapUsd: 50000 }) => ({ pool: { quoteAccepted: true, route: 'direct', lpLocked: true, nearReserve: 200, quoteSymbol: 'wNEAR', quoteForBuy: { tokensOut: 1 } }, contract: { matchesTemplate: true }, market,
+    trading: { uniqueBuyers: 30, creatorSold: false, priceMultipleSinceFirstTrade: 1, buyNear: 100, sellNear: 10, syncBuyClusters: 0, ...trading }, launch: { tax: null }, wallets: { linkedBuyerShare: 0, creatorFundedBuyers: [], creator: null },
+    audit: { available: false }, intel: null });
+  assert.deepEqual([...SOFT_GATES].sort(), ['min_buyers', 'not_overextended']);
+  const both = applyRules(f({ uniqueBuyers: 3, priceMultipleSinceFirstTrade: 50 }));
+  assert.equal(both.gates.find((g) => g.id === 'min_buyers').ok, false, 'the gate still records the miss');
+  assert.equal(both.gates.find((g) => g.id === 'not_overextended').ok, false);
+  assert.deepEqual(both.failed, [], 'but neither is a failed gate');
+  assert.equal(both.pass, both.score >= config.rules.minScore, 'pass depends only on the score now');
+  assert.deepEqual(both.warnings.map((w) => [w.id, w.level]), [['min_buyers', 'warning'], ['not_overextended', 'warning']]);
+  assert.ok(both.warnings.every((w) => !/[<>]/.test(w.why)), 'warnings never show the threshold (they are not redacted)');
+  assert.match(both.warnings[0].why, /only 3 distinct external buyer/);
+  assert.match(both.warnings[1].why, /50x since the first trade/);
+  // a soft miss next to a hard one: the hard one fails, the soft one stays a warning
+  const withHard = applyRules(f({ uniqueBuyers: 3, creatorSold: true }));
+  assert.deepEqual(withHard.failed.map((g) => g.id), ['creator_not_selling']);
+  assert.equal(withHard.pass, false);
+  assert.deepEqual(withHard.warnings.map((w) => w.id), ['min_buyers']);
+  // stored / imported failed lists: soft ids do not count
+  assert.equal(isHardGate('min_buyers'), false); assert.equal(isHardGate({ id: 'not_overextended' }), false);
+  assert.equal(isHardGate('creator_not_selling'), true); assert.equal(isHardGate({ id: 'min_mcap' }), true);
+  assert.deepEqual(applyRules(f({})).warnings, []);
+});
+
+test('rescore-gates: stored checks move soft gates to warnings; soft-only failures pass if the score is high enough', () => {
+  // a scan document: gate objects, the old reason holds the threshold
+  const onlySoft = { pass: false, score: 63, failed: [{ id: 'min_buyers', why: '3 distinct external buyers (< 11)' }, { id: 'not_overextended', why: 'x' }], features: { trading: { uniqueBuyers: 3, priceMultipleSinceFirstTrade: 12 } } };
+  const r = rescoreCheck(onlySoft, 55);
+  assert.equal(r.pass, true); assert.equal(r.became_pass, true); assert.deepEqual(r.failed, []);
+  assert.deepEqual(r.warnings.map((w) => w.id), ['min_buyers', 'not_overextended']);
+  assert.match(r.warnings[0].why, /only 3 distinct/); assert.match(r.warnings[1].why, /12x/);
+  assert.ok(!JSON.stringify(r.warnings).includes('< 11'), 'the old reason (threshold) is not copied into the warning');
+  assert.equal(rescoreCheck({ ...onlySoft, score: 40 }, 55).pass, false, 'a low score still fails');
+  assert.equal(rescoreCheck({ ...onlySoft, score: null }, 55).pass, false, 'no score: not a pass');
+  // a token's scan: plain ids, with a hard gate too
+  const tok = rescoreCheck({ pass: false, score: 70, failed: ['min_mcap', 'min_buyers'], warnings: [{ id: 'rugger_early_buyers', level: 'warning', why: 'w' }] }, 55);
+  assert.deepEqual(tok.failed, ['min_mcap']); assert.equal(tok.pass, false); assert.equal(tok.became_pass, false);
+  assert.deepEqual(tok.warnings.map((w) => w.id), ['rugger_early_buyers', 'min_buyers'], 'existing warnings are kept');
+  assert.match(tok.warnings[1].why, /few distinct external buyers/, 'no features: a generic note');
+  assert.equal(rescoreCheck({ pass: false, score: 70, failed: ['min_mcap'] }, 55), null, 'nothing soft: untouched');
+  assert.equal(rescoreCheck(rescoreCheck(onlySoft, 55), 55), null, 'running it twice changes nothing');
+  assert.match(softNote('not_overextended', null), /well up since the first trade/);
+});
+
+test('token analysis: a rugger group among the early buyers is a medium warning flag, so the AI risk floor is medium, not high', () => {
+  assert.equal(ruggerFlag([{ id: 'g', rugger: false }]), null);
+  const fl = ruggerFlag([{ id: 'g1', label: 'farmers', rugger: true }, { id: 'g2', rugger: false }]);
+  assert.equal(fl.level, 'medium');
+  assert.equal(fl.kind, 'rugger_early_buyers');
+  assert.match(fl.text, /^Warning: 1 group\(s\) linked to rugs bought early \(farmers\)/);
+  assert.equal(riskFloor([fl]), 'medium', 'was high before');
+  assert.equal(riskFloor([fl, { level: 'high', text: 'creator sold' }]), 'high', 'real extraction still sets high');
 });
 
 // ---------------------------------------------------------------- NFT collectibles
@@ -561,6 +659,27 @@ test('alerts: owner keys, alert matching, Telegram text is escaped', () => {
   assert.deepEqual(alertTargets({ related: { tokens: ['t.near'], wallets: ['w.near'], groups: ['c_12345678'], creators: [], collections: ['n.near'] } }), ['token:t.near', 'wallet:w.near', 'group:c_12345678', 'collection:n.near']);
   const m = alertMessage({ severity: 'high', title: '<b>X</b> rugged', text: 'a & b <script>' });
   assert.ok(m.includes('&lt;b&gt;X&lt;/b&gt;') && m.includes('a &amp; b &lt;script&gt;') && !m.includes('<script>'));
+});
+test('alerts: the gate-pass report (chain facts, score, warnings, never a threshold) reaches every bot chat that did not opt out', async () => {
+  const { gatePassReport } = await import('../src/scanner/gatepass.js');
+  const { GATE_PASS_CHATS } = await import('../src/alerts/watch.js');
+  const { TYPES } = await import('../src/alerts/store.js');
+  const t = { _id: 'moon-1.nearlytrade.near', symbol: 'MOON', launchpad: 'nearlytrade', creator: 'dev.near' };
+  const f = { pool: { nearReserve: 231.4 }, market: { mcapUsd: 12400 }, trading: { uniqueBuyers: 4, buyNear: 180, sellNear: 20, priceMultipleSinceFirstTrade: 1.8 },
+    audit: { available: true, risk_score: 12, risk_level: 'low' }, intel: { early_buyer_groups: { good: { share: 0.2 }, bad: { share: 0 }, rugger: { wallets: 1, share: 0.05 } } } };
+  const rules = { pass: true, score: 66, warnings: [{ id: 'min_buyers', level: 'warning', why: 'only 4 distinct external buyer(s) at the time of the check' }] };
+  const r = gatePassReport(t, f, rules, { kind: 'first', minutes: 6 });
+  assert.equal(r.title, 'Gate pass: $MOON');
+  for (const s of ['Score 66/100', 'first check, 6 min after launch', 'nearly.trade · pool 231 NEAR · market cap $12,400', '4 buyers · bought 180 / sold 20 NEAR · price x1.8',
+    'Contract audit: risk 12/100 (low)', 'known good 20% · dangerous 0% · rug-linked 5%', '⚠️ only 4 distinct external buyer(s)', 'Contract: moon-1.nearlytrade.near', 'not a buy signal']) assert.ok(r.text.includes(s), s);
+  assert.ok(!/[<>]/.test(r.text) && r.text.length <= 1200, 'no thresholds, fits an alert');
+  assert.match(gatePassReport({ _id: 'x.near' }, {}, { score: 60 }).text, /Contract audit: not available yet/, 'missing features do not break it');
+  assert.equal(TYPES.gate_pass.group, 'scanner');
+  assert.ok(alertMessage({ type: 'gate_pass', severity: 'info', title: r.title, text: r.text }).startsWith('✅ <b>Gate pass: $MOON</b>'));
+  // who: Telegram bot chats only (tg_…), unless they sent /gatepass off
+  assert.deepEqual(GATE_PASS_CHATS, { _id: { $regex: '^tg_' }, gate_pass: { $ne: false } });
+  const re = new RegExp(GATE_PASS_CHATS._id.$regex);
+  assert.ok(re.test('tg_-1001234') && !re.test('web_abc') && !re.test('api_abc'));
 });
 test('NFT events: a transfer to the same account is never a sale (escrow / market bookkeeping)', () => {
   const C = 'c.near';

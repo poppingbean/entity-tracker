@@ -10,6 +10,7 @@
 //                                                            so they never touch the paper wallet)
 import fs from 'node:fs';
 import { col } from '../db.js';
+import { isHardGate } from '../scanner/rules.js';
 import { config } from '../config.js';
 import { isKnownQuote } from '../near/quotes.js';
 import { flagRugs } from '../collect/rugs.js';
@@ -33,7 +34,7 @@ export async function importScanner(file, { dry = false } = {}) {
       live_ts: t.liveTs, live_height: null, live_tx: t.liveTx || null, status: isKnownQuote(t.pool.quote) ? 'new' : 'skipped_quote', sync_height: null, sync_ts: null, trades_n: 0,
       created_ts: t.createdTs || t.firstSeen || now, next_process_ts: 0, imported_from: 'scanner',
       // an old / already evaluated launch must not be bought by the simulated wallet
-      ...(e || ageMin > config.scan.maxTokenAgeMinutes ? { scan_done: true, scan: e ? { ts: t.evaluatedTs, score: e.score, pass: !(e.failed || []).length && (e.score ?? 0) >= config.rules.minScore, decision: `imported from the scanner (${e.action || t.status})`, bought: /bought|manual_held/.test(t.status || ''), failed: e.failed || [], imported: true } : { ts: now, imported: true, stale: true, decision: 'imported (too old to scan)' } } : {}),
+      ...(e || ageMin > config.scan.maxTokenAgeMinutes ? { scan_done: true, scan: e ? { ts: t.evaluatedTs, score: e.score, pass: !(e.failed || []).filter(isHardGate).length && (e.score ?? 0) >= config.rules.minScore, decision: `imported from the scanner (${e.action || t.status})`, bought: /bought|manual_held/.test(t.status || ''), failed: e.failed || [], imported: true } : { ts: now, imported: true, stale: true, decision: 'imported (too old to scan)' } } : {}),
     };
     const scanner = { status: t.status, score: e?.score ?? null, failed: e?.failed ?? null, ai_action: e?.ai?.action ?? e?.ai?.decision ?? null, ai_confidence: e?.ai?.confidence ?? null, ai_risk: e?.ai?.risk_level ?? null, evaluated_ts: t.evaluatedTs ?? null, imported_ts: now };
     tokenOps.push({ updateOne: { filter: { _id: t.token }, update: { $setOnInsert: doc, $set: { scanner } }, upsert: true } });
@@ -43,7 +44,7 @@ export async function importScanner(file, { dry = false } = {}) {
     if (e && t.evaluatedTs && e.score !== undefined) {
       const id = `${t.token}|${t.evaluatedTs}|first`;
       scanOps.push({ replaceOne: { filter: { _id: id }, upsert: true, replacement: { _id: id, id, token: t.token, symbol: t.symbol || null, launchpad: t.launchpad, ts: t.evaluatedTs, kind: 'first', minutes: Math.round((t.evaluatedTs - t.liveTs) / MIN),
-        score: e.score, pass: !(e.failed || []).length && (e.score ?? 0) >= config.rules.minScore, failed: (e.failed || []).map((g) => (typeof g === 'string' ? { id: g, why: '' } : g)), features: e.features || null, ai: mkAi(e.ai),
+        score: e.score, pass: !(e.failed || []).filter(isHardGate).length && (e.score ?? 0) >= config.rules.minScore, failed: (e.failed || []).map((g) => (typeof g === 'string' ? { id: g, why: '' } : g)), features: e.features || null, ai: mkAi(e.ai),
         decision: `scanner: ${e.action || e.ai?.decision || t.status}`, action: e.action || null, trade, source: 'scanner' } } });
       stat.scans++;
     }

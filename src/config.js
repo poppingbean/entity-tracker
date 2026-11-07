@@ -109,6 +109,8 @@ export const config = {
     telegramBot: (process.env.TELEGRAM_BOT_NAME || 'safenear_bot').replace(/^@/, ''), // the bot's @name, shown on the Alerts page
     telegramChannel: process.env.TELEGRAM_CHANNEL_ID || '',          // public channel / chat for alerts at publicSeverity and above
     webhookUrl: process.env.ALERTS_WEBHOOK_URL || '',                // global webhook for the same alerts
+    gatePass: process.env.ALERTS_GATE_PASS !== 'false',              // a gate-pass report when a launch passes every hard gate (scanner/gatepass.js)
+    gatePassChat: process.env.TELEGRAM_GATE_PASS_CHAT_ID || '',     // optional extra chat / channel for every gate-pass report (bot chats get them anyway)
     publicSeverity: ['high', 'medium', 'info'].includes(process.env.ALERTS_PUBLIC_SEVERITY) ? process.env.ALERTS_PUBLIC_SEVERITY : 'high',
     // watched tokens: trades re-read this often, and what counts as a large sell / a fast drop
     watchSyncMinutes: num(process.env.ALERTS_WATCH_SYNC_MINUTES, 3),  // short enough that an event is read well inside maxAgeMinutes

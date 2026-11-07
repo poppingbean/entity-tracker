@@ -34,3 +34,24 @@ export function tagVerdict(tag, behaviours = [], { selfRugger = false } = {}) {
   if (tag === 'loss' || behaviours.includes('cobuy')) return 'bots';
   return null;
 }
+
+// ---- the scanner's early-buyer buckets
+export const EARLY_BUCKETS = ['good', 'bad', 'rugger', 'bots_losers', 'neutral', 'unknown'];
+const DANGER = new Set(['insider', 'sybil-sniper']); // dangerous money: the bad_groups_not_dominant gate and the heavy score cut
+/**
+ * Which early-buyer bucket a wallet's money goes in. Dangerous money (an insider group or sybil snipers, or a wallet that is itself an
+ * insider) is "bad". Otherwise rug-linked money (a creator that rugged or is blacklisted, a group with one or that the rules / AI call
+ * rug farmers) is "rugger": a warning only. Then the group's verdict, then the wallet's tag verdict.
+ */
+export function earlyBucket(w, c) {
+  if (!w) return 'unknown';
+  const dangerousGroup = w.cluster_verdict === 'bad' && !!c && ((c.rule?.tags || []).some((t) => DANGER.has(t)) || DANGER.has(c.ai?.archetype));
+  const selfRugger = !!(w.creator && (w.creator.rugged > 0 || w.creator.blacklisted));
+  // tag_verdict "dangerous" means an insider or a self-rugger; older docs without behaviours count as insiders unless they rugged themselves
+  const insider = w.tag_verdict === 'dangerous' && ((w.behaviours || []).includes('insider') || !selfRugger);
+  if (dangerousGroup || insider) return 'bad';
+  if (ruggerWallet(w, c) || c?.ai?.archetype === 'rug-farmer') return 'rugger';
+  const byGroup = w.cluster_verdict === 'good' ? 'good' : w.cluster_verdict === 'bad' ? 'bots_losers' : w.cluster_verdict === 'neutral' ? 'neutral' : null;
+  const byTag = { good: 'good', bots: 'bots_losers' }[w.tag_verdict] || null;
+  return byGroup || byTag || 'unknown';
+}

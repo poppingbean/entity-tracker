@@ -1,5 +1,5 @@
 // ================================================================== EXPLORE
-const ASSESS = { rugger: ['r', 'Rugger in'], bullish: ['g', 'Winners in'], warning: ['r', 'Loss wallets in'], mixed: ['a', 'Mixed money'] };
+const ASSESS = { rugger: ['a', 'Warning: rugger in'], bullish: ['g', 'Winners in'], warning: ['r', 'Loss wallets in'], mixed: ['a', 'Mixed money'] };
 // Creator sales over every stored trade (what the rug check uses); falls back to the 24 h fields on old outcomes.
 const creatorSale = (o) => {
   const b = o?.rug_basis;
