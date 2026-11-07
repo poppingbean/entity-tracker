@@ -30,7 +30,7 @@ export const config = {
   githubToken: process.env.GITHUB_TOKEN || '', // optional: raises the GitHub API limit for source reviews (60 / h without)
 
   launchpads: list(process.env.LAUNCHPADS, ['nearlytrade', 'justhoot', 'memecooking']),
-  pollSeconds: num(process.env.POLL_SECONDS, 20),
+  pollSeconds: num(process.env.POLL_SECONDS, 10),
 
   entry: {
     windowMinutes: num(process.env.ENTRY_WINDOW_MINUTES, 10),
@@ -152,8 +152,8 @@ export const config = {
   // --- scanner mode: watch every new launch, apply the hard gates, ask the AI analyst, and invest in a SIMULATED wallet ---
   scan: {
     enabled: bool(process.env.SCAN_ENABLED, true),
-    observeSeconds: num(process.env.OBSERVE_SECONDS, 120),           // wait this long after the pool opens before the first check
-    justhootMinAgeSeconds: num(process.env.JUSTHOOT_MIN_AGE_SECONDS, 240), // justhoot taxes buys in the first ~2 minutes
+    observeSeconds: num(process.env.OBSERVE_SECONDS, 130),           // wait this long after the pool opens before the first check
+    justhootMinAgeSeconds: num(process.env.JUSTHOOT_MIN_AGE_SECONDS, 130), // same as observeSeconds: justhoot has no extra wait
     maxTokenAgeMinutes: num(process.env.MAX_TOKEN_AGE_MINUTES, 60),  // a launch not checked within this long is skipped as stale
   },
   rules: {
