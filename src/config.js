@@ -81,6 +81,7 @@ export const config = {
   // the ontology layer (docs/ontology-design.md): shadow mode compares every module's account decisions with it, changing none
   ontology: {
     shadow: process.env.ONTOLOGY_SHADOW !== 'false',
+    heartbeat: process.env.ONTOLOGY_HEARTBEAT !== 'false', // false on a local copy pointed at the production database: the gate trusts heartbeats
     backfillEveryHours: num(process.env.ONTOLOGY_BACKFILL_EVERY_HOURS, 24), // re-derive the facts from the other collections (0 = never)
   },
   incidents: {

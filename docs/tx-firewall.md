@@ -89,6 +89,19 @@ The verdict always comes from deterministic rules; the AI explanation can never 
 | `ai_manipulation` | medium | The call data contains text aimed at AI or automated reviewers |
 | `meta_transaction`, `new_account_key`, `binary_args` | info | Context only |
 
+## `GET /api/v1/entity?id=<account>`
+
+What Safe Near calls an account (its [ontology](ontology-design.md)): the class, in words, why, what weaker evidence was overruled, and the account's edges in the knowledge graph (operator, sweeps, funding, cases it played a role in, groups):
+
+```json
+{ "account": "9c484fa5d2d0…c5c1", "class": "exchange/hot_wallet", "is": "an exchange hot wallet", "operator": "org:binance",
+  "why": "sends its reserves to binancecold3.near", "source": "registry", "pass_through": false, "links_owners": false,
+  "cases": [{ "case": "inc:efd224…", "role": "victim", "status": "confirmed" }], "overruled": [],
+  "edges": [{ "from": "9c484fa5d2d0…c5c1", "predicate": "swept_to", "to": "binancecold3.near", "source": "registry", "evidence": "sends its reserves to binancecold3.near" }] }
+```
+
+`links_owners: false` means sharing this account (being paid by it, paying into it) says nothing about who owns two wallets.
+
 ## `GET /api/v1/account?id=<account>`
 
 Reputation of one account, e.g. on a "send to" screen:

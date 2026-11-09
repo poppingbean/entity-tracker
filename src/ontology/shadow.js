@@ -9,7 +9,7 @@ import { config } from '../config.js';
 import { whatIsMany } from './index.js';
 
 /** The migration steps this code contains. Each migration PR adds its letter; the heartbeat reports them and the gate reads them. */
-export const ONTOLOGY_STEPS = ['A'];
+export const ONTOLOGY_STEPS = ['A', 'B'];
 
 const on = () => config.ontology?.shadow !== false;
 const seen = new Map(); // module|account|old → { ts, r }: the last comparison, reused for an hour
@@ -90,6 +90,7 @@ export function runningCommit() {
 
 /** Heartbeat (once a minute): which commit and which migration steps run, per process role. The gate's proof that a PR is deployed. */
 export function startHeartbeat(role) {
+  if (config.ontology?.heartbeat === false) return;
   const commit = runningCommit(), started = Date.now();
   const beat = async () => {
     await metaSet(`ontology_heartbeat:${role}`, { role, commit, steps: ONTOLOGY_STEPS, shadow: on(), started_ts: started, ts: Date.now() });

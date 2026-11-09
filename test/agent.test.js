@@ -69,6 +69,7 @@ const fakeApi = {
   inspect: async (q) => ({ verdict: q === HACKER ? 'danger' : 'safe', headline: q === HACKER ? 'Part of a hack' : 'Nothing known against it', points: [] }),
   contract: async (id) => ({ account: id, status: 'ok', level: id === 'risky.near' ? 'high' : 'low', type: { label: 'Token' }, findings: [] }),
   account: async () => ({}),
+  whatIs: async (id) => ({ account: id, class: 'service/intents_solver', is: 'a NEAR Intents solver (fills swaps for many users)', label: null, operator: null, why: 'its name says it is a NEAR Intents solver', pass_through: false, flagged: null, cases: [], overruled: [{ is: 'an exchange hot wallet', source: 'behaviour', evidence: 'busy' }], edges: [] }),
 };
 async function connected() {
   const [a, b] = InMemoryTransport.createLinkedPair();
@@ -78,9 +79,9 @@ async function connected() {
 }
 const json = (r) => JSON.parse(r.content[1].text);
 
-test('MCP: the five tools are listed, with instructions', async () => {
+test('MCP: the six tools are listed, with instructions', async () => {
   const c = await connected();
-  assert.deepEqual((await c.listTools()).tools.map((t) => t.name).sort(), ['check_account', 'check_contract', 'check_transaction', 'guard_transaction', 'plan_scoped_key']);
+  assert.deepEqual((await c.listTools()).tools.map((t) => t.name).sort(), ['check_account', 'check_contract', 'check_transaction', 'guard_transaction', 'plan_scoped_key', 'what_is']);
   assert.match(c.getInstructions(), /guard_transaction/);
   await c.close();
 });
@@ -108,4 +109,12 @@ test('MCP: account, contract and scoped-key tools; secrets refused', async () =>
   assert.equal(secret.isError, true);
   assert.match(secret.content[0].text, /Refused/);
   await c.close();
+});
+
+test('MCP: what_is says what an account is and what it overruled', async () => {
+  const c = await connected();
+  const r = await c.callTool({ name: 'what_is', arguments: { account: 'Solver-Priv-Liq.near' } });
+  assert.match(r.content[0].text, /^solver-priv-liq\.near is a NEAR Intents solver/);
+  assert.match(r.content[0].text, /overruled: an exchange hot wallet/);
+  assert.equal(json(r).class, 'service/intents_solver');
 });

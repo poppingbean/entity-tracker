@@ -1,4 +1,4 @@
-// The four checks the Agent Guard asks, in two forms with the same shape:
+// The checks the Agent Guard asks, in two forms with the same shape:
 //   localApi()   inside the Safe Near server (the remote MCP endpoint /mcp): calls the checks directly
 //   httpApi()    anywhere else (the stdio MCP server on someone's machine): calls the public API of a Safe Near deployment, no database needed
 
@@ -6,11 +6,13 @@
 export async function localApi() {
   const [{ checkRequest, accountReputation }, { inspect }, { contractReport }] = await Promise.all([
     import('../firewall/service.js'), import('../firewall/inspect.js'), import('../audit/report.js')]);
+  const { entityView } = await import('../ontology/index.js');
   return {
     checkTx: (body) => checkRequest(body),
     inspect: (q) => inspect(q),
     contract: (id) => contractReport(id),
     account: (id) => accountReputation(id),
+    whatIs: (id) => entityView(id),
   };
 }
 
@@ -28,5 +30,6 @@ export function httpApi({ base = process.env.SAFE_NEAR_URL || 'https://app.safe-
     inspect: (q) => call(`/inspect?q=${encodeURIComponent(q)}`),
     contract: (id) => call(`/contract?id=${encodeURIComponent(id)}`),
     account: (id) => call(`/account?id=${encodeURIComponent(id)}`),
+    whatIs: (id) => call(`/entity?id=${encodeURIComponent(id)}`),
   };
 }

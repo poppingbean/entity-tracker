@@ -34,6 +34,7 @@ import { inspect } from '../firewall/inspect.js';
 import { parseInvestigation, startInvestigation, investigationJob, confirmIncident, unconfirmIncident, clearIncident } from '../incident/service.js';
 import { report } from '../incident/signals.js';
 import { walletView } from '../near/walletview.js';
+import { entityView } from '../ontology/index.js';
 
 // the UI: a small shell page (public/index.html) and its assets (public/assets: app.css, js/core.js, js/pages/*.js, js/app.js).
 // Asset links carry the server's start time (?v=) so a deploy is picked up at once while the files themselves are cached long.
@@ -174,7 +175,7 @@ const fwHits = new Map();
 const clientIp = (req) => String(req.headers['x-forwarded-for'] || '').split(',')[0].trim() || req.socket.remoteAddress || 'ip';
 const CORS = { 'access-control-allow-origin': '*', 'access-control-allow-methods': 'GET, POST, OPTIONS', 'access-control-allow-headers': 'content-type, x-api-key', 'access-control-max-age': '86400' };
 const FW_DOC = { name: 'Safe Near transaction firewall', version: FIREWALL_VERSION, docs: 'https://github.com/poppingbean/entity-tracker/blob/main/docs/tx-firewall.md',
-  endpoints: { 'POST /api/v1/tx/check': 'check transactions before they are signed', 'GET /api/v1/account?id=<account>': 'reputation of one account', 'GET /api/v1/contract?id=<account>': 'the automated audit of a contract', 'GET /api/v1/inspect?q=<wallet | contract | tx hash | link>': 'is it safe? one answer for whatever is pasted', 'GET /api/v1/incidents': 'traced hacks and scams', 'GET /api/v1/flags?since=<ms>&min=high': 'the blocklist: every flagged account (sync with since)', 'GET /api/v1/flags/check?ids=a,b': 'are these accounts flagged?', 'GET /api/v1/incident?id=<id>': 'one incident: attacker accounts, target, losses, victims, money trail' } };
+  endpoints: { 'POST /api/v1/tx/check': 'check transactions before they are signed', 'GET /api/v1/account?id=<account>': 'reputation of one account', 'GET /api/v1/contract?id=<account>': 'the automated audit of a contract', 'GET /api/v1/inspect?q=<wallet | contract | tx hash | link>': 'is it safe? one answer for whatever is pasted', 'GET /api/v1/incidents': 'traced hacks and scams', 'GET /api/v1/flags?since=<ms>&min=high': 'the blocklist: every flagged account (sync with since)', 'GET /api/v1/flags/check?ids=a,b': 'are these accounts flagged?', 'GET /api/v1/incident?id=<id>': 'one incident: attacker accounts, target, losses, victims, money trail', 'GET /api/v1/entity?id=<account>': 'what Safe Near calls an account (exchange, solver, router, person …), why, what it overruled, and its edges in the knowledge graph' } };
 async function firewallApi(req, res, u) {
   const send = (code, body) => res.writeHead(code, { 'content-type': 'application/json', 'cache-control': 'no-store', ...CORS }).end(JSON.stringify(body, noModel));
   if (req.method === 'OPTIONS') { res.writeHead(204, CORS).end(); return; }
@@ -217,6 +218,11 @@ async function firewallApi(req, res, u) {
     const id = String(u.searchParams.get('id') || '').trim().toLowerCase();
     if (!validNearAddress(id)) { send(400, { error: 'id must be a NEAR account' }); return; }
     send(200, await contractReport(id)); return;
+  }
+  if (u.pathname === '/api/v1/entity' && req.method === 'GET') {
+    const id = String(u.searchParams.get('id') || '').trim().toLowerCase();
+    if (!validNearAddress(id)) { send(400, { error: 'id must be a NEAR account' }); return; }
+    send(200, await entityView(id)); return;
   }
   if (u.pathname === '/api/v1/account' && req.method === 'GET') {
     const id = String(u.searchParams.get('id') || '').trim().toLowerCase();
@@ -446,6 +452,12 @@ const routes = {
       col('entities').find(f, { projection: { funded_wallets: 0, sink_wallets: 0, creators_funded: 0, creator_sinks: 0 } }).sort(sort).skip(offset).limit(limit).toArray(),
       col('entities').aggregate([{ $group: { _id: '$type', n: { $sum: 1 } } }, { $sort: { n: -1 } }]).toArray()]);
     return { total, rows: rows.map(strip), types: types.map((x) => ({ type: x._id, n: x.n })) };
+  },
+
+  // the ontology's answer for the UI's account pages (the public, rate-limited one is /api/v1/entity)
+  '/api/ontology': async (u) => {
+    const id = String(u.searchParams.get('id') || '').trim().toLowerCase();
+    return validNearAddress(id) ? entityView(id) : { error: 'id must be a NEAR account' };
   },
 
   '/api/entity': async (u) => {

@@ -20,6 +20,7 @@ It runs as an **MCP server** (Model Context Protocol), so any agent that speaks 
 | `check_transaction` | The transaction check alone, without a policy | `ok` / `caution` / `warn` / `block`, the findings, and the actions in plain words |
 | `check_account` | "Is it safe to pay or trust this?" Takes an account, token, NFT, contract, tx hash, link or website | `safe` / `caution` / `danger`, and any hack it is linked to |
 | `check_contract` | "What can this contract's owner do to me?" | The automated audit: type, powers, who holds them, findings, and a level (low to critical) |
+| `what_is` | "Is this payer really an exchange? A person?" | What Safe Near calls the account (person, exchange hot / cold wallet, NEAR Intents solver, relayer, router, launchpad, contract …), why, what weaker evidence it overruled, and its known links (operator, sweeps, cases) |
 | `plan_scoped_key` | "How do I act for my owner without their full-access key?" | The `AddKey` transaction for a **function-call key** limited to one contract and its methods, with a gas-only allowance (such a key can never send NEAR). The owner signs it once. Also returns the transaction that revokes it |
 
 Transactions are accepted in every shape the firewall reads:
