@@ -18,13 +18,19 @@ import { upstream } from './origin.js';
 import { ownFunds } from './ownfunds.js';
 import { exchangeWalletMap } from './exchanges.js';
 import { view } from '../near/rpc.js';
+import { shadow, comparePass } from '../ontology/shadow.js';
 import { config } from '../config.js';
 
 const IMPLICIT = /^[0-9a-f]{64}$|^0x[0-9a-f]{40}$/;
 // accounts that pass value through rather than own it: wrapping, swapping, intents, launch routers
-const PASS_THROUGH = new Set(['wrap.near', 'intents.near', 'aggregatedex.near', 'v2.ref-finance.near', 'dclv2.ref-labs.near', 'dex.intear.near', 'meteor-relayer.near', 'relay.aurora', 'near']);
+export const PASS_THROUGH = new Set(['wrap.near', 'intents.near', 'aggregatedex.near', 'v2.ref-finance.near', 'dclv2.ref-labs.near', 'dex.intear.near', 'meteor-relayer.near', 'relay.aurora', 'near']);
 const PSEUDO = /^(mint|burn|intents|chain):/;
-export const isRouter = (id) => PASS_THROUGH.has(id) || PSEUDO.test(id);
+export const isRouter = (id) => {
+  if (PSEUDO.test(id)) return true;
+  const r = PASS_THROUGH.has(id);
+  shadow('tracer.pass_through', id, r, comparePass(r)); // ontology shadow mode: compare only
+  return r;
+};
 const FREEZABLE = { 'usdt.tether-token.near': 'Tether can freeze it (add_to_blacklist / destroy_black_funds)', '17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1': 'Circle can freeze it (blacklist)' };
 const MAX_TXS = 800, HOP_TXS = 300;
 // following the money stays bounded: a busy wallet can pay hundreds of accounts, and each implicit one costs a 1Click status lookup

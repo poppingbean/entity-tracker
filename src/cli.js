@@ -29,6 +29,9 @@
 //   node src/cli.js backtest KEY=VALUE ...             replay the gates on every stored check with config.rules changed (e.g. minBuyers=8)
 //   node src/cli.js truth <kind> <id> bad|good|clear [note]   hand label (kind: token|group|wallet|collection)
 //   node src/cli.js feedback [accept|reject <id>]      list pending reports, or review one
+//   node src/cli.js what-is <account>                  the ontology's answer for an account: class, why, conflicts, its edges
+//   node src/cli.js ontology-backfill [--dry]          turn today's data into ontology facts (--dry: check them and the golden set, write nothing)
+//   node src/cli.js ontology-gate [--json]             is the next ontology migration PR ready? (heartbeat, shadow log, golden set)
 import { config, validateConfig } from './config.js';
 import { connectDb, closeDb, col, metaGet } from './db.js';
 import { enableDbLog, flushLogs, info } from './log.js';
@@ -51,11 +54,18 @@ import { checkAi, aiEnabled, aiStatus } from './ai/tools/nearai.js';
 import { evaluateAccuracy, backtest } from './accuracy/run.js';
 import { flagAccount, unflagAccount, checkRequest } from './firewall/service.js';
 import { listFeedback, resolveFeedback, setTruth, clearTruth } from './accuracy/feedback.js';
+import { backfill as ontologyBackfill } from './ontology/backfill.js';
+import { gate as ontologyGate, gateText } from './ontology/gate.js';
+import { whatIs, relationsOf } from './ontology/index.js';
+import { checkGolden } from './ontology/golden.js';
+import { resolve as ontologyResolve } from './ontology/resolve.js';
+import { virtualFacts } from './ontology/known.js';
 
 const [cmd, ...args] = process.argv.slice(2);
 const errs = validateConfig();
 if (errs.length) { for (const e of errs) console.error(`config error: ${e}`); process.exit(1); }
 await connectDb(); enableDbLog();
+config.ontology.shadow = false; // shadow mode measures the production processes, not one-off commands
 
 try {
   if (cmd === 'backfill') {
@@ -256,6 +266,28 @@ try {
       col('wallets').countDocuments({ is_early: true, profiled: true }), col('clusters').countDocuments(), col('clusters').aggregate([{ $group: { _id: '$verdict', n: { $sum: 1 } } }]).toArray(),
     ]);
     console.log(JSON.stringify({ tokens, done, entries, wallets, profiled, clusters, byVerdict: Object.fromEntries(byVerdict.map((r) => [r._id, r.n])), ai: { enabled: aiEnabled(), model: config.ai.model, status: aiStatus.ok }, worker: await metaGet('worker') }, null, 1));
+  } else if (cmd === 'ontology-backfill') {
+    // --dry: build and check every fact, resolve the golden set from them, write nothing
+    const dry = args.includes('--dry');
+    const r = await ontologyBackfill({ dry });
+    if (dry) {
+      const per = new Map();
+      for (const f of r.facts) { if (!per.has(f.subject)) per.set(f.subject, virtualFacts(f.subject)); per.get(f.subject).push(f); }
+      const ents = new Map([...per].map(([a, fs]) => [a, ontologyResolve(a, fs)]));
+      const { GOLDEN } = await import('./ontology/golden.js');
+      for (const [a] of GOLDEN) if (!ents.has(a)) ents.set(a, ontologyResolve(a, virtualFacts(a)));
+      const classes = {}; for (const e of ents.values()) classes[e.class] = (classes[e.class] || 0) + 1;
+      const conflicts = [...ents.values()].filter((e) => e.conflicts.length);
+      console.log(JSON.stringify({ facts: r.facts.length, per: r.per, rejected: r.rejected.length, rejected_sample: r.rejected.slice(0, 5), accounts: ents.size, classes, with_conflicts: conflicts.length,
+        conflict_sample: conflicts.slice(0, 8).map((e) => ({ account: e.account, class: e.class, why: e.why, overruled: e.conflicts.map((c) => `${c.object} (${c.source} ${c.confidence}: ${c.evidence})`) })),
+        golden: checkGolden(ents) }, null, 1));
+    } else console.log(JSON.stringify(r, null, 1));
+  } else if (cmd === 'ontology-gate') {
+    const g = await ontologyGate();
+    console.log(args.includes('--json') ? JSON.stringify(g, null, 1) : gateText(g));
+  } else if (cmd === 'what-is') {
+    const [account] = args;
+    console.log(JSON.stringify({ ...(await whatIs(account)), relations: (await relationsOf(account, { direction: 'both' })).slice(0, 40).map((f) => `${f.subject} ${f.predicate} ${JSON.stringify(f.object)} · ${f.source} ${f.confidence ?? ''} · ${f.evidence || ''}`) }, null, 1));
   } else {
     console.log('commands: backfill <launchpad|all> <hours> | process | creators [max] | ledger [token] | evaluate | review [n] | status | check-ai');
   }

@@ -2,13 +2,19 @@
 // airdrop contracts, and anything the entity table already labels a service, exchange or bridge. Being funded by one, or paying into one,
 // says nothing about who owns a wallet, so groups never link wallets through them.
 
+import { shadow, compareCuts } from '../ontology/shadow.js';
+
 export const SERVICE_NAME = /(^|\.)factory\.|(^|\.)unrlzd\.near$|(^|\.)racerbot\.near$|reward|treasury|airdrop|faucet|payout/i;
 export const SERVICE_TYPES = new Set(['service', 'exchange', 'bridge', 'fund']);
 
 /** The labelled services, from entity docs ({ _id, type }). */
 export const serviceSet = (entities) => new Set((entities || []).filter((e) => SERVICE_TYPES.has(e.type)).map((e) => e._id));
 
-export const isService = (account, services = null) => !!account && (SERVICE_NAME.test(account) || !!services?.has(account));
+export const isService = (account, services = null) => {
+  const r = !!account && (SERVICE_NAME.test(account) || !!services?.has(account));
+  if (account) shadow('grouping.service', account, r, compareCuts(r)); // ontology shadow mode: compare only
+  return r;
+};
 
 /** A platform that creates its users' accounts: most of the wallets it funds are its own sub-accounts (x.trade.unrlzd.near <- trade.unrlzd.near). */
 export const fundsOwnSubaccounts = (anchor, wallets) => {

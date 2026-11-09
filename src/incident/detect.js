@@ -27,7 +27,7 @@ export const PROTOCOLS = new Set(['veax.near', 'v2.ref-finance.near', 'dclv2.ref
   'pembrock.near', 'v1.pembrock.near', 'contract.ref-finance.near', 'factory.bridge.near', 'omft.near', 'aurora', 'token.sweat', 'staker1.msig1.trufin.near']);
 export const PROTOCOL_ROLES = ['amm', 'lending', 'liquid_staking', 'orderbook', 'farm', 'bridge'];
 // accounts that receive from protocols all day as part of normal operation
-const ROUTERS = new Set(['wrap.near', 'intents.near', 'aggregatedex.near', 'v2.ref-finance.near', 'dclv2.ref-labs.near', 'dex.intear.near', 'meteor-relayer.near', 'relay.aurora', 'aurora', 'near', 'system']);
+export const ROUTERS = new Set(['wrap.near', 'intents.near', 'aggregatedex.near', 'v2.ref-finance.near', 'dclv2.ref-labs.near', 'dex.intear.near', 'meteor-relayer.near', 'relay.aurora', 'aurora', 'near', 'system']);
 
 let protoCache = { ts: 0, set: PROTOCOLS };
 async function protocols() {

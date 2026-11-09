@@ -7,6 +7,7 @@ import { connectDb, closeDb } from './db.js';
 import { enableDbLog, flushLogs, info, error } from './log.js';
 import { runWorker, runtime } from './worker.js';
 import { startWeb } from './web/server.js';
+import { startOntology } from './ontology/runtime.js';
 
 const webOnly = process.argv.includes('--web-only'), workerOnly = process.argv.includes('--worker-only');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -21,7 +22,7 @@ let dbReady = false;
 const dbUp = (async () => {
   if (errs.length) return;
   for (let i = 0; !runtime.stopping; i++) {
-    try { await connectDb(); enableDbLog(); dbReady = true; info(`connected to MongoDB "${config.mongo.dbName}"`); return; }
+    try { await connectDb(); enableDbLog(); dbReady = true; info(`connected to MongoDB "${config.mongo.dbName}"`); startOntology(webOnly ? 'web' : workerOnly ? 'worker' : 'all'); return; }
     catch (e) { error(`MongoDB connection failed: ${e.message.split('\n')[0]} - retrying in 15 s (check MONGODB_URI and the Atlas Network Access list)`); await sleep(15000); }
   }
 })();

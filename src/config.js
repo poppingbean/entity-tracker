@@ -78,6 +78,11 @@ export const config = {
     writeUp: process.env.AUTO_AUDIT_WRITE_UP !== 'false',                  // a plain-language AI summary with every audit
   },
   // hacks and scams: live detection of protocol drains (beside the deploy watcher) and the incident tracer
+  // the ontology layer (docs/ontology-design.md): shadow mode compares every module's account decisions with it, changing none
+  ontology: {
+    shadow: process.env.ONTOLOGY_SHADOW !== 'false',
+    backfillEveryHours: num(process.env.ONTOLOGY_BACKFILL_EVERY_HOURS, 24), // re-derive the facts from the other collections (0 = never)
+  },
   incidents: {
     enabled: process.env.INCIDENTS_ENABLED !== 'false',
     minUsd: num(process.env.INCIDENT_MIN_USD, 100000),          // a receiver must take at least this from one protocol within 30 min (only >= $100k)
