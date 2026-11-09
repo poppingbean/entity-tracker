@@ -28,7 +28,7 @@ export const KNOWN = {
   'contract.main.burrow.near': ['contract/lending', 'Rhea (Burrow) lending', 'org:rhea'],
 };
 // Accounts the money tracers treat as pass-through today, outside the classes that pass money anyway.
-export const PASS_THROUGH = new Set(['v2.ref-finance.near', 'dclv2.ref-labs.near']);
+export const PASS_THROUGH = new Set(['v2.ref-finance.near', 'dclv2.ref-labs.near', 'aurora']);
 
 /** A fact made in code. */
 const v = (subject, predicate, object, source, confidence, evidence, by) => ({ subject, predicate, object, source, confidence, evidence, by, virtual: true });

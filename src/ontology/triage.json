@@ -1,7 +1,22 @@
 {
-  "pass_through.detect|aurora": { "cause": "decision", "note": "The Aurora engine is a bridge to Aurora EVM: money sent there leaves NEAR, so it is an endpoint (service/bridge), not pass-through. PR C makes detect.js agree.", "ts": "2026-11-09" },
-  "pass_through.origin|dex.intear.near": { "cause": "old_list_incomplete", "note": "Design 2.1: traced out it passes money through, traced in it was a counterparty. It is a router.", "ts": "2026-11-09" },
-  "pass_through.origin|meteor-relayer.near": { "cause": "old_list_incomplete", "note": "Design 2.1: a relayer in detect and trace, missing from origin.", "ts": "2026-11-09" },
-  "pass_through.origin|relay.aurora": { "cause": "old_list_incomplete", "note": "Design 2.1: a relayer in detect and trace, missing from origin.", "ts": "2026-11-09" },
-  "pass_through.trace|system": { "cause": "old_list_incomplete", "note": "Design 2.1: the system account is pass-through in detect and origin, missing from trace (it never appears in traced flows, so no behaviour changes).", "ts": "2026-11-09" }
+  "pass_through.origin|dex.intear.near": {
+    "cause": "old_list_incomplete",
+    "note": "Design 2.1: traced out it passes money through, traced in it was a counterparty. It is a router.",
+    "ts": "2026-11-09"
+  },
+  "pass_through.origin|meteor-relayer.near": {
+    "cause": "old_list_incomplete",
+    "note": "Design 2.1: a relayer in detect and trace, missing from origin.",
+    "ts": "2026-11-09"
+  },
+  "pass_through.origin|relay.aurora": {
+    "cause": "old_list_incomplete",
+    "note": "Design 2.1: a relayer in detect and trace, missing from origin.",
+    "ts": "2026-11-09"
+  },
+  "pass_through.trace|system": {
+    "cause": "old_list_incomplete",
+    "note": "Design 2.1: the system account is pass-through in detect and origin, missing from trace (it never appears in traced flows, so no behaviour changes).",
+    "ts": "2026-11-09"
+  }
 }

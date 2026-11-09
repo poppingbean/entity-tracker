@@ -14,7 +14,7 @@ export async function explainCheck(result, ctx) {
   const accounts = {};
   const signers = new Set(result.transactions.map((t) => t.signer));
   // only what bears on this transaction's safety: labels, roles, flags and token risk of the other accounts (not the signer, not leads from investigations)
-  for (const [id, a] of ctx.accounts) if (!signers.has(id) && (a.label || a.role || a.flags?.length || a.token?.flags?.length)) accounts[id] = { label: a.label, role: a.role, flags: a.flags?.map((f) => f.reason), token: a.token?.flags?.length ? { symbol: a.token.symbol, flags: a.token.flags } : undefined };
+  for (const [id, a] of ctx.accounts) if (!signers.has(id) && (a.label || a.is || a.role || a.flags?.length || a.token?.flags?.length)) accounts[id] = { label: a.label, is: a.is, role: a.role, flags: a.flags?.map((f) => f.reason), token: a.token?.flags?.length ? { symbol: a.token.symbol, flags: a.token.flags } : undefined };
   const evidence = {
     verdict: result.verdict, risk: result.risk,
     transactions: result.transactions.map((t) => ({ signer: t.signer, receiver: t.receiver, meta: t.meta, actions: t.actions.map((a) => a.text) })),

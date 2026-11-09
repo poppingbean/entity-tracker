@@ -10,6 +10,8 @@ import { nearUsdPrice } from '../near/quotes.js';
 import { accountsIn, TRUSTED } from './rules.js';
 import { enqueueAudit } from '../audit/watcher.js';
 import { shadow, compareFirewall } from '../ontology/shadow.js';
+import { reads, classOf } from '../ontology/sync.js';
+import { classWords } from '../ontology/index.js';
 
 const BUDGET_MS = 2500, CACHE_MS = 60e3, MAX_ACCOUNTS = 40;
 const cache = new Map(); // key -> { ts, value }
@@ -55,6 +57,19 @@ async function trackerFacts(ids) {
   return { toks: new Map(toks.map((t) => [t._id, { ...t, creator_blacklisted: cb.has(t.creator), creator_record: cr.get(t.creator) }])), black: new Map(black.map((b) => [b._id, b])), flags: new Map(flags.map((f) => [f._id, f])), ruggers: new Map(ruggers.map((x) => [x._id, x])) };
 }
 
+const STRONG = new Set(['manual', 'public_report', 'registry', 'audit']);
+/**
+ * The firewall's view of an account, with the ontology (ONTOLOGY_READ=firewall): its class and name in words for the explanation, and
+ * "known dapp" (which softens some warnings) only from strong evidence: never from an account name (a *.tg user is a person, not an app).
+ */
+function withOntology(id, a, au) {
+  const c = classOf(id);
+  if (c.class === 'unknown') return a;
+  const service = c.top === 'service' && c.class !== 'service/intents_solver' && STRONG.has(c.source);
+  return { ...a, label: c.label || a.label, label_type: c.top === 'exchange' ? 'exchange' : c.top === 'service' ? 'service' : c.top === 'person' ? null : a.label_type,
+    is: classWords(c.class), known_dapp: TRUSTED.has(id) || c.trusted || service || !!(au?.available && au.risk_level === 'low') };
+}
+
 /** Build the rules' ctx for decoded transactions. Returns { ctx, complete, accounts_checked }. */
 export async function buildContext(txs) {
   const deadline = Date.now() + BUDGET_MS;
@@ -92,8 +107,10 @@ export async function buildContext(txs) {
       if (au?.risk_level === 'high' || au?.risk_level === 'critical') tf.push(`Contract audit: ${au.risk_level} risk.`);
       token = { symbol: t.symbol || null, rugged: !!t.outcome?.rugged, flags: tf, transfer_fee_pct: t.tax?.transferFeePips ? t.tax.transferFeePips / 1e4 : null };
     }
-    accounts.set(id, { exists: f.exists, contract: f.contract, flags, label: label?.label || null, label_type: label?.type || null, role, known: ka ? ka.note : null,
-      audit: au?.available ? au : null, token, known_dapp: TRUSTED.has(id) || label?.type === 'service' || (au?.available && au.risk_level === 'low') });
+    let acct = { exists: f.exists, contract: f.contract, flags, label: label?.label || null, label_type: label?.type || null, role, known: ka ? ka.note : null,
+      audit: au?.available ? au : null, token, known_dapp: TRUSTED.has(id) || label?.type === 'service' || (au?.available && au.risk_level === 'low') };
+    if (reads('firewall')) acct = withOntology(id, acct, au);
+    accounts.set(id, acct);
   });
 
   // ontology shadow mode: what the firewall believes about each other account vs the ontology (compare only, never awaited)

@@ -6,6 +6,9 @@ import { invalid, factId } from '../src/ontology/index.js';
 import { cutsLinks, fromAuditRole, isA } from '../src/ontology/classes.js';
 import { compareIdentify, comparePass, compareCuts, compareFirewall } from '../src/ontology/shadow.js';
 import { checkGolden, GOLDEN } from '../src/ontology/golden.js';
+import { config } from '../src/config.js';
+import { classOf, passThrough, groupingKind, reads, setReads, confident } from '../src/ontology/sync.js';
+import { diff } from '../src/ontology/replay.js';
 
 const F = (subject, object, source, confidence, extra = {}) => ({ subject, predicate: 'is_a', object, source, confidence, evidence: `${source} ${object}`, ...extra });
 const solve = (a, facts = []) => resolve(a, [...virtualFacts(a), ...facts]);
@@ -109,4 +112,37 @@ test('golden set check', () => {
   assert.equal(r.length, GOLDEN.length);
   // without stored facts the code-level facts already get these right
   for (const a of ['intents.near', 'wrap.near', 'nearlytrade.near', 'meteor-relayer.near', '5115501476.tg', 'contract.main.burrow.near', 'near', 'solver-priv-liq.near']) assert.ok(r.find((x) => x.account === a).ok, a);
+});
+
+// ---- migration steps C-F: the ontology decides (ONTOLOGY_READ)
+
+test('one pass-through rule: what the three old lists named, plus relayers and the system', () => {
+  for (const a of ['wrap.near', 'intents.near', 'aggregatedex.near', 'v2.ref-finance.near', 'dclv2.ref-labs.near', 'dex.intear.near', 'meteor-relayer.near', 'relay.aurora', 'aurora', 'near', 'system']) assert.equal(passThrough(a), true, a);
+  for (const a of ['alice.near', 'binancecold3.near', 'contract.main.burrow.near', 'solver-priv-liq.near', 'bob.tg']) assert.equal(passThrough(a), false, a);
+});
+
+test('grouping kinds from the ontology; no answer keeps the old rules', () => {
+  assert.equal(groupingKind('bob.user.intear.near', 50), 'wallet'); // an app user is a person: links owners
+  assert.equal(groupingKind('bob.tg', 20000), 'hub');               // ... unless it is busy like a hub
+  assert.equal(groupingKind('intents.near'), 'intents');
+  assert.equal(groupingKind('solver-priv-liq.near'), 'intents');
+  assert.equal(groupingKind('meteor-relayer.near'), 'relayer');
+  assert.equal(groupingKind('binancecold3.near'), 'hub');
+  assert.equal(groupingKind('nearlytrade.near'), 'protocol');
+  assert.equal(groupingKind('alice.near'), null);
+  assert.equal(confident(classOf('alice.near')), false);
+});
+
+test('ONTOLOGY_READ switches modules; none is the rollback', () => {
+  const was = config.ontology.read;
+  setReads('pass_through,grouping'); assert.ok(reads('grouping') && !reads('tracer'));
+  setReads('none'); assert.ok(!reads('pass_through'));
+  setReads(was);
+});
+
+test('replay diff: same case, small price moves ignored, status changes reported', () => {
+  const a = { status: 'confirmed', kind: 'exchange_drain', attacker: 'x', target: null, accounts: ['attacker:x'], sources: ['h:exchange'], exits: ['an exchange'], stolen_usd: 1000 };
+  assert.deepEqual(diff(a, { ...a, stolen_usd: 1010 }), []);
+  assert.deepEqual(diff(a, { ...a, status: 'suspected' }), ['status: confirmed → suspected']);
+  assert.match(diff(a, { ...a, sources: ['h:service'] })[0], /^sources: −h:exchange \+h:service/);
 });

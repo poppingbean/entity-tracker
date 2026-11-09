@@ -31,6 +31,8 @@
 //   node src/cli.js feedback [accept|reject <id>]      list pending reports, or review one
 //   node src/cli.js what-is <account>                  the ontology's answer for an account: class, why, conflicts, its edges
 //   node src/cli.js ontology-backfill [--dry]          turn today's data into ontology facts (--dry: check them and the golden set, write nothing)
+//   node src/cli.js ontology-apply [--dry]             recompute the grouping kinds stored on wallets with the current rule, then regroup
+//   node src/cli.js ontology-replay [--json] [--only <id prefix>]   trace every stored case with the old rules and with the ontology, compare (writes nothing)
 //   node src/cli.js ontology-gate [--json]             is the next ontology migration PR ready? (heartbeat, shadow log, golden set)
 import { config, validateConfig } from './config.js';
 import { connectDb, closeDb, col, metaGet } from './db.js';
@@ -282,6 +284,21 @@ try {
         conflict_sample: conflicts.slice(0, 8).map((e) => ({ account: e.account, class: e.class, why: e.why, overruled: e.conflicts.map((c) => `${c.object} (${c.source} ${c.confidence}: ${c.evidence})`) })),
         golden: checkGolden(ents) }, null, 1));
     } else console.log(JSON.stringify(r, null, 1));
+  } else if (cmd === 'ontology-apply') {
+    // recompute the grouping kinds stored on wallets with the current rule (--dry: count only), then regroup
+    const { applyGroupingKinds } = await import('./ontology/apply.js');
+    const dry = args.includes('--dry');
+    const r = await applyGroupingKinds({ dry });
+    console.log(JSON.stringify(r, null, 1));
+    if (!dry) { await evaluateGroups(); console.log('regrouped'); }
+  } else if (cmd === 'ontology-replay') {
+    // every stored case traced twice (old rules, then the ontology) and compared; writes nothing
+    const { replay, replayText } = await import('./ontology/replay.js');
+    const { refreshSnapshot } = await import('./ontology/sync.js');
+    await refreshSnapshot({ force: true });
+    const oi = args.indexOf('--only');
+    const r = await replay({ only: oi >= 0 ? args[oi + 1] : null, log: (l) => console.error(l) });
+    console.log(args.includes('--json') ? JSON.stringify(r, null, 1) : replayText(r));
   } else if (cmd === 'ontology-gate') {
     const g = await ontologyGate();
     console.log(args.includes('--json') ? JSON.stringify(g, null, 1) : gateText(g));

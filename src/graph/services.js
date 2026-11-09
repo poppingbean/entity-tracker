@@ -3,6 +3,7 @@
 // says nothing about who owns a wallet, so groups never link wallets through them.
 
 import { shadow, compareCuts } from '../ontology/shadow.js';
+import { reads, classOf, confident } from '../ontology/sync.js';
 
 export const SERVICE_NAME = /(^|\.)factory\.|(^|\.)unrlzd\.near$|(^|\.)racerbot\.near$|reward|treasury|airdrop|faucet|payout/i;
 export const SERVICE_TYPES = new Set(['service', 'exchange', 'bridge', 'fund']);
@@ -13,7 +14,9 @@ export const serviceSet = (entities) => new Set((entities || []).filter((e) => S
 export const isService = (account, services = null) => {
   const r = !!account && (SERVICE_NAME.test(account) || !!services?.has(account));
   if (account) shadow('grouping.service', account, r, compareCuts(r)); // ontology shadow mode: compare only
-  return r;
+  if (!account || !reads('grouping')) return r;
+  const c = classOf(account);
+  return confident(c) ? c.cuts_links : r; // the ontology decides when it knows the account (ONTOLOGY_READ=grouping)
 };
 
 /** A platform that creates its users' accounts: most of the wallets it funds are its own sub-accounts (x.trade.unrlzd.near <- trade.unrlzd.near). */

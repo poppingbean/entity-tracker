@@ -27,7 +27,11 @@ export const PROTOCOLS = new Set(['veax.near', 'v2.ref-finance.near', 'dclv2.ref
   'pembrock.near', 'v1.pembrock.near', 'contract.ref-finance.near', 'factory.bridge.near', 'omft.near', 'aurora', 'token.sweat', 'staker1.msig1.trufin.near']);
 export const PROTOCOL_ROLES = ['amm', 'lending', 'liquid_staking', 'orderbook', 'farm', 'bridge'];
 // accounts that receive from protocols all day as part of normal operation
+import { reads, passThrough } from '../ontology/sync.js';
+
 export const ROUTERS = new Set(['wrap.near', 'intents.near', 'aggregatedex.near', 'v2.ref-finance.near', 'dclv2.ref-labs.near', 'dex.intear.near', 'meteor-relayer.near', 'relay.aurora', 'aurora', 'near', 'system']);
+/** Passes money through (never a drain receiver, never a case account): the ontology's one rule, or the old list (ONTOLOGY_READ). */
+const isRouter = (id) => (reads('pass_through') ? passThrough(id) : ROUTERS.has(id));
 
 let protoCache = { ts: 0, set: PROTOCOLS };
 async function protocols() {
@@ -42,7 +46,7 @@ export function protocolOutflows(b, protos) {
   const out = [], ts = Number(b.block.header.timestamp_nanosec) / 1e6, height = b.block.header.height;
   for (const s of b.shards || []) for (const ro of s.receipt_execution_outcomes || []) {
     for (const f of flowsOfReceipt(ro, { tx: ro.tx_hash || null, height, ts })) {
-      if (protos.has(f.from) && !ROUTERS.has(f.to) && !protos.has(f.to) && f.kind !== 'mint' && !/^nft:|^intents:/.test(f.token)) out.push({ ...f, protocol: f.from, signer: ro.receipt?.receipt?.Action?.signer_id || null });
+      if (protos.has(f.from) && !isRouter(f.to) && !protos.has(f.to) && f.kind !== 'mint' && !/^nft:|^intents:/.test(f.token)) out.push({ ...f, protocol: f.from, signer: ro.receipt?.receipt?.Action?.signer_id || null });
     }
   }
   return out;
@@ -59,7 +63,7 @@ export function exchangeEvents(b, wallets) {
     }
     for (const f of flowsOfReceipt(ro, { tx: ro.tx_hash || null, height, ts })) {
       const w = wallets.get(f.from);
-      if (w?.kind === 'hot' && !wallets.has(f.to) && !ROUTERS.has(f.to) && !/^(nft|intents|mint|burn):/.test(f.token) && builtinLabel(f.to)?.type !== 'exchange') flows.push({ ...f, exchange: f.from, exchange_name: w.exchange || null });
+      if (w?.kind === 'hot' && !wallets.has(f.to) && !isRouter(f.to) && !/^(nft|intents|mint|burn):/.test(f.token) && builtinLabel(f.to)?.type !== 'exchange') flows.push({ ...f, exchange: f.from, exchange_name: w.exchange || null });
     }
   }
   return { flows, keys };
@@ -146,7 +150,7 @@ async function followStolen(blocks) {
       if ((v.usd || 0) < C.followMinUsd) continue;
       const idleH = src.last_out_ts && f.ts > src.last_out_ts ? (f.ts - src.last_out_ts) / 3600e3 : null; // how long the money sat still
       const swap = /^[0-9a-f]{64}$/.test(f.to) ? await oneClickSwap(f.to).catch(() => null) : null;
-      const where = swap ? `a 1Click swap to ${swap.asset} on ${swap.chain}${swap.recipient ? ` (${swap.recipient})` : ''}` : builtinLabel(f.to)?.label || (ROUTERS.has(f.to) ? f.to : `${f.to.slice(0, 16)}…`);
+      const where = swap ? `a 1Click swap to ${swap.asset} on ${swap.chain}${swap.recipient ? ` (${swap.recipient})` : ''}` : builtinLabel(f.to)?.label || (isRouter(f.to) ? f.to : `${f.to.slice(0, 16)}…`);
       const move = { _id: `${f.tx}:${f.receipt}:${f.to}:${f.token}`, incident: src.incident, from: f.from, role: src.role, to: f.to, token: f.token, symbol: v.symbol, amount: v.amount, usd: Math.round(v.usd || 0), tx: f.tx, ts: f.ts, idle_h: idleH != null ? Math.round(idleH) : null, swap: swap || null };
       const r = await col('incident_moves').updateOne({ _id: move._id }, { $setOnInsert: move }, { upsert: true });
       if (!r.upsertedCount) continue;
@@ -156,9 +160,9 @@ async function followStolen(blocks) {
         title: `${woke ? `Stolen funds woke up after ${idleH >= 48 ? Math.round(idleH / 24) + ' days' : Math.round(idleH) + ' hours'}: ` : 'Stolen funds moved: '}${Math.round(v.amount).toLocaleString('en-US')} ${v.symbol} (~$${Math.round(v.usd).toLocaleString('en-US')}) from ${f.from.slice(0, 14)}…`,
         text: `From the ${src.role.replace(/_/g, ' ')} of incident ${src.incident.replace(/^inc:/, '').slice(0, 16)}… to ${where}.`, url: `/firewall/${encodeURIComponent(src.incident)}`, related: { wallets: [f.from, f.to] }, data: move, ts: f.ts });
       // the receiver joins the incident (flagged, followed from now on) unless it is a router or a swap service
-      const toState = !ROUTERS.has(f.to) && !swap && !builtinLabel(f.to) ? await viewAccount(f.to).catch(() => null) : null;
+      const toState = !isRouter(f.to) && !swap && !builtinLabel(f.to) ? await viewAccount(f.to).catch(() => null) : null;
       const toContract = !!toState && (toState.code_hash !== '11111111111111111111111111111111' || !!toState.global_contract_hash || !!toState.global_contract_account_id);
-      if (!ROUTERS.has(f.to) && !swap && !builtinLabel(f.to) && !toContract) { // a protocol deposit is a destination, never flagged
+      if (!isRouter(f.to) && !swap && !builtinLabel(f.to) && !toContract) { // a protocol deposit is a destination, never flagged
         await col('incidents').updateOne({ _id: src.incident, 'accounts.account': { $ne: f.to } }, { $push: { accounts: { account: f.to, role: 'cash_out_wallet', ts: f.ts, live: true } } });
         await col('firewall_flags').updateOne({ _id: f.to }, { $setOnInsert: { _id: f.to, severity: 'high', reason: 'received stolen funds', detail: `Received ${Math.round(v.amount).toLocaleString('en-US')} ${v.symbol} from an account of incident ${src.incident}.`, ts: Date.now(), source: 'incident', incident: src.incident } }, { upsert: true });
         map.set(f.to, { incident: src.incident, role: 'cash_out_wallet', root: src.root, last_out_ts: null });
