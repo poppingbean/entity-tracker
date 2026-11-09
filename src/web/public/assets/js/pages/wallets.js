@@ -159,7 +159,7 @@ function onchainWalletPage(id, v) {
 }
 
 async function walletPage(id) {
-  const w = await get('/api/wallet', { id });
+  const [w, ont] = await Promise.all([get('/api/wallet', { id }), ontologyOf(id)]);
   if (w.onchain) return onchainWalletPage(w.id, w.onchain);
   const s = w.stats || {}, c = w.cluster;
   let h = `<div class="card">${crumbs([['Wallets', '/wallets'], [short(w.id, 40)]])}<div style="float:right;position:relative">${reportBtn('wallet', w.id)} ${watchBtn('wallet', w.id)}</div>${''}
@@ -170,6 +170,7 @@ async function walletPage(id) {
     <div class="meta" style="margin:-4px 0 14px">Tag groups: ${tagGroupChips(w)}</div>
     <div class="tiles">${tile('Tokens bought early', s.tokens_n ?? '–', `${s.entries_n ?? '–'} entries`)}${tile('Profitable tokens', pct(s.profit_rate), 'share of its early tokens that ended in profit', (s.profit_rate ?? 0) >= 0.5 ? 'g' : (s.profit_rate ?? 1) < 0.3 ? 'r' : 'a')}${tile('Weighted ROI', pct(s.roi_weighted), null, roiCls(s.roi_weighted))}
       ${tile('P&L', signed(s.pnl_near) + ' N', `${n(s.total_buy_near, 1)} N bought`, roiCls(s.pnl_near))}${tile('Realized P&L', signed(s.realized_near) + ' N', 'taken out of the tokens sold', roiCls(s.realized_near))}${tile('Unrealized P&L', signed(s.unrealized_near) + ' N', 'still held, at the latest price', roiCls(s.unrealized_near))}${tile('Rugged tokens', pct(s.rug_share), null, (s.rug_share ?? 0) >= 0.4 ? 'r' : '')}${tile('Main funder', w.funder ? esc(short(w.funder, 20)) : '–', esc(w.funder_kind || ''))}</div></div>`;
+  h += ontologyCard(ont);
   if ((w.cobuy_partners || []).length) h += `<div class="card"><h2>Co-buy partners <span class="muted">bought within seconds of it in several launches · behaviour, not proof of one owner</span></h2><table><tr><th>Wallet</th><th class="num">Launches bought together</th></tr>
     ${w.cobuy_partners.map((p) => `<tr ${row(P.wal(p.wallet))}><td>${walLink(p.wallet)}</td><td class="num">${p.tokens}</td></tr>`).join('')}</table></div>`;
   h += `<div class="card"><h2>Early entries <span class="muted">${w.entries.length}</span></h2><table><tr><th>Token</th><th>Bought</th><th>Tx</th><th class="num">Rank</th><th class="num">Delay</th><th class="num">NEAR in</th><th class="num">ROI 1h</th><th class="num">ROI 6h</th><th class="num">ROI 24h</th><th class="num">Now</th><th class="num" title="NEAR taken out minus the cost of the tokens sold">Realized N</th><th class="num" title="still held, valued at the latest price, minus its cost">Unrealized N</th><th>Rug</th></tr>
@@ -197,13 +198,14 @@ views.entities = async () => {
 };
 
 async function entityPage(id) {
-  const e = await get('/api/entity', { id }), v = e.funded_verdicts || {};
+  const [e, ont] = await Promise.all([get('/api/entity', { id }), ontologyOf(id)]), v = e.funded_verdicts || {};
   let h = `<div class="card">${crumbs([['Funders & entities', '/entities'], [short(e.label || e.id, 40)]])}
     <div class="dh-main">${avatar(e.id, e.label || e.id, 54)}<div style="min-width:0"><h1>${esc(e.label || e.id)} <span class="chip">${esc(e.type)}</span>${tags(e.roles)}</h1>
       <div class="meta"><span class="acct">${esc(e.id)}</span><span>kind ${esc(e.kind)}</span><span>${e.tx_count ?? '–'} txs</span>${e.label_source ? `<span>label from ${esc(e.label_source)}</span>` : ''}${ACCT_RE.test(e.id) ? ext(nbAddr(e.id), 'NearBlocks ↗') : ''}</div></div></div>`;
   if (e.funded_n) h += `<div class="tiles">${tile('Early wallets funded', e.funded_n, `${n(e.funded_near, 0)} N sent`)}${tile('Tokens they bought', e.tokens_n ?? '–')}${tile('Their P&L', signed(e.funded_pnl_near) + ' N', pct(e.funded_roi), roiCls(e.funded_pnl_near))}${tile('Winning wallets', `${e.funded_winners}/${e.funded_judged}`)}
     ${tile('Their wallets by tag', fundedTags(v), 'win80+win50+sniper / win30 / loss / unrated')}</div>`;
   h += '</div>';
+  h += ontologyCard(ont);
   if (e.creators_funded_n || e.creator_sink_n) h += `<div class="card"><div class="tiles">${tile('Token creators funded', e.creators_funded_n || 0, `${n(e.creators_funded_near, 0)} N sent`)}${tile('Creators that rugged', e.creators_rugged_n || 0, e.creators_funded_n ? pct(e.creators_rugged_n / e.creators_funded_n) + ' of them' : null, e.creators_rugged_n ? 'r' : 'g')}
       ${tile('Their launches', e.creator_launches || 0)}${tile('Rugged tokens', e.creator_rugged_tokens || 0, e.creator_launches ? pct(e.creator_rug_rate) + ' of their launches' : null, e.creator_rugged_tokens ? 'r' : 'g')}${tile('Creators cashing out to it', e.creator_sink_n || 0, e.creator_sink_n ? `${n(e.creator_sink_near, 0)} N · ${e.creator_sink_rugged_n} rugged` : null, e.creator_sink_rugged_n ? 'r' : '')}</div></div>`;
   if (e.type === 'exchange') h += '<div class="card warn">An exchange wallet funds many unrelated customers, so funding from it links nothing by itself. The numbers show how much early-market flow came out of it.</div>';

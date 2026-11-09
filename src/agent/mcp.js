@@ -5,11 +5,11 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { transactionsOf, policyViolations, decide, scopedKeyPlan, findSecret, DANGEROUS_ACTIONS } from './policy.js';
 
-export const AGENT_GUARD_VERSION = '1.0.0';
+export const AGENT_GUARD_VERSION = '1.1.0';
 const INSTRUCTIONS = `Safe Near checks NEAR Protocol transactions, accounts and contracts for an AI agent.
 Before signing or sending ANY NEAR transaction, call guard_transaction with the transaction and the owner's policy, and follow its decision:
 "allow" = go ahead, "ask_human" = stop and ask the person you work for, "block" = do not sign, tell the person why.
-Before paying or trusting an unknown account, token or link, call check_account. Before calling an unknown contract, call check_contract.
+Before paying or trusting an unknown account, token or link, call check_account. Before calling an unknown contract, call check_contract. To know what an account is (an exchange, a solver, a person), call what_is.
 To act for someone without holding their full-access key, call plan_scoped_key and ask them to sign the key it returns, once.
 Never send a private key or a seed phrase to these tools: they never need one, and they refuse it.`;
 
@@ -97,6 +97,18 @@ export function createAgentGuard(api) {
     if (r.status && r.status !== 'ok') return reply(`No audit yet for ${account} (${r.status}). Treat it as unknown: ask a human before calling it.`, r);
     const f = (r.findings || []).filter((x) => x.severity !== 'info').slice(0, 6).map((x) => `${x.severity}: ${x.title}`);
     return reply(`${String(r.level || 'unknown').toUpperCase()}: ${r.type?.label || r.type?.role || 'contract'}${r.control?.summary ? ` · control: ${r.control.summary}` : ''}${r.summary?.headline ? `\n${r.summary.headline}` : ''}${f.length ? `\nFindings:\n${lines(f)}` : ''}`, r);
+  }));
+
+  server.registerTool('what_is', {
+    title: 'What is this account?',
+    description: 'What Safe Near calls a NEAR account (a person, an exchange hot or cold wallet, a NEAR Intents solver, a relayer, a router, a launchpad, a contract …), why, what weaker evidence it overruled, and its known links: who operates it, where it sweeps, who it funded, which hacks it played a role in. Use it before treating a payer or a receiver as "an exchange" or "a person".',
+    inputSchema: { account: z.string().min(2).max(64).describe('A NEAR account, e.g. solver-priv-liq.near or a 64-hex implicit account') },
+    annotations: READ_ONLY,
+  }, guarded(async ({ account }) => {
+    const r = await api.whatIs(account.trim().toLowerCase());
+    const extra = [r.operator && `operated by ${r.operator.replace(/^org:/, '')}`, r.pass_through && 'passes money through (an endpoint, not an owner)', r.flagged && `flagged ${r.flagged.severity}: ${r.flagged.reason || ''}`,
+      ...(r.cases || []).map((c) => `${c.role || 'involved'} in ${c.case} (${c.status || 'case'})`), ...(r.overruled || []).map((o) => `overruled: ${o.is} (${o.source}: ${o.evidence || ''})`)].filter(Boolean);
+    return reply(`${r.account} is ${r.is}${r.label ? ` (${r.label})` : ''}. Why: ${r.why}${extra.length ? `\n${lines(extra)}` : ''}`, r);
   }));
 
   server.registerTool('plan_scoped_key', {
