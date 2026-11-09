@@ -175,23 +175,27 @@ type is its resolved class. No graph database: the edge list is `ontology_facts`
 | class | `exchange/hot_wallet`, `service/intents_solver` … | the class tree; target of `is_a` |
 | operator | `org:binance`, `org:near-intents`, `org:rhea` | a named organisation behind accounts |
 | case | `inc:31ac7a27…` | the `incidents` collection |
-| group | `grp:<id>` | wallet grouping (`clusters`) |
+| group | `grp:<id>`; `grp:known:<n>` for a `KNOWN_ACTORS` group | wallet grouping (`clusters`), `KNOWN_ACTORS` |
 
 ### 5.2 Edges (schema)
 
-| predicate | from → to | written by | example |
+"Written by" is what writes the edge **today**: the backfill writers (`backfill/<collection>`) or the code-level facts (`known.js`, computed, never stored). Step G moves the writing into the modules themselves.
+
+| predicate | from → to | written by (today) | example |
 |---|---|---|---|
-| `is_a` | account → class | every writer | `binancecold3.near` is_a `exchange/cold_wallet` |
-| `operated_by` | account → operator | registry, labels | the 3 Binance hot wallets → `org:binance` |
-| `swept_to` | account → account | exchange registry | hot / deposit → `binancecold3.near` |
-| `funded` | account → account | trace, graph profiler | first payer of a new wallet (edge carries amount, token, tx, time) |
-| `solver_for` | account → account | `intentsSolver()` | `solver-priv-liq.near` → `intents.near` |
-| `controls` | account → account | audit | owner / DAO / multisig → contract |
-| `deployed`, `created_by` | account → account | audit, trace | attacker → fake token |
-| `member_of` | account → group | grouping | early wallets of one buyer |
-| `role_in` | account → case | tracer, `confirm-incident` | attacker / accomplice / victim / cash_out_wallet / fake_token / contract |
-| `flagged` | account → severity | firewall flags, cases | `critical`, with the reason as evidence |
-| `pass_through` | account → `true` | manual, class rule | `wrap.near` |
+| `is_a` | account → class | every writer, `known.js` | `binancecold3.near` is_a `exchange/cold_wallet` |
+| `label` | account → text | `labels`, `known.js`, entity hand labels | `intents.near` → "NEAR Intents" |
+| `operated_by` | account → operator | `exchange_wallets`, `labels`, `known.js` | the Binance hot wallets → `org:binance` |
+| `swept_to` | account → account | `exchange_wallets` | hot → `binancecold3.near` |
+| `funded` | account → account | `entities` (the early wallets each entity funded) | the edge carries the NEAR amount, tx and time |
+| `solver_for` | account → account | the solver check in the backfill (`intentsSolver()`) | a busy account settling through `intents.near` |
+| `controls` | account → account | audits | owner / DAO / multisig → contract |
+| `deployed`, `created_by` | account → account | **not written yet** (step G: the tracer and the deploy watcher) | attacker → fake token |
+| `member_of` | account → group | `clusters`, `KNOWN_ACTORS` | early wallets of one buyer |
+| `role_in` | account → case | incidents (`public_report` when confirmed by a report, else `trace`) | attacker / accomplice / victim / target / cash_out_wallet / fake_token |
+| `flagged` | account → severity | `firewall_flags` | `critical`, with the reason as evidence |
+| `pass_through` | account → `true` | `known.js` (plus the router, relayer and system classes) | `wrap.near`, `aurora` |
+| `trusted` | account → `true` | `known.js` (the firewall's trusted dapps) | `contract.main.burrow.near` |
 
 Every edge keeps the fact fields: `source`, `confidence`, `evidence`, `by`, `valid_from` / `valid_to`. A query can ask for "edges a
 person would accept" (`source ≥ trace`, `confidence ≥ 0.7`, still valid) and get a smaller, trusted graph.
@@ -205,8 +209,8 @@ The 2026-11-04 false drain was a **graph error**: money from two solvers was rea
   through NEAR Intents") and stops. Two wallets paid by the same solver are **not** linked.
 - **Labels do not spread along `funded`.** Being paid by an attacker does not make an account an attacker. Only `role_in` with
   a role, written by the tracer or a public report, does.
-- **Derived facts can be undone.** A fact made from other facts stores `derived_from: [fact ids]`, `source` = the weakest source
-  it used. When a case is cleared (`valid_to` set), everything derived from it closes too.
+- **Derived facts can be undone.** Today this holds through the backfill: each run closes every fact it did not see again, so a dropped exchange wallet's facts close within a day, and a cleared case's `role_in` facts close at the next run, dated to the clear time. Explicit `derived_from: [fact ids]` links, for facts made from other facts, are not built yet; they come with step G, when facts are no longer re-derived daily.
+- **The ontology's own output is never evidence** (6.3). Kinds and labels that modules computed by reading the ontology must not come back as facts.
 
 ### 5.4 Storage and queries
 
@@ -214,15 +218,16 @@ Indexes on `ontology_facts`: `{subject, predicate, valid_to}`, `{object, predica
 
 | question | how |
 |---|---|
-| what is X and why | `whatIs(X)`: one lookup in `ontology_entities` |
-| X's neighbours | `relationsOf(X, {predicate, direction})`: one indexed query each way |
-| who is behind this contract | `controls` in, then `operated_by` / `member_of` of the controller |
-| the whole case | every `role_in` → `inc:…`, plus the `funded` / `swept_to` edges between those accounts |
-| where did the money go | walk `funded` out from the case accounts, ≤ 6 hops, stop at hubs (5.3) |
-| is this receiver close to a known bad account | 2-hop walk, hubs cut, any `flagged` or attacker `role_in` (the firewall; within its 2.5 s budget, so batched with `whatIsMany`) |
+| question | how | built? |
+|---|---|---|
+| what is X and why | `whatIs(X)`: one indexed query on the facts plus the code-level facts, cached 60 s; `classOf(X)` from the in-memory snapshot for tight loops | yes |
+| X's neighbours | `relationsOf(X, {predicate, direction})`: one indexed query each way | yes (the account card, `/api/v1/entity`, `what_is`) |
+| who is behind this contract | `controls` in, then `operated_by` / `member_of` of the controller | the edges exist; no query uses them yet |
+| the whole case | every `role_in` → `inc:…`, plus the `funded` / `swept_to` edges between those accounts | the edges exist; the case page still reads `incidents` |
+| where did the money go | walk `funded` out from the case accounts, ≤ 6 hops, stop at hubs (5.3) | no: the tracer's own `followMoney` follows the chain, and asks the ontology only where to stop |
+| is this receiver close to a known bad account | 2-hop walk, hubs cut, any `flagged` or attacker `role_in` (the firewall, within its 2.5 s budget) | no: the firewall checks the account itself (`firewall_flags`), not its neighbours |
 
-Walks run in JS (breadth first, one batched query per hop, `whatIsMany` to cut hubs), not `$graphLookup`, because the stop rule
-needs the resolved class of each account.
+Walks, when they are built, run in JS (breadth first, one batched query per hop, the snapshot to cut hubs), not `$graphLookup`, because the stop rule needs the resolved class of each account.
 
 ## 6. Migration: what was planned, what was done
 
