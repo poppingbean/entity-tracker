@@ -9,6 +9,7 @@ import { accountRole, KNOWN_ACTORS } from '../analysis/prompt.js';
 import { nearUsdPrice } from '../near/quotes.js';
 import { accountsIn, TRUSTED } from './rules.js';
 import { enqueueAudit } from '../audit/watcher.js';
+import { shadow, compareFirewall } from '../ontology/shadow.js';
 
 const BUDGET_MS = 2500, CACHE_MS = 60e3, MAX_ACCOUNTS = 40;
 const cache = new Map(); // key -> { ts, value }
@@ -94,6 +95,9 @@ export async function buildContext(txs) {
     accounts.set(id, { exists: f.exists, contract: f.contract, flags, label: label?.label || null, label_type: label?.type || null, role, known: ka ? ka.note : null,
       audit: au?.available ? au : null, token, known_dapp: TRUSTED.has(id) || label?.type === 'service' || (au?.available && au.risk_level === 'low') });
   });
+
+  // ontology shadow mode: what the firewall believes about each other account vs the ontology (compare only, never awaited)
+  for (const [id, a] of accounts) if (!signers.includes(id)) shadow('firewall.context', id, { severity: T.flags.get(id)?.severity || null, exchange: a.label_type === 'exchange' }, compareFirewall);
 
   // token metadata for amounts, and what the signer holds (balance, keys, token balances) when the transaction moves it
   const tokenIds = [...new Set(txs.flatMap((t) => t.actions.filter((a) => a.kind === 'function_call' && /^ft_transfer/.test(a.method)).map(() => t.receiver)))];

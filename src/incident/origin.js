@@ -13,8 +13,9 @@ import { viewAccount } from '../audit/rpc.js';
 import { builtinLabel } from '../labels.js';
 import { flowsOfTx } from './flows.js';
 import { valueOf } from './prices.js';
+import { shadow, compareIdentify, comparePass } from '../ontology/shadow.js';
 
-const ROUTERS = new Set(['wrap.near', 'intents.near', 'aggregatedex.near', 'v2.ref-finance.near', 'dclv2.ref-labs.near', 'system', 'near']);
+export const ROUTERS = new Set(['wrap.near', 'intents.near', 'aggregatedex.near', 'v2.ref-finance.near', 'dclv2.ref-labs.near', 'system', 'near']);
 const PSEUDO = /^(mint|burn|intents|chain|nft):/;
 const cache = new Map();
 const firstTx = async (id) => {
@@ -50,6 +51,7 @@ export async function identify(id) {
     out = contract ? { kind: 'contract', name: b?.label || null, how: 'has code' } : { kind: 'wallet', name: b?.label || null, how: null };
   }
   out = { ...out, tx_count: first?.total ?? null, first_ts: first?.ts ?? null };
+  shadow('tracer.identify', id, out.kind, compareIdentify(out.kind)); // ontology shadow mode: compare only
   cache.set(id, out);
   if (cache.size > 2000) cache.delete(cache.keys().next().value);
   return out;

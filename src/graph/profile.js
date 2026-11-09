@@ -6,11 +6,17 @@ import { info, warn } from '../log.js';
 import { accountPage, accountRows, fetchTxs } from '../near/indexer.js';
 import { INFRA } from '../collect/trades.js';
 import { yoctoToNear } from '../near/rpc.js';
+import { shadow, compareCuts } from '../ontology/shadow.js';
 
 const HUB_TX_COUNT = 15000; // an account with this many transactions is an exchange hot wallet / market maker / bot, not a person
 
 /** What kind of account this is, for deciding whether sharing it says anything about common ownership. */
 export function classifyAccount(account, txCount) {
+  const k = classifyAccountNow(account, txCount);
+  if (account && (txCount != null || k !== 'wallet')) shadow('grouping.classify', account, k, compareCuts(k !== 'wallet')); // ontology shadow mode: compare only
+  return k;
+}
+function classifyAccountNow(account, txCount) {
   if (!account) return 'unknown';
   if (account === 'intents.near') return 'intents';
   if (account === 'near') return 'protocol';
