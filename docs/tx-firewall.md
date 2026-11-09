@@ -89,6 +89,8 @@ The verdict always comes from deterministic rules; the AI explanation can never 
 | `ai_manipulation` | medium | The call data contains text aimed at AI or automated reviewers |
 | `meta_transaction`, `new_account_key`, `binary_args` | info | Context only |
 
+**A known DEX or app** (which turns some of these warnings off): a contract users interact with every day (the built-in trusted list), one the [ontology](ontology-design.md) knows as a service from strong evidence (a hand label, the exchange registry, the contract audit), or a contract whose automated audit is low risk. An account name alone never makes it known: the account of a wallet-app user (`*.tg`, `*.user.intear.near`) is a person, so attaching NEAR to it is `deposit_to_unknown`.
+
 ## `GET /api/v1/entity?id=<account>`
 
 What Safe Near calls an account (its [ontology](ontology-design.md)): the class, in words, why, what weaker evidence was overruled, and the account's edges in the knowledge graph (operator, sweeps, funding, cases it played a role in, groups):

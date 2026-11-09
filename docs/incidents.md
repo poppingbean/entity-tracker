@@ -92,7 +92,7 @@ The deploy watcher already reads every block from neardata; the same blocks feed
 - a built-in list (Veax, Ref, Rhea / Burrow, Meta Pool, LiNEAR, launchpads …);
 - every contract the automated audit typed as an AMM, lending, liquid staking, order book, farm or bridge.
 
-Routers (`wrap.near`, `intents.near`, aggregators) and protocol-to-protocol moves are left out.
+Pass-through accounts and protocol-to-protocol moves are left out. Pass-through is one rule from the [ontology](ontology-design.md), shared by the detector and both tracers: routers (`wrap.near`, `intents.near`, aggregators, `dex.intear.near`), relayers, the Aurora engine and the system accounts.
 
 **When it fires.** A receiver that took at least `INCIDENT_MIN_USD` ($5,000) from one protocol is a suspect when:
 - its account is younger than `INCIDENT_FRESH_HOURS` (72 h); or
@@ -217,7 +217,8 @@ Replaying the drain's blocks, the exchange-drain detector flags the first transf
 - **1Click lookups:** a rate limit or timeout is retried and never cached. A deposit address whose status still cannot be read, but whose money only went to `bridge-mng.near`, is listed as a 1Click service account, never flagged.
 - **Contract scan:** `target:<contract>` reads up to 6,000 recent transactions. A very busy contract's window is cut, and the answer says so.
 - **Drainers:** wallets drained through a stolen key are traced from the attacker's account. The live detector watches protocol outflows and exchange hot wallets, not ordinary wallets.
-- **Exchange wallets:** a hot wallet is recognised only if the tracker has seen it (`entities`, kind `hub`) or it is busy enough (20,000+ transactions). Naming the exchange needs it to send its reserves to an exchange-named account. Otherwise it reads "Unnamed exchange hot wallet".
+- **Exchange wallets:** the tracer asks the [ontology](ontology-design.md) first. A wallet in the exchange registry that sweeps to an exchange's cold wallet, a hand label, or an exchange name is an exchange, named after its operator ("Binance hot wallet"); a NEAR Intents solver is a service. Only an account the ontology knows nothing about falls back to the on-chain checks: busy enough (20,000+ transactions, or a grouping hub) and not a solver means an exchange hot wallet. It is named only if it sends its reserves to an exchange-named account; otherwise it reads "Unnamed exchange hot wallet".
+- **Where a trail stops:** at a named exchange (the deposit), a bridge, a NEAR Intents solver (a swap) or another chain. An account known only as busy is still followed.
 
 **Tags.** A finding starts plain and only ends grave with proof: **Large transfer** (found, being checked) → **Normal** (explained: routine, own funds) or **Watching** (checked, not explained yet) → **Hack**, **Exploited** (a protocol exploit) or **Rugged**, only for a case with the rules' attacker signal. Alerts read the same way ("Large transfer from an exchange hot wallet … (being checked)"). Moves of funds are shown and alerted only for proven cases; a case cleared later retracts its move alerts.
 
