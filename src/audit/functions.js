@@ -44,7 +44,7 @@ export async function aiFunctionReview(code, functions, strings = []) {
   const evidence = { audit: { type: code.label || code.role, standards: code.standards, powers: (code.powers || []).map((p) => ({ power: p.power, methods: p.methods })) },
     functions: functions.slice(0, 120).map((f) => ({ method: f.method, kind: f.kind, effects: f.effects, size: f.size })), strings: strings.slice(0, 40), source: code.source || null };
   const { user, findings } = evidenceMessage('Contract functions to explain:', evidence);
-  const { json, model } = await chatJSON({ system: SYSTEM + UNTRUSTED_RULE, user, model: config.ai.model, maxTokens: 4000, timeoutMs: config.ai.analysisTimeoutMs, attempts: 2 }).catch(() => ({}));
+  const { json, model } = await chatJSON({ system: SYSTEM + UNTRUSTED_RULE, user, model: config.ai.model, maxTokens: 8000, timeoutMs: config.ai.analysisTimeoutMs, attempts: 2 }).catch(() => ({})); // Haiku counts its reasoning in the same budget
   if (!Array.isArray(json?.functions)) return null;
   const rules = new Map(functions.map((f) => [f.method, f]));
   const items = json.functions.filter((x) => rules.has(x?.method)).map((x) => {

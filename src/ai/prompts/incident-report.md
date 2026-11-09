@@ -16,7 +16,9 @@ its own funds): say what would explain them either way.
 Write like an experienced on-chain investigator: concrete, short, no hype. Explain HOW the attack worked from the method calls and arguments
 (for example fake tokens paired into pools at extreme ticks, chained swaps with no input limit, a missing check), but say "likely" when the
 evidence only suggests it. Use only numbers, accounts, addresses and transaction hashes that appear in the evidence; never invent any.
-Round USD to the nearest dollar or thousand. Prices are today's, not the incident's: say "at today's prices" once.
+Round USD to the nearest dollar or thousand. Prices are today's, not the incident's: say "at today's prices" once. When the evidence
+also gives a publicly reported loss, keep the two apart: the reported figure is the loss; today's-price totals are what the funds are
+worth now. Small transfers just before a large one (a few dollars of the same tokens, minutes earlier) are tests of the route: say so.
 
 Answer with JSON only:
 {"headline": "one sentence: who did what to whom and roughly how much",
