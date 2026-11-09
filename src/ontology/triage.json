@@ -18,5 +18,20 @@
     "cause": "old_list_incomplete",
     "note": "Design 2.1: the system account is pass-through in detect and origin, missing from trace (it never appears in traced flows, so no behaviour changes).",
     "ts": "2026-11-09"
+  },
+  "pass_through.origin|aurora": {
+    "cause": "decision",
+    "note": "The Aurora engine is pass-through everywhere (since PR #74): money sent there leaves NEAR, and drain detection must never treat an exchange's bridge deposit as a drain. The old origin/trace lists lacked it.",
+    "ts": "2026-11-09"
+  },
+  "pass_through.trace|aurora": {
+    "cause": "decision",
+    "note": "The Aurora engine is pass-through everywhere (since PR #74): money sent there leaves NEAR, and drain detection must never treat an exchange's bridge deposit as a drain. The old origin/trace lists lacked it.",
+    "ts": "2026-11-09"
+  },
+  "tracer.pass_through|aurora": {
+    "cause": "decision",
+    "note": "The Aurora engine is pass-through everywhere (since PR #74): money sent there leaves NEAR, and drain detection must never treat an exchange's bridge deposit as a drain. The old origin/trace lists lacked it.",
+    "ts": "2026-11-09"
   }
 }
