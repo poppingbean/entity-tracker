@@ -19,6 +19,7 @@ import { ownFunds } from './ownfunds.js';
 import { exchangeWalletMap } from './exchanges.js';
 import { view } from '../near/rpc.js';
 import { shadow, comparePass } from '../ontology/shadow.js';
+import { reads, passThrough, classOf } from '../ontology/sync.js';
 import { config } from '../config.js';
 
 const IMPLICIT = /^[0-9a-f]{64}$|^0x[0-9a-f]{40}$/;
@@ -29,7 +30,7 @@ export const isRouter = (id) => {
   if (PSEUDO.test(id)) return true;
   const r = PASS_THROUGH.has(id);
   shadow('tracer.pass_through', id, r, comparePass(r)); // ontology shadow mode: compare only
-  return r;
+  return reads('pass_through') ? passThrough(id) : r;
 };
 const FREEZABLE = { 'usdt.tether-token.near': 'Tether can freeze it (add_to_blacklist / destroy_black_funds)', '17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1': 'Circle can freeze it (blacklist)' };
 const MAX_TXS = 800, HOP_TXS = 300;
@@ -291,10 +292,17 @@ function destKind(id) {
   if (id.startsWith('chain:')) return 'withdrawn to another chain';
   if (id === 'intents.near') return 'NEAR Intents';
   const l = builtinLabel(id);
-  if (l?.kind === 'exchange') return `exchange (${l.name})`;
+  if (reads('tracer')) {
+    const c = classOf(id);
+    // a named exchange (registry sweeps, hand labels, its name) is where money is cashed out; an account only known as busy is followed
+    if (c.top === 'exchange' && c.operator) return `exchange (${c.label || c.operator.replace(/^org:/, '')})`;
+    if (c.class === 'service/bridge') return 'bridge';
+    if (c.class === 'service/intents_solver') return 'NEAR Intents solver';
+  }
+  if (l?.type === 'exchange') return `exchange (${l.label})`; // (read l.kind / l.name before: never matched)
   if (/bridge|omft\.near$|\.factory\.bridge\.near$|rainbow|aurora$/.test(id)) return 'bridge';
-  if (PASS_THROUGH.has(id) || /ref-finance|ref-labs|veax|dex|swap|router/.test(id)) return 'DEX';
-  if (l?.kind) return l.name;
+  if (isRouter(id) || /ref-finance|ref-labs|veax|dex|swap|router/.test(id)) return 'DEX';
+  // other labels (wallet apps such as "Telegram wallet") are people's wallets: followed, never an endpoint
   return null; // a wallet
 }
 

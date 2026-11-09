@@ -14,10 +14,15 @@ import { builtinLabel } from '../labels.js';
 import { flowsOfTx } from './flows.js';
 import { valueOf } from './prices.js';
 import { shadow, compareIdentify, comparePass } from '../ontology/shadow.js';
+import { reads, passThrough, confident } from '../ontology/sync.js';
+import { whatIs, classWords } from '../ontology/index.js';
 
 export const ROUTERS = new Set(['wrap.near', 'intents.near', 'aggregatedex.near', 'v2.ref-finance.near', 'dclv2.ref-labs.near', 'system', 'near']);
+const isRouter = (id) => (reads('pass_through') ? passThrough(id) : ROUTERS.has(id));
 const PSEUDO = /^(mint|burn|intents|chain|nft):/;
 const cache = new Map();
+/** Forget identify()'s answers (the replay compares old and new rules in one process). */
+export const clearIdentifyCache = () => cache.clear();
 const firstTx = async (id) => {
   const j = await txIndexer('/v0/account', { account_id: id, limit: 1, desc: false }).catch(() => null);
   const r = j?.account_txs?.[0];
@@ -27,6 +32,17 @@ const firstTx = async (id) => {
 /** What an account is, for an investigation: { kind: exchange | contract | wallet, name, how, tx_count, first_ts }. Cached. */
 export async function identify(id) {
   if (cache.has(id)) return cache.get(id);
+  // the ontology decides when it knows the account (ONTOLOGY_READ=tracer): registry sweeps, solvers, audits, hand labels outrank "busy"
+  if (reads('tracer')) {
+    const o = await whatIs(id).catch(() => null);
+    const out = o && confident(o) ? fromOntology(o) : null;
+    if (out) {
+      const first = await firstTx(id);
+      const r = { ...out, tx_count: first?.total ?? null, first_ts: first?.ts ?? null };
+      cache.set(id, r); if (cache.size > 2000) cache.delete(cache.keys().next().value);
+      return r;
+    }
+  }
   const b = builtinLabel(id);
   const [ent, lab, first, state, reg] = await Promise.all([col('entities').findOne({ _id: id }, { projection: { kind: 1, label: 1, label_source: 1 } }).catch(() => null), col('labels').findOne({ _id: id }).catch(() => null),
     firstTx(id), viewAccount(id).catch(() => null), col('exchange_wallets').findOne({ _id: id }).catch(() => null)]);
@@ -56,6 +72,19 @@ export async function identify(id) {
   if (cache.size > 2000) cache.delete(cache.keys().next().value);
   return out;
 }
+/** identify()'s answer from a resolved ontology entity, or null for a class the tracer has no word for. */
+function fromOntology(o) {
+  const org = o.operator ? o.operator.replace(/^org:/, '').split('-').map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ') : null;
+  if (o.top === 'exchange') {
+    const where = o.class === 'exchange/cold_wallet' ? 'cold' : 'hot';
+    return { kind: 'exchange', name: `${org || o.label || 'Unnamed exchange'} ${where} wallet`, how: o.why };
+  }
+  if (o.top === 'service') return { kind: 'service', name: o.class === 'service/intents_solver' ? 'NEAR Intents solver' : o.label || classWords(o.class), how: o.why };
+  if (o.top === 'contract' || o.top === 'system') return { kind: 'contract', name: o.label || null, how: o.why };
+  if (o.top === 'person') return { kind: 'wallet', name: o.label || null, how: o.class === 'person/wallet' ? null : o.why };
+  return null;
+}
+
 /**
  * A NEAR Intents solver (a market maker that fills swaps): its name says so, or most of its latest transactions go through intents.near.
  * A solver paying an account is how every 1Click / Intents swap delivers (the user paid on the other side, often on another chain), so
@@ -91,7 +120,7 @@ async function sweepTarget(id) {
 async function inflows(id, txs, minUsd) {
   const per = new Map();
   for (const t of txs) for (const f of flowsOfTx(t)) {
-    if (f.to !== id || f.from === id || ROUTERS.has(f.from) || PSEUDO.test(f.from) || /^nft:/.test(f.token)) continue;
+    if (f.to !== id || f.from === id || isRouter(f.from) || PSEUDO.test(f.from) || /^nft:/.test(f.token)) continue;
     const v = await valueOf(f.token, f.raw);
     const x = per.get(f.from) || { from: f.from, usd: 0, txs: new Set(), first_ts: f.ts, items: [] };
     x.usd += v.usd || 0; x.txs.add(f.tx); x.first_ts = Math.min(x.first_ts, f.ts); x.items.push({ token: f.token, symbol: v.symbol, amount: v.amount, usd: v.usd, tx: f.tx, ts: f.ts });

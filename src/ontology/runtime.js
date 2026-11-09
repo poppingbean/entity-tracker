@@ -4,6 +4,8 @@ import { config } from '../config.js';
 import { warn } from '../log.js';
 import { startHeartbeat, shadow, comparePass } from './shadow.js';
 import { backfill } from './backfill.js';
+import { refreshSnapshot } from './sync.js';
+import { syncGroupingIfChanged } from './apply.js';
 
 let backfilling = false;
 
@@ -18,14 +20,18 @@ export async function shadowLists() {
 async function runBackfill() {
   if (backfilling) return;
   backfilling = true;
-  try { await backfill(); await shadowLists(); } catch (e) { warn(`ontology backfill failed: ${e.message}`); } finally { backfilling = false; }
+  try { await backfill(); await refreshSnapshot({ force: true }); await shadowLists(); } catch (e) { warn(`ontology backfill failed: ${e.message}`); } finally { backfilling = false; }
 }
 
 /** role: 'web' | 'worker' | 'all'. */
 export function startOntology(role) {
   startHeartbeat(role);
+  refreshSnapshot().catch(() => {});
+  const snapT = setInterval(() => refreshSnapshot().catch(() => {}), 10 * 60e3); snapT.unref?.();
   if (role === 'web') return;
   shadowLists().catch(() => {});
+  // stored grouping kinds follow the grouping rule (once per change of ONTOLOGY_READ), after the snapshot is loaded
+  const sync = setTimeout(() => syncGroupingIfChanged().catch((e) => warn(`ontology grouping re-sync failed: ${e.message}`)), 30e3); sync.unref?.();
   const every = config.ontology.backfillEveryHours;
   if (every > 0) {
     const first = setTimeout(runBackfill, 2 * 60e3); first.unref?.(); // after the worker's first cycle
