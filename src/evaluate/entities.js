@@ -7,6 +7,22 @@ import { info } from '../log.js';
 import { classifyAccount, isGenericKind } from '../graph/profile.js';
 import { describe } from '../labels.js';
 import { creatorIndex, creatorAnchors } from './creators.js';
+import { reads, classOf, confident } from '../ontology/sync.js';
+import { classWords } from '../ontology/index.js';
+
+/**
+ * A generic label from the account's kind ("Unlabelled exchange / hub wallet") is replaced by what the ontology knows, so a treasury
+ * that funds wallets is not shown as an exchange. Hand-set and name labels stay.
+ */
+function ontologyLabel(id, d) {
+  if (d.source !== 'kind' && d.label) return d;
+  if (!reads('grouping')) return d;
+  const c = classOf(id);
+  if (!confident(c)) return d;
+  const words = classWords(c.class);
+  const type = c.top === 'exchange' ? 'exchange' : c.class === 'service/bridge' ? 'bridge' : c.top === 'person' ? 'wallet' : 'service';
+  return { label: c.label || (c.operator ? `${c.operator.replace(/^org:/, '').replace(/(^|-)\w/g, (m) => m.toUpperCase()).replace(/-/g, ' ')} ${c.class === 'exchange/cold_wallet' ? 'cold' : 'hot'} wallet` : words.charAt(0).toUpperCase() + words.slice(1)), type, source: 'ontology' };
+}
 
 const CAP = 80; // wallets listed per entity
 
@@ -88,7 +104,7 @@ export async function buildEntities() {
       for (const t of tokensOf.get(w._id) || []) tokens.add(t);
       if (w.stats?.tokens_n) { pnl += w.stats.pnl_near || 0; buy += w.stats.total_buy_near || 0; judged++; if ((w.stats.win_rate ?? 0) >= 0.5) wins++; }
     }
-    const d = describe(e._id, kind, manual);
+    const d = ontologyLabel(e._id, describe(e._id, kind, manual));
     docs.push({
       _id: e._id, kind, label: d.label, type: d.type, label_source: d.source, roles: [...e.roles], tx_count: e.tx_count,
       funded_n: funded.length, funded_near: funded.reduce((s, f) => s + (f.near || 0), 0), funded_wallets: funded.sort((a, b) => (b.near || 0) - (a.near || 0)).slice(0, CAP).map((f) => ({ ...f, cluster_id: wmap.get(f.wallet)?.cluster_id ?? null, tag: wmap.get(f.wallet)?.tag ?? null })),

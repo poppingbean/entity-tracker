@@ -114,7 +114,7 @@ export async function buildContext(txs) {
   });
 
   // ontology shadow mode: what the firewall believes about each other account vs the ontology (compare only, never awaited)
-  for (const [id, a] of accounts) if (!signers.includes(id)) shadow('firewall.context', id, { severity: T.flags.get(id)?.severity || null, exchange: a.label_type === 'exchange' }, compareFirewall);
+  for (const [id, a] of accounts) if (!signers.includes(id)) shadow('firewall.context', id, { severity: T.flags.get(id)?.severity || null, exchange: a.label_type === 'exchange' }, compareFirewall({ severity: T.flags.get(id)?.severity || null, exchange: a.label_type === 'exchange' }));
 
   // token metadata for amounts, and what the signer holds (balance, keys, token balances) when the transaction moves it
   const tokenIds = [...new Set(txs.flatMap((t) => t.actions.filter((a) => a.kind === 'function_call' && /^ft_transfer/.test(a.method)).map(() => t.receiver)))];

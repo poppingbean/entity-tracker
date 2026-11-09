@@ -146,3 +146,10 @@ test('replay diff: same case, small price moves ignored, status changes reported
   assert.deepEqual(diff(a, { ...a, status: 'suspected' }), ['status: confirmed → suspected']);
   assert.match(diff(a, { ...a, sources: ['h:service'] })[0], /^sources: −h:exchange \+h:service/);
 });
+
+test('the firewall hook passes compareFirewall(old), not the factory', async () => {
+  const src = (await import('node:fs')).readFileSync(new URL('../src/firewall/context.js', import.meta.url), 'utf8');
+  assert.match(src, /compareFirewall\(\{ severity/);
+  const r = compareFirewall({ severity: 'critical', exchange: false })({ class: 'unknown', top: 'unknown', flagged: { severity: 'critical' } });
+  assert.equal(r.agree, true);
+});
