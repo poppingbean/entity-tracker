@@ -10,6 +10,8 @@ import { resolve } from './resolve.js';
 import { intentsSolver } from '../incident/origin.js';
 
 const NO_CODE = '11111111111111111111111111111111';
+const BUSY_TX = 15000; // grouping's hub threshold: this many transactions is busy like an exchange, a bot or a market maker
+const RELAYER_NAME = /relayer|herewallet|meteor|wallet-relay|intear|registrar|\.tg$|\.user\.|^bridge/; // grouping's old relayer names
 const org = (name) => `org:${String(name).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')}`;
 
 /** Each writer reads one collection and returns its facts. */
@@ -47,8 +49,10 @@ export const WRITERS = {
     const cur = col('entities').find({}, { projection: { kind: 1, type: 1, label: 1, label_source: 1, tx_count: 1, funded_wallets: 1 } });
     for await (const e of cur) {
       const n = (e.tx_count || 0).toLocaleString('en-US');
-      if (e.kind === 'hub') out.push({ subject: e._id, predicate: 'is_a', object: 'exchange', source: 'behaviour', confidence: 0.3, evidence: `busy: ${n} transactions, pays many wallets` });
-      else if (e.kind === 'relayer') out.push({ subject: e._id, predicate: 'is_a', object: 'service/relayer', source: 'name_pattern', confidence: 0.45, evidence: 'grouping calls it a relayer (account name)' });
+      // evidence only, never grouping's kind itself: that kind now comes from the ontology, and reading it back would be a loop
+      // (a treasury the ontology calls a hub would come back as "busy, so an exchange")
+      if ((e.tx_count || 0) >= BUSY_TX) out.push({ subject: e._id, predicate: 'is_a', object: 'exchange', source: 'behaviour', confidence: 0.3, evidence: `busy: ${n} transactions, pays many wallets` });
+      else if (RELAYER_NAME.test(e._id)) out.push({ subject: e._id, predicate: 'is_a', object: 'service/relayer', source: 'name_pattern', confidence: 0.45, evidence: 'grouping calls it a relayer (account name)' });
       // grouping's "wallet" only means nothing marked it as special: the weakest fact there is, below any name pattern
       else if (e.kind === 'wallet') out.push({ subject: e._id, predicate: 'is_a', object: 'person/wallet', source: 'name_pattern', confidence: 0.2, evidence: `nothing marks it as a service (${n} transactions)` });
       if (e.label && e.label_source === 'manual') out.push({ subject: e._id, predicate: 'label', object: e.label, source: 'manual', confidence: 0.9, evidence: 'named by hand' });
