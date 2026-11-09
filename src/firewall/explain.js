@@ -22,7 +22,7 @@ export async function explainCheck(result, ctx) {
   };
   const { user } = evidenceMessage('Transaction to explain:', evidence);
   try {
-    const { json, model } = await chatJSON({ system: SYSTEM + UNTRUSTED_RULE, user, model: config.ai.model, maxTokens: 1500, timeoutMs: config.firewall.explainTimeoutMs, attempts: 1 });
+    const { json, model } = await chatJSON({ system: SYSTEM + UNTRUSTED_RULE, user, model: config.firewall.explainModel, maxTokens: 1500, timeoutMs: config.firewall.explainTimeoutMs, attempts: 1 });
     return { headline: String(json.headline || '').slice(0, 200), explanation: String(json.explanation || '').slice(0, 1200), advice: (Array.isArray(json.advice) ? json.advice : []).map((x) => String(x).slice(0, 200)).slice(0, 3), model };
   } catch { return null; }
 }
