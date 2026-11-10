@@ -1,0 +1,69 @@
+{
+ "name": "near-transfer-large",
+ "note": "SYNTHETIC. A plain NEAR transfer of 8,091,108.6 NEAR from a hot wallet to a fresh account.",
+ "hash": "2ZLmY19bzfkikz5PUYH9jV8CXTPLjbMVhGYA9RLzMdjF",
+ "captured_ts": 1794300000000,
+ "synthetic": true,
+ "tx": {
+  "transaction": {
+   "hash": "2ZLmY19bzfkikz5PUYH9jV8CXTPLjbMVhGYA9RLzMdjF",
+   "signer_id": "hotwallet.near",
+   "receiver_id": "fresh-user.near",
+   "actions": [
+    {
+     "Transfer": {
+      "deposit": "8091108600000000000000000000000"
+     }
+    }
+   ]
+  },
+  "receipts": [
+   {
+    "receipt": {
+     "predecessor_id": "hotwallet.near",
+     "receiver_id": "fresh-user.near",
+     "receipt_id": "r1",
+     "receipt": {
+      "Action": {
+       "signer_id": "hotwallet.near",
+       "actions": [
+        {
+         "Transfer": {
+          "deposit": "8091108600000000000000000000000"
+         }
+        }
+       ]
+      }
+     }
+    },
+    "execution_outcome": {
+     "block_hash": "B",
+     "block_height": 200000001,
+     "id": "r1",
+     "outcome": {
+      "executor_id": "fresh-user.near",
+      "logs": [],
+      "status": {
+       "SuccessValue": ""
+      },
+      "receipt_ids": [],
+      "gas_burnt": 1
+     }
+    }
+   }
+  ],
+  "execution_outcome": {
+   "block_hash": "B",
+   "block_height": 200000000,
+   "id": "2ZLmY19bzfkikz5PUYH9jV8CXTPLjbMVhGYA9RLzMdjF",
+   "outcome": {
+    "executor_id": "hotwallet.near",
+    "logs": [],
+    "status": {
+     "SuccessValue": ""
+    }
+   },
+   "block_timestamp": "1794300000000000000"
+  }
+ }
+}

@@ -1,0 +1,77 @@
+{
+ "name": "nft-transfer",
+ "note": "SYNTHETIC. A NEP-171 nft_transfer of token 42 between two wallets.",
+ "hash": "CpyCWQDcUpEVuYXsq3GNRUa8bHGHjJphmLzhMvax2jMA",
+ "captured_ts": 1794300000000,
+ "synthetic": true,
+ "tx": {
+  "transaction": {
+   "hash": "CpyCWQDcUpEVuYXsq3GNRUa8bHGHjJphmLzhMvax2jMA",
+   "signer_id": "alice.near",
+   "receiver_id": "nft.collection.near",
+   "actions": [
+    {
+     "FunctionCall": {
+      "method_name": "nft_transfer",
+      "args": "eyJyZWNlaXZlcl9pZCI6ImJvYi5uZWFyIiwidG9rZW5faWQiOiI0MiJ9",
+      "gas": 100000000000000,
+      "deposit": "1"
+     }
+    }
+   ]
+  },
+  "receipts": [
+   {
+    "receipt": {
+     "predecessor_id": "alice.near",
+     "receiver_id": "nft.collection.near",
+     "receipt_id": "r1",
+     "receipt": {
+      "Action": {
+       "signer_id": "alice.near",
+       "actions": [
+        {
+         "FunctionCall": {
+          "method_name": "nft_transfer",
+          "args": "eyJyZWNlaXZlcl9pZCI6ImJvYi5uZWFyIiwidG9rZW5faWQiOiI0MiJ9",
+          "gas": 100000000000000,
+          "deposit": "1"
+         }
+        }
+       ]
+      }
+     }
+    },
+    "execution_outcome": {
+     "block_hash": "B",
+     "block_height": 200000001,
+     "id": "r1",
+     "outcome": {
+      "executor_id": "nft.collection.near",
+      "logs": [
+       "EVENT_JSON:{\"standard\":\"nep171\",\"version\":\"1.0.0\",\"event\":\"nft_transfer\",\"data\":[{\"old_owner_id\":\"alice.near\",\"new_owner_id\":\"bob.near\",\"token_ids\":[\"42\"]}]}"
+      ],
+      "status": {
+       "SuccessValue": ""
+      },
+      "receipt_ids": [],
+      "gas_burnt": 1
+     }
+    }
+   }
+  ],
+  "execution_outcome": {
+   "block_hash": "B",
+   "block_height": 200000000,
+   "id": "CpyCWQDcUpEVuYXsq3GNRUa8bHGHjJphmLzhMvax2jMA",
+   "outcome": {
+    "executor_id": "alice.near",
+    "logs": [],
+    "status": {
+     "SuccessValue": ""
+    }
+   },
+   "block_timestamp": "1794300000000000000"
+  }
+ }
+}

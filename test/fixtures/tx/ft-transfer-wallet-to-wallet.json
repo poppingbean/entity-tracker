@@ -1,0 +1,77 @@
+{
+ "name": "ft-transfer-wallet-to-wallet",
+ "note": "SYNTHETIC. A plain NEP-141 transfer between two wallets (no venue).",
+ "hash": "39stcD6y99QxibM8F7BE8fKWWvrh21RN9hTSbwCiEAgu",
+ "captured_ts": 1794300000000,
+ "synthetic": true,
+ "tx": {
+  "transaction": {
+   "hash": "39stcD6y99QxibM8F7BE8fKWWvrh21RN9hTSbwCiEAgu",
+   "signer_id": "alice.near",
+   "receiver_id": "bonk-123456.nearlytrade.near",
+   "actions": [
+    {
+     "FunctionCall": {
+      "method_name": "ft_transfer",
+      "args": "eyJyZWNlaXZlcl9pZCI6ImJvYi5uZWFyIiwiYW1vdW50IjoiNTAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMCJ9",
+      "gas": 100000000000000,
+      "deposit": "1"
+     }
+    }
+   ]
+  },
+  "receipts": [
+   {
+    "receipt": {
+     "predecessor_id": "alice.near",
+     "receiver_id": "bonk-123456.nearlytrade.near",
+     "receipt_id": "r1",
+     "receipt": {
+      "Action": {
+       "signer_id": "alice.near",
+       "actions": [
+        {
+         "FunctionCall": {
+          "method_name": "ft_transfer",
+          "args": "eyJyZWNlaXZlcl9pZCI6ImJvYi5uZWFyIiwiYW1vdW50IjoiNTAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMCJ9",
+          "gas": 100000000000000,
+          "deposit": "1"
+         }
+        }
+       ]
+      }
+     }
+    },
+    "execution_outcome": {
+     "block_hash": "B",
+     "block_height": 200000001,
+     "id": "r1",
+     "outcome": {
+      "executor_id": "bonk-123456.nearlytrade.near",
+      "logs": [
+       "EVENT_JSON:{\"standard\":\"nep141\",\"version\":\"1.0.0\",\"event\":\"ft_transfer\",\"data\":[{\"old_owner_id\":\"alice.near\",\"new_owner_id\":\"bob.near\",\"amount\":\"5000000000000000000000000000\"}]}"
+      ],
+      "status": {
+       "SuccessValue": ""
+      },
+      "receipt_ids": [],
+      "gas_burnt": 1
+     }
+    }
+   }
+  ],
+  "execution_outcome": {
+   "block_hash": "B",
+   "block_height": 200000000,
+   "id": "39stcD6y99QxibM8F7BE8fKWWvrh21RN9hTSbwCiEAgu",
+   "outcome": {
+    "executor_id": "alice.near",
+    "logs": [],
+    "status": {
+     "SuccessValue": ""
+    }
+   },
+   "block_timestamp": "1794300000000000000"
+  }
+ }
+}

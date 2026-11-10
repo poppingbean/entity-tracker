@@ -15,6 +15,12 @@ export const INFRA = /^(dclv2\.ref-labs\.near|v2\.ref-finance\.near|aggregatedex
 export async function tradesFromTxs(token, pool, txs) {
   const dec = await decimals(token);
   const q = pool.quote, qDec = await decimals(q), qPx = pool.dex === 'curve' ? 1 : await quoteNearPrice(q);
+  return tradesFromDecoded(token, pool, txs, { dec, qDec, qPx });
+}
+
+/** The pure part of tradesFromTxs: `dec` = the token's decimals, `qDec` = the quote's, `qPx` = NEAR per whole quote token. No network. */
+export function tradesFromDecoded(token, pool, txs, { dec, qDec, qPx }) {
+  const q = pool.quote;
   const out = [], transfers = [];
   for (const tx of txs) {
     if (tx.failed) continue;

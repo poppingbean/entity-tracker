@@ -32,6 +32,7 @@
 //   node src/cli.js case-add <case id | account> <plan.json> [--dry]   add accounts, funded edges, suspected links to a confirmed case (docs/incidents.md)
 //   node src/cli.js ring-scan [case id]                look for laundering rings (memecoins bought by wallets a confirmed case paid); stores proposals
 //   node src/cli.js ring-approve <id> [--dry] | ring-reject <id> ["reason"]   an operator applies a proposal with case-add, or drops it
+//   node src/cli.js fixture-tx <hash> <name> [--note "<text>"] [--stdout]   store a real transaction as test/fixtures/tx/<name>.json (--stdout prints it instead)
 //   node src/cli.js what-is <account>                  the ontology's answer for an account: class, why, conflicts, its edges
 //   node src/cli.js ontology-backfill [--dry]          turn today's data into ontology facts (--dry: check them and the golden set, write nothing)
 //   node src/cli.js ontology-apply [--dry]             recompute the grouping kinds stored on wallets with the current rule, then regroup
@@ -64,13 +65,16 @@ import { backfill as ontologyBackfill } from './ontology/backfill.js';
 import { gate as ontologyGate, gateText } from './ontology/gate.js';
 import { whatIs, relationsOf } from './ontology/index.js';
 import { checkGolden } from './ontology/golden.js';
+import { txIndexer } from './near/rpc.js';
+import { fixtureDoc } from './near/fixture.js';
+import { writeFile } from 'node:fs/promises';
 import { resolve as ontologyResolve } from './ontology/resolve.js';
 import { virtualFacts } from './ontology/known.js';
 
 const [cmd, ...args] = process.argv.slice(2);
 const errs = validateConfig();
 if (errs.length) { for (const e of errs) console.error(`config error: ${e}`); process.exit(1); }
-await connectDb(); enableDbLog();
+if (cmd !== 'fixture-tx') { await connectDb(); enableDbLog(); } // fixture-tx only reads the indexer: it needs no database
 config.ontology.shadow = false; // shadow mode measures the production processes, not one-off commands
 
 try {
@@ -327,6 +331,17 @@ try {
   } else if (cmd === 'ontology-gate') {
     const g = await ontologyGate();
     console.log(args.includes('--json') ? JSON.stringify(g, null, 1) : gateText(g));
+  } else if (cmd === 'fixture-tx') {
+    const [hash, name] = args.filter((a, i) => !a.startsWith('--') && args[i - 1] !== '--note');
+    if (!hash || !name) throw new Error('usage: fixture-tx <hash> <name> [--note "<text>"] [--stdout]');
+    const ni = args.indexOf('--note'), note = ni >= 0 ? args[ni + 1] || '' : '';
+    const j = await txIndexer('/v0/transactions', { tx_hashes: [hash] });
+    const tx = (j.transactions || []).find((t) => t.transaction?.hash === hash);
+    if (!tx) throw new Error(`transaction ${hash} not returned by the indexer`);
+    const doc = fixtureDoc({ name, note, tx, captured_ts: Date.now() });
+    const text = JSON.stringify(doc, null, 1) + '\n';
+    if (args.includes('--stdout')) process.stdout.write(text);
+    else { const f = new URL(`../test/fixtures/tx/${name}.json`, import.meta.url); await writeFile(f, text); info(`wrote ${f.pathname} (${text.length} bytes)`); }
   } else if (cmd === 'what-is') {
     const [account] = args;
     console.log(JSON.stringify({ ...(await whatIs(account)), relations: (await relationsOf(account, { direction: 'both' })).slice(0, 40).map((f) => `${f.subject} ${f.predicate} ${JSON.stringify(f.object)} · ${f.source} ${f.confidence ?? ''} · ${f.evidence || ''}`) }, null, 1));

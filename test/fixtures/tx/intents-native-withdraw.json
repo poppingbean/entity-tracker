@@ -1,0 +1,77 @@
+{
+ "name": "intents-native-withdraw",
+ "note": "SYNTHETIC. A NEAR Intents native_withdraw to a NEAR account (dip4 event).",
+ "hash": "23DffLjEjbpPXtrsmW7FX4sMwYsRZz1X9b6c7DuYT4v6",
+ "captured_ts": 1794300000000,
+ "synthetic": true,
+ "tx": {
+  "transaction": {
+   "hash": "23DffLjEjbpPXtrsmW7FX4sMwYsRZz1X9b6c7DuYT4v6",
+   "signer_id": "solver.near",
+   "receiver_id": "intents.near",
+   "actions": [
+    {
+     "FunctionCall": {
+      "method_name": "execute_intents",
+      "args": "e30=",
+      "gas": 100000000000000,
+      "deposit": "1"
+     }
+    }
+   ]
+  },
+  "receipts": [
+   {
+    "receipt": {
+     "predecessor_id": "solver.near",
+     "receiver_id": "intents.near",
+     "receipt_id": "r1",
+     "receipt": {
+      "Action": {
+       "signer_id": "solver.near",
+       "actions": [
+        {
+         "FunctionCall": {
+          "method_name": "execute_intents",
+          "args": "e30=",
+          "gas": 100000000000000,
+          "deposit": "1"
+         }
+        }
+       ]
+      }
+     }
+    },
+    "execution_outcome": {
+     "block_hash": "B",
+     "block_height": 200000001,
+     "id": "r1",
+     "outcome": {
+      "executor_id": "intents.near",
+      "logs": [
+       "EVENT_JSON:{\"standard\":\"dip4\",\"version\":\"0.3.0\",\"event\":\"native_withdraw\",\"data\":[{\"account_id\":\"61c5aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"receiver_id\":\"bob.near\",\"amount\":\"5000000000000000000000000\"}]}"
+      ],
+      "status": {
+       "SuccessValue": ""
+      },
+      "receipt_ids": [],
+      "gas_burnt": 1
+     }
+    }
+   }
+  ],
+  "execution_outcome": {
+   "block_hash": "B",
+   "block_height": 200000000,
+   "id": "23DffLjEjbpPXtrsmW7FX4sMwYsRZz1X9b6c7DuYT4v6",
+   "outcome": {
+    "executor_id": "solver.near",
+    "logs": [],
+    "status": {
+     "SuccessValue": ""
+    }
+   },
+   "block_timestamp": "1794300000000000000"
+  }
+ }
+}

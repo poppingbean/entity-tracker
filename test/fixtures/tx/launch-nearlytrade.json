@@ -1,0 +1,77 @@
+{
+ "name": "launch-nearlytrade",
+ "note": "SYNTHETIC. A nearlytrade \"nearpad\" launch event with a single-sided DCL pool.",
+ "hash": "AD9iY6pHiKXYgzEPiT7KxLE6KyfAJMmrVJsXrCAPh6t",
+ "captured_ts": 1794300000000,
+ "synthetic": true,
+ "tx": {
+  "transaction": {
+   "hash": "AD9iY6pHiKXYgzEPiT7KxLE6KyfAJMmrVJsXrCAPh6t",
+   "signer_id": "creator1.near",
+   "receiver_id": "nearlytrade.near",
+   "actions": [
+    {
+     "FunctionCall": {
+      "method_name": "launch",
+      "args": "e30=",
+      "gas": 100000000000000,
+      "deposit": "1"
+     }
+    }
+   ]
+  },
+  "receipts": [
+   {
+    "receipt": {
+     "predecessor_id": "creator1.near",
+     "receiver_id": "nearlytrade.near",
+     "receipt_id": "r1",
+     "receipt": {
+      "Action": {
+       "signer_id": "creator1.near",
+       "actions": [
+        {
+         "FunctionCall": {
+          "method_name": "launch",
+          "args": "e30=",
+          "gas": 100000000000000,
+          "deposit": "1"
+         }
+        }
+       ]
+      }
+     }
+    },
+    "execution_outcome": {
+     "block_hash": "B",
+     "block_height": 200000001,
+     "id": "r1",
+     "outcome": {
+      "executor_id": "nearlytrade.near",
+      "logs": [
+       "EVENT_JSON:{\"standard\":\"nearpad\",\"version\":\"1.0.0\",\"event\":\"launch\",\"data\":[{\"id\":\"123456\",\"token\":\"bonk-123456.nearlytrade.near\",\"creator\":\"creator1.near\",\"pool_id\":\"bonk-123456.nearlytrade.near|wrap.near|10000\",\"name\":\"Bonk Test\",\"symbol\":\"BONK\"}]}"
+      ],
+      "status": {
+       "SuccessValue": ""
+      },
+      "receipt_ids": [],
+      "gas_burnt": 1
+     }
+    }
+   }
+  ],
+  "execution_outcome": {
+   "block_hash": "B",
+   "block_height": 200000000,
+   "id": "AD9iY6pHiKXYgzEPiT7KxLE6KyfAJMmrVJsXrCAPh6t",
+   "outcome": {
+    "executor_id": "creator1.near",
+    "logs": [],
+    "status": {
+     "SuccessValue": ""
+    }
+   },
+   "block_timestamp": "1794300000000000000"
+  }
+ }
+}

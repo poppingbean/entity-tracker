@@ -1,0 +1,115 @@
+{
+ "name": "launch-memecooking",
+ "note": "SYNTHETIC. A meme.cooking \"create_token\" event naming Ref v2 pool 777.",
+ "hash": "CVw4CaBdbZof6KyVuCqJrp5qjaXXHaBjevhhVhpjVKJz",
+ "captured_ts": 1794300000000,
+ "synthetic": true,
+ "tx": {
+  "transaction": {
+   "hash": "CVw4CaBdbZof6KyVuCqJrp5qjaXXHaBjevhhVhpjVKJz",
+   "signer_id": "bot1.near",
+   "receiver_id": "meme-cooking.near",
+   "actions": [
+    {
+     "FunctionCall": {
+      "method_name": "create_token",
+      "args": "e30=",
+      "gas": 100000000000000,
+      "deposit": "1"
+     }
+    }
+   ]
+  },
+  "receipts": [
+   {
+    "receipt": {
+     "predecessor_id": "bot1.near",
+     "receiver_id": "meme-cooking.near",
+     "receipt_id": "r1",
+     "receipt": {
+      "Action": {
+       "signer_id": "bot1.near",
+       "actions": [
+        {
+         "FunctionCall": {
+          "method_name": "create_token",
+          "args": "e30=",
+          "gas": 100000000000000,
+          "deposit": "1"
+         }
+        }
+       ]
+      }
+     }
+    },
+    "execution_outcome": {
+     "block_hash": "B",
+     "block_height": 200000001,
+     "id": "r1",
+     "outcome": {
+      "executor_id": "meme-cooking.near",
+      "logs": [
+       "EVENT_JSON:{\"standard\":\"meme-cooking\",\"version\":\"1.0.0\",\"event\":\"create_token\",\"data\":{\"meme_id\":55,\"token_id\":\"cook-55.meme-cooking.near\",\"pool_id\":777}}"
+      ],
+      "status": {
+       "SuccessValue": ""
+      },
+      "receipt_ids": [],
+      "gas_burnt": 1
+     }
+    }
+   },
+   {
+    "receipt": {
+     "predecessor_id": "meme-cooking.near",
+     "receiver_id": "v2.ref-finance.near",
+     "receipt_id": "r2",
+     "receipt": {
+      "Action": {
+       "signer_id": "meme-cooking.near",
+       "actions": [
+        {
+         "FunctionCall": {
+          "method_name": "add_liquidity",
+          "args": "e30=",
+          "gas": 100000000000000,
+          "deposit": "1"
+         }
+        }
+       ]
+      }
+     }
+    },
+    "execution_outcome": {
+     "block_hash": "B",
+     "block_height": 200000001,
+     "id": "r2",
+     "outcome": {
+      "executor_id": "v2.ref-finance.near",
+      "logs": [
+       "Liquidity added [\"1000 cook-55.meme-cooking.near\", \"10000000000000000000000000 wrap.near\"], minted 1000 shares"
+      ],
+      "status": {
+       "SuccessValue": ""
+      },
+      "receipt_ids": [],
+      "gas_burnt": 1
+     }
+    }
+   }
+  ],
+  "execution_outcome": {
+   "block_hash": "B",
+   "block_height": 200000000,
+   "id": "CVw4CaBdbZof6KyVuCqJrp5qjaXXHaBjevhhVhpjVKJz",
+   "outcome": {
+    "executor_id": "bot1.near",
+    "logs": [],
+    "status": {
+     "SuccessValue": ""
+    }
+   },
+   "block_timestamp": "1794300000000000000"
+  }
+ }
+}

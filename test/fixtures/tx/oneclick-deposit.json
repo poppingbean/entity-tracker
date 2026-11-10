@@ -1,0 +1,77 @@
+{
+ "name": "oneclick-deposit",
+ "note": "SYNTHETIC. A USDC transfer to a 64-hex 1Click deposit address.",
+ "hash": "GqWetpVyhqoCyRtMjHAUBVBz9jr9RSQMzv6s8bNBLiCV",
+ "captured_ts": 1794300000000,
+ "synthetic": true,
+ "tx": {
+  "transaction": {
+   "hash": "GqWetpVyhqoCyRtMjHAUBVBz9jr9RSQMzv6s8bNBLiCV",
+   "signer_id": "victim.near",
+   "receiver_id": "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+   "actions": [
+    {
+     "FunctionCall": {
+      "method_name": "ft_transfer",
+      "args": "eyJyZWNlaXZlcl9pZCI6ImQzZDNkM2QzZDNkM2QzZDNkM2QzZDNkM2QzZDNkM2QzZDNkM2QzZDNkM2QzZDNkM2QzZDNkM2QzZDNkM2QzZDMiLCJhbW91bnQiOiIxMDAwMDAwIn0=",
+      "gas": 100000000000000,
+      "deposit": "1"
+     }
+    }
+   ]
+  },
+  "receipts": [
+   {
+    "receipt": {
+     "predecessor_id": "victim.near",
+     "receiver_id": "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+     "receipt_id": "r1",
+     "receipt": {
+      "Action": {
+       "signer_id": "victim.near",
+       "actions": [
+        {
+         "FunctionCall": {
+          "method_name": "ft_transfer",
+          "args": "eyJyZWNlaXZlcl9pZCI6ImQzZDNkM2QzZDNkM2QzZDNkM2QzZDNkM2QzZDNkM2QzZDNkM2QzZDNkM2QzZDNkM2QzZDNkM2QzZDNkM2QzZDMiLCJhbW91bnQiOiIxMDAwMDAwIn0=",
+          "gas": 100000000000000,
+          "deposit": "1"
+         }
+        }
+       ]
+      }
+     }
+    },
+    "execution_outcome": {
+     "block_hash": "B",
+     "block_height": 200000001,
+     "id": "r1",
+     "outcome": {
+      "executor_id": "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+      "logs": [
+       "EVENT_JSON:{\"standard\":\"nep141\",\"version\":\"1.0.0\",\"event\":\"ft_transfer\",\"data\":[{\"old_owner_id\":\"victim.near\",\"new_owner_id\":\"d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3\",\"amount\":\"1000000\"}]}"
+      ],
+      "status": {
+       "SuccessValue": ""
+      },
+      "receipt_ids": [],
+      "gas_burnt": 1
+     }
+    }
+   }
+  ],
+  "execution_outcome": {
+   "block_hash": "B",
+   "block_height": 200000000,
+   "id": "GqWetpVyhqoCyRtMjHAUBVBz9jr9RSQMzv6s8bNBLiCV",
+   "outcome": {
+    "executor_id": "victim.near",
+    "logs": [],
+    "status": {
+     "SuccessValue": ""
+    }
+   },
+   "block_timestamp": "1794300000000000000"
+  }
+ }
+}

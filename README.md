@@ -110,7 +110,7 @@ npm start                # worker + web UI (http://127.0.0.1:8790)
 
 - **NEAR AI:** create a key at <https://cloud.near.ai> (API Keys). `NEAR_AI_MODEL` can be any chat model from `https://cloud-api.near.ai/v1/models` that supports JSON output (default `anthropic/claude-haiku-5-5`, used by the scanner's AI analyst and group reviews; the On-chain analysis write-up uses `NEAR_AI_ANALYSIS_MODEL`, default `anthropic/claude-sonnet-5-5`). Without a key the tracker still runs with rule-based verdicts.
 - **FastNEAR:** an API key raises rate limits on the transaction indexer and RPC.
-- **Tests:** `npm test` (grouping, ROI, outcome and rug rules, verdicts, AI parsing and the injection guard, alert detectors and delivery, accuracy metrics).
+- **Tests:** `npm test` (grouping, ROI, outcome and rug rules, verdicts, AI parsing and the injection guard, alert detectors and delivery, accuracy metrics, and parsers against real transactions stored in `test/fixtures/tx/`). Add a fixture with `node src/cli.js fixture-tx <hash> <name> [--note "<text>"] [--stdout]` (fetches the transaction from the FastNEAR indexer, shrinks deployed code, writes `test/fixtures/tx/<name>.json`; `--stdout` prints it instead). A file with `"synthetic": true` was built by hand and is replaced by a real capture.
 - **Nothing here trades:** there is no wallet or private key; the only "trading" is the simulated wallet in MongoDB.
 
 ## Scanner mode: monitor, AI analyst and simulated investing

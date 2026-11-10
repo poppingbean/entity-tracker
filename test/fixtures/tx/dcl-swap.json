@@ -1,0 +1,77 @@
+{
+ "name": "dcl-swap",
+ "note": "SYNTHETIC. A Ref DCL swap: 3 wNEAR for the token; the swapper is the wallet itself.",
+ "hash": "BrbfmsvVYkeWc2KtxByiyenGYHL2edMJuKA9hsfDvgf8",
+ "captured_ts": 1794300000000,
+ "synthetic": true,
+ "tx": {
+  "transaction": {
+   "hash": "BrbfmsvVYkeWc2KtxByiyenGYHL2edMJuKA9hsfDvgf8",
+   "signer_id": "trader2.near",
+   "receiver_id": "aggregatedex.near",
+   "actions": [
+    {
+     "FunctionCall": {
+      "method_name": "swap",
+      "args": "e30=",
+      "gas": 100000000000000,
+      "deposit": "1"
+     }
+    }
+   ]
+  },
+  "receipts": [
+   {
+    "receipt": {
+     "predecessor_id": "trader2.near",
+     "receiver_id": "dclv2.ref-labs.near",
+     "receipt_id": "r1",
+     "receipt": {
+      "Action": {
+       "signer_id": "trader2.near",
+       "actions": [
+        {
+         "FunctionCall": {
+          "method_name": "ft_on_transfer",
+          "args": "e30=",
+          "gas": 100000000000000,
+          "deposit": "1"
+         }
+        }
+       ]
+      }
+     }
+    },
+    "execution_outcome": {
+     "block_hash": "B",
+     "block_height": 200000001,
+     "id": "r1",
+     "outcome": {
+      "executor_id": "dclv2.ref-labs.near",
+      "logs": [
+       "EVENT_JSON:{\"standard\":\"dcl.ref\",\"version\":\"1.0.0\",\"event\":\"swap\",\"data\":[{\"swapper\":\"trader2.near\",\"token_in\":\"wrap.near\",\"token_out\":\"bonk-123456.nearlytrade.near\",\"pool_id\":\"bonk-123456.nearlytrade.near|wrap.near|10000\",\"amount_in\":\"3000000000000000000000000\",\"amount_out\":\"120000000000000000000000000000\"}]}"
+      ],
+      "status": {
+       "SuccessValue": ""
+      },
+      "receipt_ids": [],
+      "gas_burnt": 1
+     }
+    }
+   }
+  ],
+  "execution_outcome": {
+   "block_hash": "B",
+   "block_height": 200000000,
+   "id": "BrbfmsvVYkeWc2KtxByiyenGYHL2edMJuKA9hsfDvgf8",
+   "outcome": {
+    "executor_id": "trader2.near",
+    "logs": [],
+    "status": {
+     "SuccessValue": ""
+    }
+   },
+   "block_timestamp": "1794300000000000000"
+  }
+ }
+}

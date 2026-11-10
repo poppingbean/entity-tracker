@@ -45,7 +45,7 @@ function refv2PoolId(tx, token) {
 }
 
 /** The first pool event naming `token` in these transactions: a DCL create_pool / liquidity_added / swap, or a Ref v2 swap against wNEAR. */
-function poolHit(token, txs) {
+export function poolHit(token, txs) {
   for (const tx of txs) {
     if (tx.failed) continue;
     const e = tx.events.find((x) => x.executor === DCL && ['create_pool', 'liquidity_added', 'swap'].includes(x.event) && (x.data?.[0]?.pool_id || '').split('|').slice(0, 2).includes(token));

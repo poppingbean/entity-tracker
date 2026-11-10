@@ -1,0 +1,153 @@
+{
+ "name": "refv2-sell-wnear",
+ "note": "SYNTHETIC. A Ref v2 sell of a token for wNEAR; the swap log ends in \", total fee N, admin fee N\".",
+ "hash": "B3wn8L56YTwiKbJkdP12AoULQYusvFqVfRpLNUNLthRC",
+ "captured_ts": 1794300000000,
+ "synthetic": true,
+ "tx": {
+  "transaction": {
+   "hash": "B3wn8L56YTwiKbJkdP12AoULQYusvFqVfRpLNUNLthRC",
+   "signer_id": "trader1.near",
+   "receiver_id": "blackdragon.tkn.near",
+   "actions": [
+    {
+     "FunctionCall": {
+      "method_name": "ft_transfer_call",
+      "args": "eyJyZWNlaXZlcl9pZCI6InYyLnJlZi1maW5hbmNlLm5lYXIiLCJhbW91bnQiOiIxMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwIiwibXNnIjoie1wiYWN0aW9uc1wiOlt7XCJwb29sX2lkXCI6NDI3NixcInRva2VuX2luXCI6XCJibGFja2RyYWdvbi50a24ubmVhclwiLFwidG9rZW5fb3V0XCI6XCJ3cmFwLm5lYXJcIixcImFtb3VudF9pblwiOlwiMTAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMFwiLFwibWluX2Ftb3VudF9vdXRcIjpcIjBcIn1dfSJ9",
+      "gas": 100000000000000,
+      "deposit": "1"
+     }
+    }
+   ]
+  },
+  "receipts": [
+   {
+    "receipt": {
+     "predecessor_id": "trader1.near",
+     "receiver_id": "blackdragon.tkn.near",
+     "receipt_id": "r1",
+     "receipt": {
+      "Action": {
+       "signer_id": "trader1.near",
+       "actions": [
+        {
+         "FunctionCall": {
+          "method_name": "ft_transfer_call",
+          "args": "eyJyZWNlaXZlcl9pZCI6InYyLnJlZi1maW5hbmNlLm5lYXIiLCJhbW91bnQiOiIxMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwIiwibXNnIjoie1wiYWN0aW9uc1wiOlt7XCJwb29sX2lkXCI6NDI3NixcInRva2VuX2luXCI6XCJibGFja2RyYWdvbi50a24ubmVhclwiLFwidG9rZW5fb3V0XCI6XCJ3cmFwLm5lYXJcIixcImFtb3VudF9pblwiOlwiMTAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMFwiLFwibWluX2Ftb3VudF9vdXRcIjpcIjBcIn1dfSJ9",
+          "gas": 100000000000000,
+          "deposit": "1"
+         }
+        }
+       ]
+      }
+     }
+    },
+    "execution_outcome": {
+     "block_hash": "B",
+     "block_height": 200000001,
+     "id": "r1",
+     "outcome": {
+      "executor_id": "blackdragon.tkn.near",
+      "logs": [
+       "EVENT_JSON:{\"standard\":\"nep141\",\"version\":\"1.0.0\",\"event\":\"ft_transfer\",\"data\":[{\"old_owner_id\":\"trader1.near\",\"new_owner_id\":\"v2.ref-finance.near\",\"amount\":\"1000000000000000000000000\"}]}"
+      ],
+      "status": {
+       "SuccessValue": ""
+      },
+      "receipt_ids": [],
+      "gas_burnt": 1
+     }
+    }
+   },
+   {
+    "receipt": {
+     "predecessor_id": "blackdragon.tkn.near",
+     "receiver_id": "v2.ref-finance.near",
+     "receipt_id": "r2",
+     "receipt": {
+      "Action": {
+       "signer_id": "blackdragon.tkn.near",
+       "actions": [
+        {
+         "FunctionCall": {
+          "method_name": "ft_on_transfer",
+          "args": "eyJzZW5kZXJfaWQiOiJ0cmFkZXIxLm5lYXIiLCJhbW91bnQiOiIxMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwIiwibXNnIjoie1wiYWN0aW9uc1wiOlt7XCJwb29sX2lkXCI6NDI3NixcInRva2VuX2luXCI6XCJibGFja2RyYWdvbi50a24ubmVhclwiLFwidG9rZW5fb3V0XCI6XCJ3cmFwLm5lYXJcIixcImFtb3VudF9pblwiOlwiMTAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMFwiLFwibWluX2Ftb3VudF9vdXRcIjpcIjBcIn1dfSJ9",
+          "gas": 100000000000000,
+          "deposit": "1"
+         }
+        }
+       ]
+      }
+     }
+    },
+    "execution_outcome": {
+     "block_hash": "B",
+     "block_height": 200000001,
+     "id": "r2",
+     "outcome": {
+      "executor_id": "v2.ref-finance.near",
+      "logs": [
+       "Swapped 1000000000000000000000000 blackdragon.tkn.near for 2500000000000000000000000 wrap.near, total fee 5000000000000000000000, admin fee 1000000000000000000000"
+      ],
+      "status": {
+       "SuccessValue": ""
+      },
+      "receipt_ids": [],
+      "gas_burnt": 1
+     }
+    }
+   },
+   {
+    "receipt": {
+     "predecessor_id": "v2.ref-finance.near",
+     "receiver_id": "wrap.near",
+     "receipt_id": "r3",
+     "receipt": {
+      "Action": {
+       "signer_id": "v2.ref-finance.near",
+       "actions": [
+        {
+         "FunctionCall": {
+          "method_name": "ft_transfer",
+          "args": "eyJyZWNlaXZlcl9pZCI6InRyYWRlcjEubmVhciIsImFtb3VudCI6IjI1MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAifQ==",
+          "gas": 100000000000000,
+          "deposit": "1"
+         }
+        }
+       ]
+      }
+     }
+    },
+    "execution_outcome": {
+     "block_hash": "B",
+     "block_height": 200000001,
+     "id": "r3",
+     "outcome": {
+      "executor_id": "wrap.near",
+      "logs": [
+       "EVENT_JSON:{\"standard\":\"nep141\",\"version\":\"1.0.0\",\"event\":\"ft_transfer\",\"data\":[{\"old_owner_id\":\"v2.ref-finance.near\",\"new_owner_id\":\"trader1.near\",\"amount\":\"2500000000000000000000000\"}]}"
+      ],
+      "status": {
+       "SuccessValue": ""
+      },
+      "receipt_ids": [],
+      "gas_burnt": 1
+     }
+    }
+   }
+  ],
+  "execution_outcome": {
+   "block_hash": "B",
+   "block_height": 200000000,
+   "id": "B3wn8L56YTwiKbJkdP12AoULQYusvFqVfRpLNUNLthRC",
+   "outcome": {
+    "executor_id": "trader1.near",
+    "logs": [],
+    "status": {
+     "SuccessValue": ""
+    }
+   },
+   "block_timestamp": "1794300000000000000"
+  }
+ }
+}

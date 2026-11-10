@@ -1,0 +1,75 @@
+{
+ "name": "launch-tkn",
+ "note": "SYNTHETIC. create_token on tkn.near (the token is minted without a pool).",
+ "hash": "ASXaDdNGT4XZmNKmimotPXH82K9uA3EDuQLWopdVR4pD",
+ "captured_ts": 1794300000000,
+ "synthetic": true,
+ "tx": {
+  "transaction": {
+   "hash": "ASXaDdNGT4XZmNKmimotPXH82K9uA3EDuQLWopdVR4pD",
+   "signer_id": "creator3.near",
+   "receiver_id": "tkn.near",
+   "actions": [
+    {
+     "FunctionCall": {
+      "method_name": "create_token",
+      "args": "eyJhcmdzIjp7Im93bmVyX2lkIjoiY3JlYXRvcjMubmVhciIsIm1ldGFkYXRhIjp7InN5bWJvbCI6IkRPR0UiLCJuYW1lIjoiRG9nZSBUZXN0IiwiZGVjaW1hbHMiOjI0fX19",
+      "gas": 100000000000000,
+      "deposit": "1"
+     }
+    }
+   ]
+  },
+  "receipts": [
+   {
+    "receipt": {
+     "predecessor_id": "creator3.near",
+     "receiver_id": "tkn.near",
+     "receipt_id": "r1",
+     "receipt": {
+      "Action": {
+       "signer_id": "creator3.near",
+       "actions": [
+        {
+         "FunctionCall": {
+          "method_name": "create_token",
+          "args": "e30=",
+          "gas": 100000000000000,
+          "deposit": "1"
+         }
+        }
+       ]
+      }
+     }
+    },
+    "execution_outcome": {
+     "block_hash": "B",
+     "block_height": 200000001,
+     "id": "r1",
+     "outcome": {
+      "executor_id": "tkn.near",
+      "logs": [],
+      "status": {
+       "SuccessValue": ""
+      },
+      "receipt_ids": [],
+      "gas_burnt": 1
+     }
+    }
+   }
+  ],
+  "execution_outcome": {
+   "block_hash": "B",
+   "block_height": 200000000,
+   "id": "ASXaDdNGT4XZmNKmimotPXH82K9uA3EDuQLWopdVR4pD",
+   "outcome": {
+    "executor_id": "creator3.near",
+    "logs": [],
+    "status": {
+     "SuccessValue": ""
+    }
+   },
+   "block_timestamp": "1794300000000000000"
+  }
+ }
+}
