@@ -89,6 +89,8 @@ The verdict always comes from deterministic rules; the AI explanation can never 
 | `ai_manipulation` | medium | The call data contains text aimed at AI or automated reviewers |
 | `meta_transaction`, `new_account_key`, `binary_args` | info | Context only |
 
+**The explanation.** The verdict and findings come from rules. The words (`explanation`) come from NEAR AI (`FIREWALL_EXPLAIN_MODEL`, default the analysis model), which is told what each other account is (its name, and the ontology's class, e.g. "a NEAR Intents solver") and can never soften the verdict.
+
 **A known DEX or app** (which turns some of these warnings off): a contract users interact with every day (the built-in trusted list), one the [ontology](ontology-design.md) knows as a service from strong evidence (a hand label, the exchange registry, the contract audit), or a contract whose automated audit is low risk. An account name alone never makes it known: the account of a wallet-app user (`*.tg`, `*.user.intear.near`) is a person, so attaching NEAR to it is `deposit_to_unknown`.
 
 ## `GET /api/v1/entity?id=<account>`

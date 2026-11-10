@@ -14,6 +14,8 @@ It runs as an **MCP server** (Model Context Protocol), so any agent that speaks 
 
 ## The tools
 
+Six tools (Agent Guard 1.1.0; `what_is` was added with the ontology layer). A client that connected before may need to reconnect to see the new tool.
+
 | Tool | What the agent asks | Answer |
 |---|---|---|
 | `guard_transaction` | "May I sign this?" Pass the transaction, the owner's `policy`, and optionally `spent_near_today` | `allow` / `ask_human` / `block`, the reasons, and what each action does in plain words |
