@@ -93,6 +93,8 @@ The verdict always comes from deterministic rules; the AI explanation can never 
 
 **A known DEX or app** (which turns some of these warnings off): a contract users interact with every day (the built-in trusted list), one the [ontology](ontology-design.md) knows as a service from strong evidence (a hand label, the exchange registry, the contract audit), or a contract whose automated audit is low risk. An account name alone never makes it known: the account of a wallet-app user (`*.tg`, `*.user.intear.near`) is a person, so attaching NEAR to it is `deposit_to_unknown`.
 
+**Addresses on other chains.** `GET /api/v1/inspect?q=0x…` (or `eth:0x…`, `btc:…`, `sol:…`) answers from the NEAR cases whose money was swapped out to that address: *danger* when a confirmed case sent money there, *caution* for a case being watched, otherwise "nothing known" (never "safe": Safe Near follows money on NEAR only).
+
 ## `GET /api/v1/entity?id=<account>`
 
 What Safe Near calls an account (its [ontology](ontology-design.md)): the class, in words, why, what weaker evidence was overruled, and the account's edges in the knowledge graph (operator, sweeps, funding, cases it played a role in, groups):

@@ -1,6 +1,6 @@
 # Accuracy and depth upgrade: execution plan
 
-Status: plan, nothing built yet. Written 2026-11-10 against `main` at `a2be32e` (after PR #80).
+Status: built on branch `accuracy-depth` (WP-01 to WP-16, locally; see the PR). Operator steps and the live checks listed in each package are still to run. Written 2026-11-10 against `main` at `a2be32e` (after PR #80).
 
 This plan turns the evaluation "where can Safe Near get more accurate and go deeper" into work packages (WP) that an AI coding agent can execute one at a time. Each package says which model should run it:
 

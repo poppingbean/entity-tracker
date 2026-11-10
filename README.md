@@ -62,7 +62,7 @@ It also follows the money of NEAR launchpad tokens: **who buys early, how those 
 - **One answer for "what is this account?"** A person, an exchange hot or cold wallet, a NEAR Intents solver, a relayer, a router, a launchpad, a contract: every part of Safe Near (the hack tracer, wallet grouping, the firewall) asks the same [ontology layer](#ontology-layer-one-answer-for-what-is-this-account), which answers from the strongest evidence and says why.
 - **One search for everything:** press `/` and type a token, a wallet, a creator, an exchange name, a contract, a hack, an NFT collection, or paste any account, transaction or link.
 - **Warns in time:** alerts on rugs in progress, contract changes, large buys, sells and transfers of anything on a watchlist, on the dashboard, through the Telegram bot [@safenear_bot](https://t.me/safenear_bot), an API or webhooks.
-- **Measures itself:** every gate, score and AI verdict is scored against what happened afterwards (the Accuracy page).
+- **Measures itself:** every gate, score and AI verdict is scored against what happened afterwards (the Accuracy page). Security verdicts too: hacks called and retracted, how fast real hacks were caught, the firewall's misses and false alarms, contract audit levels against outcomes, the golden set of known accounts, AI texts checked against their evidence, and chain data checked against a second source.
 - **Treats chain data as untrusted:** token names, metadata and memos are cleaned before any AI reads them, and the AI can never make something look safer than the rules say.
 - **MongoDB is the main database.** It is **read-only on-chain**: no wallet, no private key, no trading anywhere in this project.
 
@@ -110,7 +110,7 @@ npm start                # worker + web UI (http://127.0.0.1:8790)
 
 - **NEAR AI:** create a key at <https://cloud.near.ai> (API Keys). `NEAR_AI_MODEL` can be any chat model from `https://cloud-api.near.ai/v1/models` that supports JSON output (default `anthropic/claude-haiku-5-5`, used by the scanner's AI analyst and group reviews; the On-chain analysis write-up uses `NEAR_AI_ANALYSIS_MODEL`, default `anthropic/claude-sonnet-5-5`). Without a key the tracker still runs with rule-based verdicts.
 - **FastNEAR:** an API key raises rate limits on the transaction indexer and RPC.
-- **Tests:** `npm test` (grouping, ROI, outcome and rug rules, verdicts, AI parsing and the injection guard, alert detectors and delivery, accuracy metrics).
+- **Tests:** `npm test` (stored real transactions as fixtures: `node src/cli.js fixture-tx <hash> <name>` captures one into `test/fixtures/tx/`, and the ones marked synthetic are replaced by real captures; grouping, ROI, outcome and rug rules, verdicts, AI parsing and the injection guard, alert detectors and delivery, accuracy metrics).
 - **Nothing here trades:** there is no wallet or private key; the only "trading" is the simulated wallet in MongoDB.
 
 ## Scanner mode: monitor, AI analyst and simulated investing
@@ -251,6 +251,8 @@ A token or NFT collection whose name or symbol addresses AI reviewers fails the 
 
 ## Measured accuracy
 
+**Security verdicts.** Ground truth for a hack case is, in order: a hand label, a public report with a link, an operator's confirmation, an operator's clear, a deep review's clear that stood 14 days. The page shows precision and recall of the public calls, the retracted ones with the hours they stayed up, the time to detect, the traced loss against the reported one, live detections, the firewall (known-bad accounts blocked, known-good accounts warned about), and contract audit levels against what happened. Every block prints its sample size. CLI: `accuracy`, `truth-backfill [--dry]`, `trace-replay`, `golden-candidates`, `link-eval`.
+
 The **Accuracy** page (`/accuracy`) scores every early judgment against what happened afterwards, never before. Ground truth for a launch is what a buyer at the moment of the first check held 24 h later: "bad" when the price fell below `ACCURACY_BAD_BELOW` (0.85) of it; the 24 h return of what each check let through or blocked is shown too, which needs no threshold. Hand labels override it (`ground_truth`): `node src/cli.js truth <kind> <id> bad|good|clear`, or a reviewed report.
 
 - **Gates:** confusion matrix, and per gate how often launches that failed it went bad (lift) and how many fine launches it blocked.
@@ -358,7 +360,7 @@ The UI and API are read-only except the simulated sell button (`POST /api/sim/se
 
 ## MongoDB collections
 
-`tokens` (launches, outcome, status) · `trades` (swaps) · `transfers` (token hand-offs between wallets) · `entries` (early wallet × token, with ROI per checkpoint) · `wallets` (profile, funding chain, outflows, track record, group) · `edges` (funding and flow edges) · `audits` (contract audits) · `analyses` (token analyses and NEAR AI assessments) · `nft_collections` / `nft_events` / `nft_analyses` (NFT collectibles) · `scans` (gate checks + AI reviews) · `followups` · `sim_account` / `sim_positions` / `sim_fills` / `sim_equity` (simulated wallet) · `blacklist` · `templates` · `entities` (every funder / destination account incl. exchange wallets) · `labels` (hand-set names) · `clusters` (groups: members, links, metrics, tokens, rule + AI verdicts) · `cluster_history` · `events` (30-day log) · `alerts` · `watchlists` · `contract_deploys` / `audit_queue` / `code_audits` (automated audits) · `firewall_flags` (reported and incident accounts) · `incidents` / `incident_queue` / `incident_detections` (hacks) · `contract_state` · `token_flags` (alerts) · `analysis_runs` (every AI analyst run with its evidence) · `ground_truth` · `feedback` (accuracy) · `ontology_facts` / `ontology_entities` (the ontology: facts and resolved accounts) · `ontology_shadow` / `ontology_shadow_stats` (shadow-mode comparisons) · `meta` (cursors, worker heartbeat, accuracy results, `security:watch` for the live feed).
+`tokens` (launches, outcome, status) · `trades` (swaps) · `transfers` (token hand-offs between wallets) · `entries` (early wallet × token, with ROI per checkpoint) · `wallets` (profile, funding chain, outflows, track record, group) · `edges` (funding and flow edges) · `audits` (contract audits) · `analyses` (token analyses and NEAR AI assessments) · `nft_collections` / `nft_events` / `nft_analyses` (NFT collectibles) · `scans` (gate checks + AI reviews) · `followups` · `sim_account` / `sim_positions` / `sim_fills` / `sim_equity` (simulated wallet) · `blacklist` · `templates` · `entities` (every funder / destination account incl. exchange wallets) · `labels` (hand-set names) · `clusters` (groups: members, links, metrics, tokens, rule + AI verdicts) · `cluster_history` · `events` (30-day log) · `alerts` · `watchlists` · `contract_deploys` / `audit_queue` / `code_audits` (automated audits) · `firewall_flags` (reported and incident accounts) · `incidents` / `incident_queue` / `incident_detections` (hacks) · `contract_state` · `token_flags` (alerts) · `analysis_runs` (every AI analyst run with its evidence) · `ground_truth` · `feedback` (accuracy) · `price_history` (hourly NEAR/USD) · `ontology_facts` / `ontology_entities` (the ontology: facts and resolved accounts) · `ontology_shadow` / `ontology_shadow_stats` (shadow-mode comparisons) · `meta` (cursors, worker heartbeat, accuracy results, `security:watch` for the live feed).
 
 ## Configuration
 
@@ -372,3 +374,9 @@ See `.env.example`; every threshold (early window, win ROI, rug drawdown, co-buy
 | `ONTOLOGY_HEARTBEAT` | `true` | Report this process's commit and ontology steps; `false` on a local copy that uses the production database |
 | `FIREWALL_EXPLAIN_MODEL` | the analysis model | The NEAR AI model that explains a transaction check in words (the fast model missed too often in tests) |
 | `INCIDENT_ALERT_MAX_AGE_DAYS` | `7` | A hack older than this when found is recorded as a past case, with no alert |
+| `PRICE_AT_INCIDENT` / `PRICE_HISTORY_URL` | `true` / Binance klines | Value a case at the prices when the money moved (history of NEAR/USD); `false` = today's prices |
+| `TRAIL_SEARCH` | `best_first` | The money trail search; `bfs` restores the old one. Budget: `TRAIL_FLOOR_USD` 200, `TRAIL_SHARE_FLOOR` 0.005, `TRAIL_MAX_WALLETS` 40, `TRAIL_MAX_DEPTH` 6, `TRAIL_MAX_MINUTES` 5 |
+| `IDENTIFY_BUSY_NEUTRAL` | `true` | A busy account is never called an exchange hot wallet on busyness alone |
+| `AI_GROUNDING_RETRY` | `true` | An AI text quoting something not in its evidence is asked again once |
+| `ANALYSIS_HOLDERS_VERIFIED` | `60` | Holders checked live (traders, transfer-only holders and the creator) |
+| `DATA_GAP_BLOCKS`, `DATA_CHECK_EVERY_MINUTES`, `DATA_CHECK_SAMPLE`, `DATA_CHECK_RPC_URLS`, `DATA_CHECK_RECEIPTS` | `5`, `60`, `10`, a non-FastNEAR RPC, `false` | Data health: empty block runs checked against RPC, a sample of indexer transactions cross-checked on another host |
