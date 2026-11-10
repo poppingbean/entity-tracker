@@ -108,6 +108,7 @@ export async function evaluateGroups() {
   const by = (t) => docs.filter((d) => d.tag === t).length;
   info(`GROUPS ${docs.length} (win80 ${by('win80')}, win50 ${by('win50')}, win30 ${by('win30')}, sniper ${by('sniper')}, loss ${by('loss')}, unrated ${by('unrated')}); ${cobuyPairs} co-buy links, ${deepLinks} deep links (${config.graph.deepDepth} hops); ${gone.deletedCount} stale removed`);
   await buildEntities();
+  await (await import('../ontology/writers.js')).syncFacts(['clusters', 'entities']); // G1 (throttled to every 10 minutes in writers.js)
   return { groups: docs.length };
 }
 

@@ -56,6 +56,7 @@ async function run(address, force) {
   // update the token-audit fields only: the automated audit (auto) lives on the same record
   const { _id: _ignored, ...fields } = doc;
   await col('audits').updateOne({ _id: address }, { $set: fields }, { upsert: true });
+  await (await import('../ontology/writers.js')).syncFacts(['audits'], { scope: { audits: { ids: [address] } } }); // G1
   return doc;
 }
 

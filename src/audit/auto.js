@@ -127,7 +127,7 @@ export async function autoAudit(account, { deploy = null, force = false, ai = tr
   const acc = await viewAccount(account);
   if (!acc) return { _id: account, notFound: true };
   const code = await auditCode(account, acc, { force, ai });
-  if (!code) { await col('audits').updateOne({ _id: account }, { $set: { auto: { v: AUTO_AUDIT_V, ts: Date.now(), no_code: true } } }, { upsert: true }); return { _id: account, auto: { no_code: true } }; }
+  if (!code) { await col('audits').updateOne({ _id: account }, { $set: { auto: { v: AUTO_AUDIT_V, ts: Date.now(), no_code: true } } }, { upsert: true }); await (await import('../ontology/writers.js')).syncFacts(['audits'], { scope: { audits: { ids: [account] } } }); return { _id: account, auto: { no_code: true } }; }
   const before = await col('audits').findOne({ _id: account }, { projection: { auto: 1 } });
   // the existing audit: keys, code checks, token sells and tax (kept as is for the scanner and the firewall)
   const legacy = await auditNearContract(account, { force }).catch(() => null);
@@ -177,6 +177,7 @@ export async function autoAudit(account, { deploy = null, force = false, ai = tr
   // the plain-language summary (stage 7)
   if (ai && config.autoAudit.writeUp) auto.summary = await aiWriteUp(account, auto).catch(() => null);
   await col('audits').updateOne({ _id: account }, { $set: { auto } }, { upsert: true });
+  await (await import('../ontology/writers.js')).syncFacts(['audits'], { scope: { audits: { ids: [account] } } }); // G1: the contract's class at once
   return { ...(legacy || { _id: account }), auto };
 }
 

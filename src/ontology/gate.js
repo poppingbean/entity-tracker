@@ -5,6 +5,7 @@
 //   - the firewall's latency for an ontology read.
 //   node src/cli.js ontology-gate [--json]
 import { readFileSync } from 'node:fs';
+import { THROTTLE_MS } from './writers.js';
 import { col, metaGet } from '../db.js';
 import { whatIsMany, clearCache } from './index.js';
 import { GOLDEN, checkGolden } from './golden.js';
@@ -14,6 +15,8 @@ export const GATE = {
   heartbeatFreshMs: 15 * 60e3,
   minDecisions: { 'tracer.identify': 50, 'tracer.pass_through': 200, 'grouping.classify': 500, 'grouping.service': 500, 'firewall.context': 200 },
   firewallP95Ms: 300, // an ontology read may take this share of the firewall's 2.5 s budget
+  parityRuns: 3,      // G2: this many daily parity checks in a row with nothing missing or stale (after G1 runs)
+  parityLagShare: 0.01, // ... except the throttled writers (entities, clusters), allowed this share of their facts (up to 10 minutes behind)
 };
 
 // The PRs after A (docs/ontology-design.md, 6), what each needs, and which shadow modules it moves.
@@ -23,10 +26,25 @@ export const STEPS = {
   D: { title: 'incident tracer reads whatIs (step 4)', needs: ['A', 'C'], days: GATE.minDays, modules: ['tracer.identify'], replay: true },
   E: { title: 'grouping reads whatIs (step 5)', needs: ['A'], days: GATE.minDays, modules: ['grouping.classify', 'grouping.service'] },
   F: { title: 'firewall and Safety Check read whatIsMany (step 6)', needs: ['A'], days: GATE.minDays, modules: ['firewall.context'], latency: true },
-  G: { title: 'writers assert facts directly; old lists go (step 7)', needs: ['A', 'C', 'D', 'E', 'F'], days: GATE.minDays, modules: [] },
+  // step 7 in three parts (docs/ontology-design.md 6.5). G1 started before the 7-day window by the operator's choice: it is additive and
+  // changes no decision. G2 waits for its own evidence (parity). G3 removes the rollback switch, so it waits for #74's readers' 7 days.
+  G1: { title: 'writers assert facts at the source (step 7, part 1)', needs: ['A', 'C', 'D', 'E', 'F'], days: 0, modules: [] },
+  G2: { title: 'the daily backfill off, its old facts retired (step 7, part 2)', needs: ['G1'], days: 0, modules: [], parity: true },
+  G3: { title: 'the old lists and the ONTOLOGY_READ switch go (step 7, part 3)', needs: ['A', 'C', 'D', 'E', 'F', 'G1'], daysOf: ['C', 'D', 'E', 'F'], days: GATE.minDays, modules: [] },
 };
 
 /** Disagreements already explained (the cause, and what was done), kept in the repository so they are reviewed in PRs. */
+/** What keeps one parity record from being clean (docs/ontology-design.md 6.5, G2). */
+export function parityProblems(p) {
+  const out = [];
+  for (const [name, w] of Object.entries(p.writers || {})) {
+    const allowed = THROTTLE_MS[name] ? Math.ceil((w.facts || 0) * GATE.parityLagShare) : 0;
+    if (w.missing + w.stale > allowed) out.push(`${name}: ${w.missing} missing, ${w.stale} stale${w.sample_missing?.length ? ` (e.g. ${w.sample_missing[0]})` : ''}`);
+    if (w.legacy) out.push(`${name}: ${w.legacy} facts still from the old backfill`);
+  }
+  return out;
+}
+
 export function loadTriage(path = new URL('./triage.json', import.meta.url)) {
   try { return JSON.parse(readFileSync(path, 'utf8')); } catch { return {}; }
 }
@@ -64,7 +82,7 @@ export async function gate({ now = Date.now() } = {}) {
     const why = [];
     if (running(id)) { steps[id] = { title: st.title, status: 'done', why: ['running in production'] }; continue; }
     for (const n of st.needs) if (!running(n)) why.push(`step ${n} is not running in production yet`);
-    const last = Math.min(...st.needs.map(daysSince));
+    const last = Math.min(...(st.daysOf || st.needs).map(daysSince));
     if (st.days && last < st.days) why.push(`shadow log ${last.toFixed(1)} of ${st.days} days`);
     if (!goldenOk) why.push(`golden set: ${golden.filter((g) => !g.ok).map((g) => `${g.account.slice(0, 20)} is ${g.got}, expected ${g.expect}`).join('; ')}`);
     for (const m of st.modules) {
@@ -79,6 +97,12 @@ export async function gate({ now = Date.now() } = {}) {
       if (ms == null || ms > GATE.firewallP95Ms) why.push(`firewall ontology read p95 ${ms ?? '?'} ms (budget ${GATE.firewallP95Ms} ms)`);
     }
     if (st.replay) why.push('the stored-case replay (shipped with PR C) has not passed yet');
+    if (st.parity) {
+      const runs = (await metaGet('ontology_parity', [])).filter((p) => p.ts > (since.G1?.ts || Infinity)).slice(-GATE.parityRuns);
+      const bad = runs.map((p) => parityProblems(p)).filter((x) => x.length);
+      if (runs.length < GATE.parityRuns) why.push(`parity: ${runs.length} of ${GATE.parityRuns} daily checks since G1 runs`);
+      if (bad.length) why.push(`parity: ${bad[bad.length - 1].join('; ')}`);
+    }
     steps[id] = { title: st.title, status: why.length ? 'waiting' : 'ready', why };
   }
   return {

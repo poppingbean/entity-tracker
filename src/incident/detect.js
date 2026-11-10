@@ -166,6 +166,7 @@ async function followStolen(blocks) {
         await col('incidents').updateOne({ _id: src.incident, 'accounts.account': { $ne: f.to } }, { $push: { accounts: { account: f.to, role: 'cash_out_wallet', ts: f.ts, live: true } } });
         await col('firewall_flags').updateOne({ _id: f.to }, { $setOnInsert: { _id: f.to, severity: 'high', reason: 'received stolen funds', detail: `Received ${Math.round(v.amount).toLocaleString('en-US')} ${v.symbol} from an account of incident ${src.incident}.`, ts: Date.now(), source: 'incident', incident: src.incident } }, { upsert: true });
         map.set(f.to, { incident: src.incident, role: 'cash_out_wallet', root: src.root, last_out_ts: null });
+        await (await import('../ontology/writers.js')).syncFacts(['incidents', 'firewall_flags']); // G1: the new cash-out wallet is in the ontology at once
       }
       retrace.add(src.incident);
       out.push(move);

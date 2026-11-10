@@ -9,7 +9,7 @@ import { config } from '../config.js';
 import { whatIsMany } from './index.js';
 
 /** The migration steps this code contains. Each migration PR adds its letter; the heartbeat reports them and the gate reads them. */
-export const ONTOLOGY_STEPS = ['A', 'B', 'C', 'D', 'E', 'F'];
+export const ONTOLOGY_STEPS = ['A', 'B', 'C', 'D', 'E', 'F', 'G1'];
 
 const on = () => config.ontology?.shadow !== false;
 const seen = new Map(); // module|account|old → { ts, r }: the last comparison, reused for an hour

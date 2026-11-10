@@ -89,6 +89,7 @@ export async function reflagIncidents({ log = info } = {}) {
     { $pull: { tags: { tag: 'hack' } } }
   );
 
+  await (await import('../ontology/writers.js')).syncFacts(['incidents', 'firewall_flags']); // G1
   return {
     reflagged_count: reflagged.length,
     reflagged,
