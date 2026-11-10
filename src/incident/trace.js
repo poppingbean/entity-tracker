@@ -20,6 +20,7 @@ import { exchangeWalletMap } from './exchanges.js';
 import { view } from '../near/rpc.js';
 import { shadow, comparePass } from '../ontology/shadow.js';
 import { reads, passThrough, classOf } from '../ontology/sync.js';
+import { priceCtx, buildImplied } from './pricehistory.js';
 import { config } from '../config.js';
 
 const IMPLICIT = /^[0-9a-f]{64}$|^0x[0-9a-f]{40}$/;
@@ -60,9 +61,11 @@ export async function accountTxHashes(account, { limit = MAX_TXS, from = null, t
 const usdSum = (rows) => rows.reduce((s, r) => s + (r.usd || 0), 0);
 /** Value per token of a set of flows, summed: [{ token, symbol, amount, usd }] sorted by USD. */
 async function valued(flows) {
-  const by = new Map();
-  for (const f of flows) by.set(f.token, (by.get(f.token) || 0n) + BigInt(f.raw));
-  const rows = await Promise.all([...by].map(async ([token, raw]) => ({ token: baseToken(token), via_intents: token.startsWith('intents:') || undefined, raw: raw.toString(), ...(await valueOf(token, raw.toString())) })));
+  const by = new Map(), at = new Map(), ctx = priceCtx.getStore();
+  for (const f of flows) { by.set(f.token, (by.get(f.token) || 0n) + BigInt(f.raw)); (at.get(f.token) || at.set(f.token, []).get(f.token)).push(f.ts); }
+  const when = (t) => { const s = (at.get(t) || []).filter(Number.isFinite).sort((a, b) => a - b); return s.length ? s[s.length >> 1] : null; }; // the median time of the token's flows
+  const rows = await Promise.all([...by].map(async ([token, raw]) => ({ token: baseToken(token), via_intents: token.startsWith('intents:') || undefined, raw: raw.toString(), ...(await valueOf(token, raw.toString(), { ts: when(token) })) })));
+  if (ctx) for (const r of rows) if (r.basis) { ctx.bases[r.basis] = (ctx.bases[r.basis] || 0) + 1; ctx.today_usd += r.today_usd || 0; }
   return rows.sort((a, b) => (b.usd || 0) - (a.usd || 0));
 }
 const actionsOf = (t) => (t.transaction?.actions || []).map((a) => (typeof a === 'string' ? a : a.FunctionCall ? a.FunctionCall.method_name : Object.keys(a)[0]));
@@ -102,7 +105,17 @@ function originOf(account, txs, flows) {
  * Trace an incident. `input`: { account } (the attacker), { tx } (an attack transaction) or { target, hours } (a contract that was hit:
  * the receivers it paid most in the window become the suspects). Returns the incident document (not saved).
  */
-export async function traceIncident(input, { depth = 2, log = () => {}, upstreamDone = null } = {}) {
+/**
+ * Trace one case. USD figures are at the time the money moved (pricehistory.js; PRICE_AT_INCIDENT=false = today's prices); the result carries
+ * `prices: { at, bases: { <basis>: lookups }, today_usd }`: how the prices were found, and what the priced amounts are worth today.
+ */
+export async function traceIncident(input, opts = {}) {
+  const ctx = { implied: new Map(), bases: {}, at_usd: 0, today_usd: 0 };
+  const inc = await priceCtx.run(ctx, () => traceIncidentInner(input, opts));
+  if (!inc || !config.incidents.priceAtIncident) return inc;
+  return { ...inc, prices: { at: 'incident', bases: ctx.bases, today_usd: Math.round(ctx.today_usd) }, prices_note: Object.keys(ctx.bases).some((b) => b !== 'today') ? `USD at the time the money moved (${Object.entries(ctx.bases).map(([k, v]) => `${k} ${v}`).join(', ')}); today's value beside it` : 'USD at current prices (no price history found)' };
+}
+async function traceIncidentInner(input, { depth = 2, log = () => {}, upstreamDone = null } = {}) {
   let attacker = input.account || null, hint = null, suspects = [];
   if (input.tx) {
     const [t] = await fetchTxs([input.tx]);
@@ -129,6 +142,7 @@ export async function traceIncident(input, { depth = 2, log = () => {}, upstream
   const { hashes } = await accountTxHashes(attacker);
   const txs = await fetchTxs(hashes);
   const flows = txs.flatMap(flowsOfTx);
+  { const c = priceCtx.getStore(); if (c) c.implied = await buildImplied(flows).catch(() => new Map()); } // the case's own swaps price tokens nobody else does
   const made = createdBy(attacker, txs);
   const own = new Map([[attacker, { account: attacker, role: 'attacker' }]]);
   for (const m of made) own.set(m.account, { account: m.account, role: m.token ? 'fake_token' : m.code ? 'contract' : 'sub_account', ts: m.ts });
@@ -266,7 +280,7 @@ export async function traceIncident(input, { depth = 2, log = () => {}, upstream
     _id: `inc:${attacker}`, status, has_evidence: !!evidence, kind, input,
     attacker: { account: attacker, ...origin, created_ts: origin.created_ts, funders: origin.funders.map((f) => ({ account: f.from, tx: f.tx, ts: f.ts, raw: f.raw })) },
     accounts: [...own.values()], service_accounts: service, target, victims, sources: up.sources, source_path: up.path, drain: up.drain ? { exchange: up.drain.exchange, usd: up.drain.usd, root: up.drain.root } : null, attack_txs: attackRows, stolen_usd: Math.round(stolen), losses: target?.tokens || [],
-    trail, held, held_usd: Math.round(held.reduce((s, h) => s + (h.usd || 0), 0)), freezable: held.flatMap((h) => h.tokens.filter((t) => t.freeze).map((t) => ({ holder: h.account, ...t }))),
+    trail, coverage: coverageOf({ exits: [{ usd: Object.values(trail.exit_usd || {}).reduce((s, v) => s + v, 0) }], held_usd: held.reduce((s, h) => s + (h.usd || 0), 0), stolen_usd: stolen, stopped: trail.stopped || [] }), held, held_usd: Math.round(held.reduce((s, h) => s + (h.usd || 0), 0)), freezable: held.flatMap((h) => h.tokens.filter((t) => t.freeze).map((t) => ({ holder: h.account, ...t }))),
     timeline, signals, suspects, started_ts: Number.isFinite(firstAttack) ? firstAttack : null, last_ts: Math.max(...txs.map(tsOf).filter(Boolean), 0) || null,
     stats: { txs: txs.length, flows: flows.length }, prices_note: 'USD at current prices', traced_ts: Date.now(),
   };
@@ -306,15 +320,95 @@ function destKind(id) {
   return null; // a wallet
 }
 
-/** Follow value out of the attacker's accounts: hop by hop through new wallets, up to exchanges / bridges / NEAR Intents. */
-export async function followMoney(ownSet, flows, { since, depth, own, fake, payers = new Set() }) {
+/**
+ * Follow value out of the attacker's accounts up to exchanges / bridges / NEAR Intents / other chains. `config.incidents.trail.search`:
+ * best_first (default: the wallet that received the most USD is expanded first, and each branch stops by value) or bfs (the old hop-by-hop
+ * search with fixed caps). Returns { moves, exits, wallets, exit_usd, capped, stopped } (`stopped`: branches not followed, with the rule that ended them).
+ */
+export async function followMoney(ownSet, flows, opts) {
+  return config.incidents.trail.search === 'bfs' ? followMoneyBfs(ownSet, flows, opts) : followMoneyBestFirst(ownSet, flows, opts);
+}
+
+/** How much of the loss was traced: to an endpoint (exchange, bridge, solver, another chain), still held, or not traced. Pure. */
+export function coverageOf({ exits = [], held_usd = 0, stolen_usd = 0, stopped = [] }) {
+  const to = Math.round(exits.reduce((s, e) => s + (e.usd || 0), 0)), held = Math.round(held_usd || 0), loss = Math.round(stolen_usd || 0);
+  const untraced = Math.max(0, loss - to - held);
+  return { stolen_usd: loss, to_endpoints_usd: to, still_held_usd: held, untraced_usd: untraced, untraced_share: loss > 0 ? Math.round((untraced / loss) * 1000) / 1000 : null, stopped: stopped.slice(0, 30) };
+}
+
+/**
+ * Best-first money trail: a priority queue of wallets ordered by the USD that reached them. Each is expanded (its transactions read, its
+ * outgoing moves classified) until a stop rule ends the branch: below `floorUsd`, below `shareFloor` of the loss, `maxWallets`, `maxDepth`, `maxMs`.
+ * `opts.lossUsd` is the case's loss (default: the first moves' total); `opts.budget` overrides the settings (follow-ups: 10 wallets, 60 s);
+ * `opts.source` injects { accountTxHashes, fetchTxs } (tests).
+ */
+export async function followMoneyBestFirst(ownSet, flows, { since, own, fake, payers = new Set(), lossUsd = null, budget = {}, source = {} }) {
+  const B = { ...config.incidents.trail, ...budget }, src = { accountTxHashes, fetchTxs, valueOf, ...source };
+  const moves = [], exits = [], wallets = [], stopped = [], seen = new Set(ownSet), queue = new Map(), t0 = Date.now();
+  const keep = (f) => f.ts >= since && !fake.has(baseToken(f.token)) && !/^nft:|^mint:|^burn:/.test(f.token) && !(PSEUDO.test(f.to) && !f.to.startsWith('chain:'));
+  let capped = null;
+  const want = (acct, usd, hop) => { const q = queue.get(acct); if (q) q.usd += usd; else queue.set(acct, { usd, hop }); };
+  // classify a set of outgoing moves (one wallet's, or the first ones): exits, 1Click swaps, and the wallets worth following next
+  const handle = async (frontier, hop) => {
+    const rows = await Promise.all(frontier.map(async (f) => ({ ...f, ...(await src.valueOf(f.token, f.raw, { ts: f.ts })), hop })));
+    const all = rows.filter((r) => (r.usd ?? 0) >= 50 || (r.usd == null && r.token === NEAR));
+    const big = all.sort((a, b) => (b.usd ?? 0) - (a.usd ?? 0)).slice(0, HOP_MOVES); // a busy wallet pays hundreds of accounts
+    if (all.length > big.length) capped = `hop ${hop}: the ${HOP_MOVES} largest of ${all.length} moves followed`;
+    const swaps = await pool(big, 3, (r) => (Date.now() - t0 < B.maxMs && !destKind(r.to) && /^[0-9a-f]{64}$/.test(r.to) ? oneClickSwap(r.to) : null)); // three at a time: the status API rate-limits
+    for (const [i, r] of big.entries()) {
+      const sw = swaps[i], base = { tx: r.tx, ts: r.ts, from: r.from, to: r.to, token: baseToken(r.token), symbol: r.symbol, amount: r.amount, usd: r.usd != null ? Math.round(r.usd) : null, hop };
+      if (sw) {
+        const refunded = sw.status === 'REFUNDED' || sw.status === 'FAILED';
+        moves.push({ ...base, dest_kind: refunded ? `1Click swap, ${sw.status === 'FAILED' ? 'failed' : 'refunded'}` : `1Click swap to ${sw.asset} on ${sw.chain}`, swap: sw });
+        seen.add(r.to);
+        if (!refunded) {
+          exits.push({ to: sw.recipient ? `${sw.chain}:${sw.recipient}` : r.to, kind: sw.chain === 'NEAR' ? '1Click swap on NEAR' : `swapped to ${sw.chain}`, chain: sw.chain, asset: sw.asset, recipient: sw.recipient, amount_out: sw.amount_out, status: sw.status, dest_txs: sw.dest_txs, deposit_address: r.to, usd: r.usd, token: baseToken(r.token), symbol: r.symbol, amount: r.amount, tx: r.tx, ts: r.ts });
+          if (sw.chain === 'NEAR' && sw.recipient && !seen.has(sw.recipient)) want(sw.recipient, r.usd || 0, hop + 1);
+        }
+        continue;
+      }
+      let k = destKind(r.to);
+      if (!k && !PSEUDO.test(r.to) && !/^[0-9a-f]{64}$|^0x[0-9a-f]{40}$/.test(r.to)) { const st = await isContract(r.to); if (st) k = 'contract'; }
+      moves.push({ ...base, dest_kind: k || 'wallet' });
+      if (k && k !== 'DEX' && k !== 'contract') exits.push({ to: r.to, kind: k.startsWith('exchange') ? 'an exchange' : k, label: k, usd: r.usd, token: baseToken(r.token), symbol: r.symbol, amount: r.amount, tx: r.tx, ts: r.ts });
+      // money going back to an account that paid in (a victim, a source, a solver it traded with) is that account's again: never followed
+      else if (!k && !PSEUDO.test(r.to) && !seen.has(r.to) && !payers.has(r.to)) want(r.to, r.usd || 0, hop + 1);
+    }
+  };
+  await handle(flows.filter((f) => keep(f) && ownSet.has(f.from) && !ownSet.has(f.to)), 0);
+  const loss = lossUsd ?? moves.reduce((s, m) => s + (m.usd || 0), 0);
+  while (queue.size) {
+    const [acct, c] = [...queue].sort((a, b) => b[1].usd - a[1].usd)[0];
+    queue.delete(acct);
+    if (seen.has(acct)) continue;
+    const why = c.usd < B.floorUsd ? 'below the USD floor' : c.usd < B.shareFloor * loss ? 'below its share of the loss' : wallets.length >= B.maxWallets ? 'wallet budget spent' : c.hop > B.maxDepth ? 'depth limit' : Date.now() - t0 > B.maxMs ? 'out of time' : null;
+    if (why) { stopped.push({ account: acct, usd: Math.round(c.usd), why }); continue; }
+    seen.add(acct); wallets.push({ account: acct, received_usd: Math.round(c.usd), hop: c.hop });
+    const { hashes } = await src.accountTxHashes(acct, { limit: HOP_TXS });
+    const fl = (await src.fetchTxs(hashes)).flatMap((t) => (t.transaction ? [...(t.receipts ? flowsOfTx(t) : [])] : []));
+    const out = fl.filter((f) => keep(f) && f.from === acct && !seen.has(f.to));
+    out.push(...fl.filter((f) => keep(f) && f.kind === 'intents_out' && seen.has(f.from) && !seen.has(f.to))); // intents withdrawals signed from this wallet's intents account
+    await handle(out, c.hop);
+  }
+  if (stopped.length) capped = `${stopped.length} branch(es) not followed (${[...new Set(stopped.map((s) => s.why))].join(', ')})`;
+  // the attacker's own intents withdrawals to other chains
+  for (const f of flows) if (f.kind === 'intents_out' && ownSet.has(f.from) && f.to.startsWith('chain:') && keep(f)) { const v = await valueOf(f.token, f.raw, { ts: f.ts }); exits.push({ to: f.to, kind: 'withdrawn to another chain', usd: v.usd, token: baseToken(f.token), symbol: v.symbol, amount: v.amount, tx: f.tx, ts: f.ts }); }
+  const per = new Map(); // each transfer once (the same move can be seen from two hops)
+  for (const e of exits) per.set(`${e.tx}|${e.to}|${e.token}`, e);
+  const byKind = {};
+  for (const e of per.values()) byKind[e.kind] = Math.round((byKind[e.kind] || 0) + (e.usd || 0));
+  return { moves: moves.sort((a, b) => a.ts - b.ts).slice(0, 200), exits: [...per.values()], wallets, exit_usd: byKind, capped, stopped };
+}
+
+/** The old search: hop by hop through new wallets with fixed caps (TRAIL_SEARCH=bfs). */
+export async function followMoneyBfs(ownSet, flows, { since, depth, own, fake, payers = new Set() }) {
   const moves = [], exits = [], wallets = [], seen = new Set(ownSet);
   const keep = (f) => f.ts >= since && !fake.has(baseToken(f.token)) && !/^nft:|^mint:|^burn:/.test(f.token) && !(PSEUDO.test(f.to) && !f.to.startsWith('chain:'));
   let frontier = flows.filter((f) => keep(f) && ownSet.has(f.from) && !ownSet.has(f.to));
   const t0 = Date.now(); let capped = null;
   for (let hop = 0; hop <= depth && frontier.length; hop++) {
     if (hop && Date.now() - t0 > FOLLOW_MS) { capped = `stopped after ${hop} hop(s): out of time`; break; }
-    const rows = await Promise.all(frontier.map(async (f) => ({ ...f, ...(await valueOf(f.token, f.raw)), hop })));
+    const rows = await Promise.all(frontier.map(async (f) => ({ ...f, ...(await valueOf(f.token, f.raw, { ts: f.ts })), hop })));
     const all = rows.filter((r) => (r.usd ?? 0) >= 50 || (r.usd == null && r.token === NEAR));
     // the largest moves only (a busy wallet pays hundreds of accounts)
     const big = all.sort((a, b) => (b.usd ?? 0) - (a.usd ?? 0)).slice(0, HOP_MOVES);
@@ -357,7 +451,7 @@ export async function followMoney(ownSet, flows, { since, depth, own, fake, paye
     frontier = more;
   }
   // the attacker's own intents withdrawals to other chains
-  for (const f of flows) if (f.kind === 'intents_out' && ownSet.has(f.from) && f.to.startsWith('chain:') && keep(f)) { const v = await valueOf(f.token, f.raw); exits.push({ to: f.to, kind: 'withdrawn to another chain', usd: v.usd, token: baseToken(f.token), symbol: v.symbol, amount: v.amount, tx: f.tx, ts: f.ts }); }
+  for (const f of flows) if (f.kind === 'intents_out' && ownSet.has(f.from) && f.to.startsWith('chain:') && keep(f)) { const v = await valueOf(f.token, f.raw, { ts: f.ts }); exits.push({ to: f.to, kind: 'withdrawn to another chain', usd: v.usd, token: baseToken(f.token), symbol: v.symbol, amount: v.amount, tx: f.tx, ts: f.ts }); }
   const per = new Map(); // each transfer once (the same move can be seen from two hops)
   for (const e of exits) per.set(`${e.tx}|${e.to}|${e.token}`, e);
   const byKind = {};
