@@ -16,6 +16,8 @@
 | Run `curl "https://app.safe-near.org/api/v1/inspect?q=efd224256518a7cacd209867963276efed302a8e222c013c43f4b1bd369ae5af"` | The same answer as JSON (`"verdict": "danger"`): what a wallet or an AI agent calls before it lets a user sign. `POST /api/v1/tx/check` checks a whole transaction ([docs/tx-firewall.md](docs/tx-firewall.md)) |
 | In Telegram, send `/hacks` to [@safenear_bot](https://t.me/safenear_bot), then `/hack efd224256518a7cacd209867963276efed302a8e222c013c43f4b1bd369ae5af` | The latest proven hacks, then this case with an evidence file to forward to whoever can act (an exchange, a bridge, SEAL 911) |
 | Add the Agent Guard to Claude Code: `claude mcp add --transport http safe-near https://app.safe-near.org/mcp`, then ask *"Send 0.5 NEAR from my-agent.near to efd224256518a7cacd209867963276efed302a8e222c013c43f4b1bd369ae5af"* | The agent calls `guard_transaction` and gets **BLOCK**: the receiver holds the Binance drain. Codex: `codex mcp add safe-near --url https://app.safe-near.org/mcp` ([docs/agent-guard.md](docs/agent-guard.md)) |
+| Press `/` on any page and type `binance`, then `burrow`, then paste `efd224256518a7cacd209867963276efed302a8e222c013c43f4b1bd369ae5af` | **One search over everything**: the Binance hot wallets (entities) and the drain case; the Rhea (Burrow) exploit and its lending contract; for a pasted account, **Is it safe?** first (flagged critical, in 1 case), then its wallet page and the case |
+| Open <https://app.safe-near.org/entities/9c484fa5d2d069569ba063fc555c34e621ccd88fdbb0295fc79bad232621c5c1>, or run `curl "https://app.safe-near.org/api/v1/entity?id=solver-priv-liq.near"` | **What Safe Near calls it** (the ontology): *an exchange hot wallet · operated by Binance*, why (it sends its reserves to `binancecold3.near`), and its links (the cold wallet, the drain case it was a victim of, the wallets it funded). The API answers the same for any account; an agent asks with the `what_is` tool |
 | Run `npm install && npm run agent-example` | An agent in code guards three transactions: a payment to the drain account (**BLOCK**), wrapping 0.5 NEAR (**ALLOW**), a full-access key for a "support agent" (**BLOCK**), then plans a function-call key limited to one contract instead |
 
 Run it yourself: see [Setup](#setup) (Node.js 20+, MongoDB, a NEAR AI key; `npm test` runs the unit tests).
@@ -57,6 +59,8 @@ It also follows the money of NEAR launchpad tokens: **who buys early, how those 
 - **Is it safe?** One box (**Safety Check**) answers for anything a user pastes: a wallet, a token or its name, an NFT, any contract, a transaction, a link, a website, or what a wallet is about to sign. Wallets and dApps get the same answers through a public API, including a transaction firewall called right before signing.
 - **Audits every new contract** deployed on NEAR, of any type (tokens, NFTs, pools, lending, DAOs, bridges …): what it is, the powers its code gives someone over users, and who holds them.
 - **Catches hacks as they happen and traces them:** money leaving a DeFi protocol for an account that looks like an attacker is flagged within seconds. The incident is rebuilt from the chain: the attacker's accounts, the target, the losses and victims, and where the money went, across chains.
+- **One answer for "what is this account?"** A person, an exchange hot or cold wallet, a NEAR Intents solver, a relayer, a router, a launchpad, a contract: every part of Safe Near (the hack tracer, wallet grouping, the firewall) asks the same [ontology layer](#ontology-layer-one-answer-for-what-is-this-account), which answers from the strongest evidence and says why.
+- **One search for everything:** press `/` and type a token, a wallet, a creator, an exchange name, a contract, a hack, an NFT collection, or paste any account, transaction or link.
 - **Warns in time:** alerts on rugs in progress, contract changes, large buys, sells and transfers of anything on a watchlist, on the dashboard, through the Telegram bot [@safenear_bot](https://t.me/safenear_bot), an API or webhooks.
 - **Measures itself:** every gate, score and AI verdict is scored against what happened afterwards (the Accuracy page).
 - **Treats chain data as untrusted:** token names, metadata and memos are cleaned before any AI reads them, and the AI can never make something look safer than the rules say.
@@ -332,6 +336,13 @@ The UI and API are read-only except the simulated sell button (`POST /api/sim/se
 4. In MongoDB Atlas allow the service's IP under Network Access.
 5. Run **one** worker only (two workers would duplicate work). `npm run web` serves the UI alone if you want to scale it separately.
 
+**Operating notes.**
+- **Is the new version running?** `node src/cli.js ontology-gate` prints the commit and the ontology steps each production process reports (a heartbeat, once a minute), the golden set and the shadow log. `/api/health` says whether the database and NEAR AI are reachable.
+- **A merge that does not deploy.** If the host missed the push (the last deployment is still the previous commit), use *Deploy latest commit* in Railway, or check the service's Source settings: branch `main`, automatic deploys on, *Wait for CI* off (this repository has no CI), no watch paths that exclude `src/`.
+- **Rolling back the ontology without a deploy.** Set `ONTOLOGY_READ=none` and restart: the tracer, drain detection, grouping and the firewall go back to their old rules, and grouping's stored kinds are re-synced the other way. A subset works too, e.g. `ONTOLOGY_READ=pass_through,tracer`.
+- **After a grouping rule change** the worker re-syncs the kinds stored on wallets by itself (log line `ontology: grouping rule … wallets re-synced, groups rebuilt`); nothing to run by hand.
+- **Working from a laptop on the production database.** Allow its IP in Atlas (a TLS "internal error" on connect means it is not allowed), and set `ONTOLOGY_HEARTBEAT=false ONTOLOGY_SHADOW=false ONTOLOGY_BACKFILL_EVERY_HOURS=0` for any local server, so it never tells the gate that unmerged code is running. Dry runs that write nothing: `ontology-backfill --dry`, `ontology-apply --dry`, `ontology-replay`.
+
 ## Project layout
 
 | Folder | What is in it |
@@ -349,4 +360,13 @@ The UI and API are read-only except the simulated sell button (`POST /api/sim/se
 
 ## Configuration
 
-See `.env.example`; every threshold (early window, win ROI, rug drawdown, co-buy rule, score cut-offs, AI review frequency) is configurable.
+See `.env.example`; every threshold (early window, win ROI, rug drawdown, co-buy rule, score cut-offs, AI review frequency) is configurable. Settings added most recently:
+
+| Setting | Default | What it does |
+|---|---|---|
+| `ONTOLOGY_READ` | `pass_through,tracer,grouping,firewall` | The modules that decide with the ontology; `none` puts them all back on their old rules (the rollback) |
+| `ONTOLOGY_SHADOW` | `true` | Compare each module's old rule with the ontology and record it (`ontology_shadow`) |
+| `ONTOLOGY_BACKFILL_EVERY_HOURS` | `24` | Re-derive the ontology's facts from the other collections (`0` = never) |
+| `ONTOLOGY_HEARTBEAT` | `true` | Report this process's commit and ontology steps; `false` on a local copy that uses the production database |
+| `FIREWALL_EXPLAIN_MODEL` | the analysis model | The NEAR AI model that explains a transaction check in words (the fast model missed too often in tests) |
+| `INCIDENT_ALERT_MAX_AGE_DAYS` | `7` | A hack older than this when found is recorded as a past case, with no alert |
