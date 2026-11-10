@@ -29,6 +29,9 @@
 //   node src/cli.js backtest KEY=VALUE ...             replay the gates on every stored check with config.rules changed (e.g. minBuyers=8)
 //   node src/cli.js truth <kind> <id> bad|good|clear [note]   hand label (kind: token|group|wallet|collection)
 //   node src/cli.js feedback [accept|reject <id>]      list pending reports, or review one
+//   node src/cli.js case-add <case id | account> <plan.json> [--dry]   add accounts, funded edges, suspected links to a confirmed case (docs/incidents.md)
+//   node src/cli.js ring-scan [case id]                look for laundering rings (memecoins bought by wallets a confirmed case paid); stores proposals
+//   node src/cli.js ring-approve <id> [--dry] | ring-reject <id> ["reason"]   an operator applies a proposal with case-add, or drops it
 //   node src/cli.js what-is <account>                  the ontology's answer for an account: class, why, conflicts, its edges
 //   node src/cli.js ontology-backfill [--dry]          turn today's data into ontology facts (--dry: check them and the golden set, write nothing)
 //   node src/cli.js ontology-apply [--dry]             recompute the grouping kinds stored on wallets with the current rule, then regroup
@@ -200,6 +203,23 @@ try {
     const opt = (k) => { const i = args.indexOf(`--${k}`); return i > 0 ? args[i + 1] : null; };
     const d = await confirmIncident(args[0], { source: args[1] === '-' ? null : args[1], reason: args[2], kind: opt('kind'), target: opt('target'), loss_usd: opt('loss'), accounts: (opt('accounts') || '').split(',').filter(Boolean) });
     info(`incident ${d._id}: confirmed (${d.confirmed_by?.source || 'no link yet'}) · ${d.kind} $${d.stolen_usd}`);
+  } else if (cmd === 'case-add') {
+    const { addToCase } = await import('./incident/caseadd.js');
+    const plan = JSON.parse((await import('node:fs')).readFileSync(args[1], 'utf8'));
+    console.log(JSON.stringify(await addToCase(args[0], plan, { dry: args.includes('--dry'), log: (l) => console.error(l) }), null, 1));
+  } else if (cmd === 'ring-scan') {
+    const { scanCase, proposeRings } = await import('./incident/ring.js');
+    const { refreshSnapshot } = await import('./ontology/sync.js');
+    await refreshSnapshot();
+    const { findCase } = await import('./incident/caseadd.js');
+    const cases = args[0] ? [await findCase(args[0])] : await col('incidents').find({ status: 'confirmed' }).toArray();
+    for (const c of cases.filter(Boolean)) { const f = await scanCase(c, { log: (l) => console.error(l) }); const n = await proposeRings(c, f); console.log(JSON.stringify({ case: c._id, linked: f.linked.length, proposals: f.proposals.map((p) => ({ token: p.token, creator: p.creator, linked: p.linked, total: p.total, share: +p.share.toFixed(3) })), new: n })); }
+  } else if (cmd === 'ring-approve') {
+    const { approveRing } = await import('./incident/ring.js');
+    console.log(JSON.stringify(await approveRing(args[0], { dry: args.includes('--dry'), log: (l) => console.error(l) }), null, 1));
+  } else if (cmd === 'ring-reject') {
+    const { rejectRing } = await import('./incident/ring.js');
+    await rejectRing(args[0], args[1]); info(`${args[0]} rejected`);
   } else if (cmd === 'unconfirm-incident') {
     // node src/cli.js unconfirm-incident <account> ["<reason>"]
     const { unconfirmIncident } = await import('./incident/service.js');

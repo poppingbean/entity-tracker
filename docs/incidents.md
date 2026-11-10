@@ -231,3 +231,24 @@ Replaying the drain's blocks, the exchange-drain detector flags the first transf
 **Confirmed by public reports.** Some hacks cannot be proven from the chain alone: a key compromise, or a collector account traced on its own, whose master looks like a victim. `node src/cli.js confirm-incident <account> <source link | -> "<reason>" [--kind protocol_exploit] [--target <contract>] [--loss <usd>] [--accounts a,b,c]` confirms one with its source. The case stays confirmed through every re-trace, NEAR AI cannot clear it, the attacker's accounts named in the report are flagged and followed, and the page shows "Confirmed by public reports" with the link.
 
 **NEAR Intents solvers are not exchanges.** A solver paying an account is how every 1Click / Intents swap delivers, so a busy account named `solver*`, or one whose transactions mostly settle through `intents.near`, is a service, never the exchange hot wallet of a drain. The accounts that paid into a case (its victims, its sources) are never followed as the attacker's.
+
+## Laundering rings and `case-add`
+
+**Ring detector** (`src/incident/ring.js`, worker, hourly; `RING_EVERY_MINUTES=0` turns it off). For each confirmed case it follows the NEAR the case's accounts paid out, three hops, the biggest 40 receivers per hop (exchanges, solvers and other hubs never count). It then reads which tokens those wallets bought and who else bought each one. A token where at least 2 linked wallets are at least 80% of the buyers is a ring. It only **proposes**: a `ring_proposals` row and an alert. It never flags anything, because flags change what other people see.
+
+```bash
+node src/cli.js ring-scan [case id]          # scan now, store proposals
+node src/cli.js ring-approve <id> --dry      # build what approving would write
+node src/cli.js ring-approve <id>            # an operator applies it (case-add)
+node src/cli.js ring-reject <id> "reason"
+```
+
+A proposal's plan: the buyers and the wallets that paid them become the case's `cash_out_wallet` accounts (flagged high); the token's creator is only **suspected** (an `accomplice` role with status `suspected`, confidence 0.6, "linked by trading, no traced payment"), is not flagged, and is added to the scanner's creator blacklist. Tested on the Binance case with the hand-added accounts removed, it finds `olccl-4` and `mmli-6` with the right creators; the other four tokens' buyers are outside the per-hop cap, so extend the plan by hand.
+
+**`case-add`** is the one writer for an analyst's findings (the detector's approval uses it too):
+
+```bash
+node src/cli.js case-add <case id | account> plan.json [--dry]
+```
+
+`plan.json`: `name` (the writer `case-add/<name>` and the group `grp:<name>`; running a name again replaces its facts), `accounts` (`account`, `role`, `why`; roles `cash_out_wallet`, `sub_account`, `intents_account`, `funder`), `edges` (`[from, to]`; the amount, transaction and time are read from the chain), `suspected`, `members` (group only, confidence at most 0.8), `blacklist`. Only a confirmed case takes accounts. It writes the case accounts (marked `added_by`, so a full re-trace keeps them), the firewall flags, the `funded` / `member_of` / suspected `role_in` facts, and the blacklist, then runs the incidents and firewall_flags backfill writers.

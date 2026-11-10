@@ -26,7 +26,7 @@ export function parseInvestigation(q) {
 }
 
 /** Flag the attacker's own accounts (not 1Click deposit addresses or the target) so every check that touches them warns. */
-async function flagAccounts(inc) {
+export async function flagAccounts(inc) {
   if (inc.status !== 'confirmed') return 0;
   const what = `${inc.kind === 'wallet_drainer' ? 'drained wallets' : inc.kind === 'exchange_drain' ? `received the money drained from ${inc.drain?.exchange || 'an exchange'}'s hot wallets` : `exploited ${inc.target?.account || 'a contract'}`}${inc.started_ts ? ` on ${new Date(inc.started_ts).toISOString().slice(0, 10)}` : ''} (~$${Math.round(inc.stolen_usd).toLocaleString('en-US')} taken)`;
   const reason = what;
