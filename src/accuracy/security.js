@@ -138,5 +138,9 @@ export async function securityAccuracy({ now = Date.now() } = {}) {
   // the contract's age comes from when it was deployed (contract_deploys), never from when it was audited
   const deployed = new Map((await col('contract_deploys').aggregate([{ $match: { account: { $in: ids } } }, { $group: { _id: '$account', ts: { $min: '$ts' } } }]).toArray()).map((d) => [d._id, d.ts]));
   out.audits = auditsAccuracy(audits.map((a) => ({ level: a.auto.level, truth: contractTruth({ manual: man.get(a._id), rugged: rugged.has(a._id), target_of_bad_case: targets.has(a._id), flagged_critical: crit.has(a._id), first_ts: deployed.get(a._id) ?? null }, now) })), audits.length);
+  // classification: the golden set against the ontology's answers
+  const { GOLDEN: G, checkGolden, goldenReport } = await import('../ontology/golden.js');
+  const { whatIsMany: wim } = await import('../ontology/index.js');
+  out.ontology = goldenReport(checkGolden(await wim(G.map((g) => g[0]))));
   return out;
 }

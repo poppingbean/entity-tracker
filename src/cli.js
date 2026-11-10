@@ -32,6 +32,8 @@
 //   node src/cli.js case-add <case id | account> <plan.json> [--dry]   add accounts, funded edges, suspected links to a confirmed case (docs/incidents.md)
 //   node src/cli.js ring-scan [case id]                look for laundering rings (memecoins bought by wallets a confirmed case paid); stores proposals
 //   node src/cli.js ring-approve <id> [--dry] | ring-reject <id> ["reason"]   an operator applies a proposal with case-add, or drops it
+//   node src/cli.js exchanges-prune [--apply]          list (or remove) registry entries that rest only on being busy (IDENTIFY_BUSY_NEUTRAL)
+//   node src/cli.js golden-candidates [--class <class>] [--limit N]   resolved accounts not in the golden set, strongest evidence first (JSON lines; writes nothing)
 //   node src/cli.js trace-replay [--limit N] [--only <id prefix>]   re-trace stored cases with the current code and diff them against what is stored (no AI, nothing saved)
 //   node src/cli.js truth-backfill [--dry]             build status_history for stored cases and count how many are labelled bad / good / unknown
 //   node src/cli.js fixture-tx <hash> <name> [--note "<text>"] [--stdout]   capture a real transaction as a test fixture (test/fixtures/tx/<name>.json)
@@ -312,6 +314,21 @@ try {
   } else if (cmd === 'ontology-parity') {
     const { parity } = await import('./ontology/backfill.js');
     console.log(JSON.stringify(await parity(), null, 1));
+  } else if (cmd === 'exchanges-prune') {
+    // registry entries that rest only on being busy (found by discovery, no sweep to an exchange's cold wallet, not added by hand): listed, and removed with --apply
+    const { provenWallet } = await import('./incident/exchanges.js');
+    const rows = (await col('exchange_wallets').find({}).toArray()).filter((r) => !provenWallet(r));
+    for (const r of rows) console.log(`${r._id.slice(0, 40)}  ${r.exchange || 'unnamed'}  ${r.how || ''}`);
+    console.log(`${rows.length} of the registry's entries rest on being busy alone`);
+    if (args.includes('--apply') && rows.length) { await col('exchange_wallets').deleteMany({ _id: { $in: rows.map((r) => r._id) } }); console.log('removed'); }
+  } else if (cmd === 'golden-candidates') {
+    // resolved accounts not in the golden set, strongest evidence first, as JSON lines ready to paste into src/ontology/golden.json (writes nothing)
+    const { GOLDEN } = await import('./ontology/golden.js'), have = new Set(GOLDEN.map((g) => g[0]));
+    const ci = args.indexOf('--class'), li = args.indexOf('--limit'), cls = ci >= 0 ? args[ci + 1] : null, lim = li >= 0 ? Number(args[li + 1]) : 50;
+    const { SOURCE_RANK } = await import('./ontology/classes.js');
+    const rows = (await col('ontology_entities').find(cls ? { class: new RegExp('^' + cls) } : { class: { $ne: 'unknown' } }).limit(5000).toArray()).filter((e) => !have.has(e._id));
+    rows.sort((a, b) => (SOURCE_RANK[b.source] || 0) - (SOURCE_RANK[a.source] || 0) || (b.confidence || 0) - (a.confidence || 0));
+    for (const e of rows.slice(0, lim)) console.log(JSON.stringify({ account: e._id, expect: e.class, note: e.label || e.why || '', source: 'operator', _evidence: `${e.source} ${e.confidence}: ${e.why}`, _conflicts: (e.conflicts || []).length }));
   } else if (cmd === 'trace-replay') {
     // re-trace stored cases with the current code and diff them against what is stored (nothing saved; no AI)
     const { traceReplay } = await import('./ontology/replay.js'), { refreshSnapshot } = await import('./ontology/sync.js');

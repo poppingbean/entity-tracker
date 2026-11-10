@@ -170,3 +170,15 @@ test('direct writers are named for the writer, and a legacy fact maps onto the s
   assert.equal(factId({ ...f, by: writerBy('audits') }), factId({ ...f, by: 'writer/audits' }));
   assert.notEqual(factId({ ...f, by: 'backfill/audits' }), factId({ ...f, by: 'writer/audits' }));
 });
+
+// ---- WP-07: the golden set as data
+import { validateGolden, goldenReport, GOLDEN_ENTRIES } from '../src/ontology/golden.js';
+test('golden.json is valid: classes exist, no duplicates, every entry has a source and a note', async () => {
+  assert.deepEqual(await validateGolden(), []);
+  assert.deepEqual(await validateGolden([{ account: 'a', expect: 'exchange/hot', source: 'operator', note: 'x' }, { account: 'a', expect: 'system', source: 'guess', note: '' }]).then((x) => x.length), 4);
+  assert.ok(GOLDEN_ENTRIES.length >= 15);
+});
+test('goldenReport counts per top class and lists failures', () => {
+  const r = goldenReport([{ account: 'a', expect: 'exchange/hot_wallet', got: 'exchange/hot_wallet', ok: true }, { account: 'b', expect: 'exchange/cold_wallet', got: 'unknown', ok: false, why: 'x' }, { account: 'c', expect: 'system', got: 'system', ok: true }]);
+  assert.deepEqual([r.n, r.ok], [3, 2]); assert.deepEqual(r.by_class.find((x) => x.class === 'exchange'), { class: 'exchange', n: 2, ok: 1 }); assert.equal(r.failures[0].account, 'b');
+});

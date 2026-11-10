@@ -11,6 +11,7 @@ import { config } from '../config.js';
 import { txIndexer } from '../near/rpc.js';
 import { viewAccount } from '../audit/rpc.js';
 import { builtinLabel } from '../labels.js';
+import { provenWallet } from './exchanges.js';
 import { flowsOfTx } from './flows.js';
 import { valueOf } from './prices.js';
 import { shadow, compareIdentify, comparePass } from '../ontology/shadow.js';
@@ -21,6 +22,7 @@ export const ROUTERS = new Set(['wrap.near', 'intents.near', 'aggregatedex.near'
 const isRouter = (id) => (reads('pass_through') ? passThrough(id) : ROUTERS.has(id));
 const PSEUDO = /^(mint|burn|intents|chain|nft):/;
 const cache = new Map();
+const BUSY_NAME = 'Busy account (unidentified)';
 /** Forget identify()'s answers (the replay compares old and new rules in one process). */
 export const clearIdentifyCache = () => cache.clear();
 const firstTx = async (id) => {
@@ -50,7 +52,7 @@ export async function identify(id) {
   // an entry the registry found only by being busy (not by hand, no sweep to an exchange's cold wallet) may be a solver
   const solver = !b && (!reg || (reg.source !== 'manual' && !reg.cold)) && ((first?.total || 0) >= 20000 || reg || ent?.kind === 'hub') ? await intentsSolver(id) : null;
   if (solver) out = { kind: 'service', name: 'NEAR Intents solver', how: solver };
-  else if (reg) out = { kind: 'exchange', name: `${reg.exchange || 'Unnamed exchange'} ${reg.kind === 'cold' ? 'cold' : 'hot'} wallet`, how: reg.how || 'in the exchange wallet registry' };
+  else if (reg && !(config.incidents.identifyBusyNeutral && !provenWallet(reg))) out = { kind: 'exchange', name: `${reg.exchange || 'Unnamed exchange'} ${reg.kind === 'cold' ? 'cold' : 'hot'} wallet`, how: reg.how || 'in the exchange wallet registry' };
   else if (lab?.label) out = { kind: lab.type === 'exchange' ? 'exchange' : 'wallet', name: lab.label, how: 'named by hand' };
   else if (b?.type === 'exchange') out = { kind: 'exchange', name: b.label, how: 'account name' };
   const contract = !!state && (state.code_hash !== '11111111111111111111111111111111' || !!state.global_contract_hash || !!state.global_contract_account_id);
@@ -60,7 +62,7 @@ export async function identify(id) {
     if (busy) {
       // a busy wallet: whose exchange is it? the exchange-named accounts it sends its reserves to say so
       const sweep = await sweepTarget(id);
-      out = sweep ? { kind: 'exchange', name: `${sweep.label} hot wallet`, how: `sends its reserves to ${sweep.to}` } : { kind: 'exchange', name: ent?.label && ent.label_source !== 'kind' ? ent.label : 'Unnamed exchange hot wallet', how: `${(first?.total || 0).toLocaleString('en-US')} transactions${ent?.kind === 'hub' ? ', pays out to many wallets' : ''}` };
+      out = sweep ? { kind: 'exchange', name: `${sweep.label} hot wallet`, how: `sends its reserves to ${sweep.to}` } : config.incidents.identifyBusyNeutral ? { kind: 'wallet', name: BUSY_NAME, how: `${(first?.total || 0).toLocaleString('en-US')} transactions`, busy: true } : { kind: 'exchange', name: ent?.label && ent.label_source !== 'kind' ? ent.label : 'Unnamed exchange hot wallet', how: `${(first?.total || 0).toLocaleString('en-US')} transactions${ent?.kind === 'hub' ? ', pays out to many wallets' : ''}` };
     }
   }
   if (!out) {
@@ -73,8 +75,10 @@ export async function identify(id) {
   return out;
 }
 /** identify()'s answer from a resolved ontology entity, or null for a class the tracer has no word for. */
-function fromOntology(o) {
+export function fromOntology(o) {
   const org = o.operator ? o.operator.replace(/^org:/, '').split('-').map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ') : null;
+  // an exchange that rests only on being busy (a behaviour fact) is not proof: neutral (IDENTIFY_BUSY_NEUTRAL)
+  if (o.top === 'exchange' && o.source === 'behaviour' && config.incidents.identifyBusyNeutral) return { kind: 'wallet', name: BUSY_NAME, how: o.why, busy: true };
   if (o.top === 'exchange') {
     const where = o.class === 'exchange/cold_wallet' ? 'cold' : 'hot';
     return { kind: 'exchange', name: `${org || o.label || 'Unnamed exchange'} ${where} wallet`, how: o.why };

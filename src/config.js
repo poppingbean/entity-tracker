@@ -90,6 +90,8 @@ export const config = {
   },
   incidents: {
     enabled: process.env.INCIDENTS_ENABLED !== 'false',
+    // an account that is only busy (20,000+ transactions) is never called an exchange hot wallet: it needs a sweep to an exchange's cold wallet, a hand entry or a name. false = the old fallback
+    identifyBusyNeutral: process.env.IDENTIFY_BUSY_NEUTRAL !== 'false',
     minUsd: num(process.env.INCIDENT_MIN_USD, 100000),          // a receiver must take at least this from one protocol within 30 min (only >= $100k)
     alwaysUsd: num(process.env.INCIDENT_ALWAYS_USD, 250000),   // ... and is traced whatever it looks like above this
     freshHours: num(process.env.INCIDENT_FRESH_HOURS, 72),      // an account younger than this is a suspect
