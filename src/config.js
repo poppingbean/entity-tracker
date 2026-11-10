@@ -202,6 +202,7 @@ export const config = {
   // the token analysis page's AI review: it reads the latest trades first, then follows tokens moved out by transfer
   analysis: {
     syncMinutes: num(process.env.ANALYSIS_SYNC_MINUTES, 5),  // how long an AI review reads new trades before writing (the worker reads the rest)
+    holdersVerified: num(process.env.ANALYSIS_HOLDERS_VERIFIED, 60), // the largest estimated holders checked live (ft_balance_of), ten at a time
     flowHops: num(process.env.ANALYSIS_FLOW_HOPS, 5),        // how many transfer hops to follow tokens that left the creator / early buyers
   },
   analyst: {

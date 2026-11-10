@@ -35,6 +35,7 @@ import { parseInvestigation, startInvestigation, investigationJob, confirmIncide
 import { report } from '../incident/signals.js';
 import { walletView } from '../near/walletview.js';
 import { entityView } from '../ontology/index.js';
+import { parseChainId } from '../ontology/chains.js';
 
 // the UI: a small shell page (public/index.html) and its assets (public/assets: app.css, js/core.js, js/pages/*.js, js/app.js).
 // Asset links carry the server's start time (?v=) so a deploy is picked up at once while the files themselves are cached long.
@@ -212,7 +213,7 @@ async function firewallApi(req, res, u) {
   }
   if (u.pathname === '/api/v1/entity' && req.method === 'GET') {
     const id = String(u.searchParams.get('id') || '').trim().toLowerCase();
-    if (!validNearAddress(id)) { send(400, { error: 'id must be a NEAR account' }); return; }
+    if (!validNearAddress(id) && !parseChainId(id)) { send(400, { error: 'id must be a NEAR account or a chain address such as eth:0x…' }); return; }
     send(200, await entityView(id)); return;
   }
   if (u.pathname === '/api/v1/account' && req.method === 'GET') {
@@ -448,7 +449,7 @@ const routes = {
   // the ontology's answer for the UI's account pages (the public, rate-limited one is /api/v1/entity)
   '/api/ontology': async (u) => {
     const id = String(u.searchParams.get('id') || '').trim().toLowerCase();
-    return validNearAddress(id) ? entityView(id) : { error: 'id must be a NEAR account' };
+    return validNearAddress(id) || parseChainId(id) ? entityView(id) : { error: 'id must be a NEAR account or a chain address' };
   },
 
   '/api/entity': async (u) => {

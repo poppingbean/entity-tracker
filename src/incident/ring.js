@@ -15,7 +15,7 @@ import { classOf, refreshSnapshot, snapshotSize } from '../ontology/sync.js';
 import { isKnownQuote } from '../near/quotes.js';
 import { addToCase } from './caseadd.js';
 
-export const RING = { minNear: 100, minLinked: 2, minShare: 0.8, seedsMax: 40, hops: 3, perHop: 40, perAccount: 200, tokenTxs: 400, tokensMax: 12, tokenMaxTxs: 20000, activeDays: 60 };
+export const RING = { minNear: 100, minLinked: 2, minShare: 0.8, seedsMax: 40, hops: 3, maxAccounts: 200, perAccount: 200, tokenTxs: 400, tokensMax: 12, tokenMaxTxs: 20000, activeDays: 60 };
 const WATCH = new Set(['attacker', 'accomplice', 'sub_account', 'intents_account', 'cash_out_wallet']);
 const skip = (a) => !a || /^(mint|burn|intents|chain|nft):/.test(a) || classOf(a).cuts_links;
 
@@ -68,6 +68,9 @@ const txsOf = async (acc, n, cache) => {
   return cache.get(acc);
 };
 
+/** The biggest payments first, up to ONE total budget of accounts for the whole scan (not a cap per hop): dust is noise, a buyer far down the list is still reached while budget remains. */
+export const pickFound = (found, linkedSize, max = RING.maxAccounts) => [...found].sort((a, b) => b.near - a.near).slice(0, Math.max(0, max - linkedSize));
+
 /** Look at one confirmed case. Returns { proposals, edges, linked } (nothing is stored). */
 export async function scanCase(inc, { log = () => {} } = {}) {
   const cache = new Map();
@@ -78,7 +81,7 @@ export async function scanCase(inc, { log = () => {} } = {}) {
   for (let hop = 0; hop < RING.hops && frontier.size; hop++) {
     const txs = [];
     for (const s of frontier) txs.push(...await txsOf(s, RING.perAccount, cache));
-    const found = paidBy(txs, frontier, { exclude: new Set([...caseSet, ...linked]), since }).sort((a, b) => b.near - a.near).slice(0, RING.perHop); // the biggest payments: dust is noise
+    const found = pickFound(paidBy(txs, frontier, { exclude: new Set([...caseSet, ...linked]), since }), linked.size);
     edges.push(...found);
     frontier = new Set(found.map((e) => e.to));
     frontier.forEach((a) => linked.add(a));

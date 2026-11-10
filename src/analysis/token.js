@@ -9,12 +9,13 @@ import { creatorIndex, creatorNetwork } from '../evaluate/creators.js';
 import { priceSeries } from '../collect/analyze.js';
 import { tagOf, ruggerGroup, ruggerWallet } from '../evaluate/tags.js';
 import { config } from '../config.js';
+import { holderCandidates, transferOnlyNote } from './holders.js';
 import { looksLikeInjection } from '../ai/tools/untrusted.js';
 
 const MIN = 60e3, DAY = 86400e3;
 export const CACHE_MS = 15 * MIN;
 const WINDOWS = [15, 60, 1440]; // minutes after launch
-const EARLY_ROWS = 30, HOLDERS_VERIFIED = 15, FLOW_TRAILS = 10, FLOW_NODES = 60;
+const EARLY_ROWS = 30, FLOW_TRAILS = 10, FLOW_NODES = 60;
 const r = (x, d = 2) => (x == null || !Number.isFinite(x) ? null : Math.round(x * 10 ** d) / 10 ** d);
 // routers and launchpad services that trade on behalf of users (justhoot in-app buys settle through NEAR Intents): not holders or sellers
 export const INFRA = /^(intents|wrap)\.near$|^(aa-[\w-]+|reward-distribute)\.justhoot\.near$|(^|\.)(ref-finance|ref-labs)\.near$/;
@@ -229,18 +230,20 @@ export async function buildAnalysis(id) {
     .sort((a, b) => b.net_near - a.net_near).slice(0, 12);
 
   // ---- holders: net tokens from trades (misses transfers), the largest checked live with ft_balance_of
-  const est = [...traders.values()].filter((x) => !INFRA.test(x.account) && x.account !== id).map((x) => ({ account: x.account, est_tokens: x.buy_tokens - x.sell_tokens })).filter((x) => x.est_tokens > 1).sort((a, b) => b.est_tokens - a.est_tokens);
-  const check = est.slice(0, HOLDERS_VERIFIED);
+  const xfers = await col('transfers').find({ token: id }, { projection: { from: 1, to: 1, tokens: 1 } }).toArray().catch(() => []);
+  const est = holderCandidates(traders, xfers, { creator, skip: (a) => INFRA.test(a) || a === id });
+  const check = est.slice(0, config.analysis.holdersVerified);
   // the dev buy does not go through the pool, so the creator is always checked
   if (creator && !check.some((x) => x.account === creator)) check.push({ account: creator, est_tokens: est.find((x) => x.account === creator)?.est_tokens ?? 0 });
-  const balances = dec != null ? await Promise.all(check.map((x) => ftBalance(id, x.account))) : [];
+  const balances = [];
+  if (dec != null) for (let i = 0; i < check.length; i += 10) balances.push(...await Promise.all(check.slice(i, i + 10).map((x) => ftBalance(id, x.account)))); // ten at a time
   const holders = check.map((x, i) => {
     const b = balances[i], tokens = b != null && dec != null ? units(b.toString(), dec) : null;
-    return { account: x.account, est_tokens: r(x.est_tokens, 0), tokens: tokens != null ? r(tokens, 0) : null, verified: tokens != null, supply_share: share(tokens ?? x.est_tokens),
+    return { account: x.account, via: x.via, est_tokens: r(x.est_tokens, 0), tokens: tokens != null ? r(tokens, 0) : null, verified: tokens != null, supply_share: share(tokens ?? x.est_tokens),
       early_rank: rankOf.get(x.account) ?? null, known: wmap.has(x.account), tag: wmap.get(x.account) ? tagOf(wmap.get(x.account).tag) : null, group: groupBrief(groupOf(x.account)), is_creator: x.account === creator };
   }).sort((a, b) => (b.tokens ?? b.est_tokens) - (a.tokens ?? a.est_tokens));
   const top10 = holders.slice(0, 10).reduce((s, h) => s + (h.supply_share || 0), 0);
-  const holdersSec = { holders_est: est.length, top10_share: supply ? r(top10, 4) : null, rows: holders };
+  const holdersSec = { holders_est: est.length, top10_share: supply ? r(top10, 4) : null, rows: holders, transfer_only_note: transferOnlyNote(holders, xfers, { creator, earlyBuyers: new Set(entries.map((e) => e.wallet)) }) };
 
   // ---- where the tokens went: transfers out of the creator and the early buyers, followed up to ANALYSIS_FLOW_HOPS hops
   const flowSources = [...(creator ? [{ account: creator, role: 'creator', rank: null }] : []),
@@ -274,6 +277,7 @@ export async function buildAnalysis(id) {
   if (early.length && fresh.length / early.length >= 0.3) add('medium', `${fresh.length} of the first ${early.length} buyers used wallets less than 3 days old.`);
   const strongShared = sharedFunders.filter((x) => x.strength === 'strong' && !x.same_group);
   if (strongShared.length) add('medium', `${strongShared.length} funder(s) paid several early buyers that the groups do not link yet.`);
+  if (holdersSec.transfer_only_note) add('medium', holdersSec.transfer_only_note);
   if (holdersSec.top10_share != null && holdersSec.top10_share >= 0.5) add('medium', `The 10 largest holders checked hold ${(holdersSec.top10_share * 100).toFixed(0)}% of supply.`);
   if (launch.transfer_fee_pct) add('info', `Transfer fee ${launch.transfer_fee_pct}%.`);
   const devTrail = tokenFlowsSec.trails.find((x) => x.role === 'creator');

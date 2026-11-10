@@ -32,6 +32,8 @@
 //   node src/cli.js case-add <case id | account> <plan.json> [--dry]   add accounts, funded edges, suspected links to a confirmed case (docs/incidents.md)
 //   node src/cli.js ring-scan [case id]                look for laundering rings (memecoins bought by wallets a confirmed case paid); stores proposals
 //   node src/cli.js ring-approve <id> [--dry] | ring-reject <id> ["reason"]   an operator applies a proposal with case-add, or drops it
+//   node src/cli.js chain-links                        addresses on other chains that received money from 2+ NEAR cases (leads; flags nothing)
+//   node src/cli.js link-eval                          pairwise precision / recall of the wallet grouping against pairs of known owners (changes nothing)
 //   node src/cli.js exchanges-prune [--apply]          list (or remove) registry entries that rest only on being busy (IDENTIFY_BUSY_NEUTRAL)
 //   node src/cli.js golden-candidates [--class <class>] [--limit N]   resolved accounts not in the golden set, strongest evidence first (JSON lines; writes nothing)
 //   node src/cli.js trace-replay [--limit N] [--only <id prefix>]   re-trace stored cases with the current code and diff them against what is stored (no AI, nothing saved)
@@ -314,6 +316,14 @@ try {
   } else if (cmd === 'ontology-parity') {
     const { parity } = await import('./ontology/backfill.js');
     console.log(JSON.stringify(await parity(), null, 1));
+  } else if (cmd === 'chain-links') {
+    // addresses on other chains that received money from two or more different NEAR cases: leads for the operator (flags nothing)
+    const rows = await col('ontology_facts').aggregate([{ $match: { predicate: 'sent_to', valid_to: null } }, { $group: { _id: '$object', cases: { $addToSet: '$subject' }, usd: { $sum: '$amount_usd' } } }, { $match: { 'cases.1': { $exists: true } } }, { $sort: { usd: -1 } }]).toArray();
+    for (const r of rows) console.log(JSON.stringify({ address: r._id, cases: r.cases, usd: Math.round(r.usd) }));
+    console.log(`${rows.length} addresses shared by 2+ cases`);
+  } else if (cmd === 'link-eval') {
+    // pairwise precision / recall of the current wallet grouping against pairs whose owner is known (WP-13 part A); changes nothing
+    console.log(JSON.stringify(await (await import('./graph/linkeval.js')).linkEval(), null, 1));
   } else if (cmd === 'exchanges-prune') {
     // registry entries that rest only on being busy (found by discovery, no sweep to an exchange's cold wallet, not added by hand): listed, and removed with --apply
     const { provenWallet } = await import('./incident/exchanges.js');
