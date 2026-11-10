@@ -1,0 +1,66 @@
+{
+ "name": "launch-tkn",
+ "note": "a create_token call on tkn.near",
+ "hash": "S9",
+ "captured_ts": 1794300000000,
+ "synthetic": true,
+ "tx": {
+  "transaction": {
+   "hash": "S9",
+   "signer_id": "dev.near",
+   "receiver_id": "tkn.near",
+   "actions": [
+    {
+     "FunctionCall": {
+      "method_name": "create_token",
+      "args": "eyJhcmdzIjp7Im93bmVyX2lkIjoiZGV2Lm5lYXIiLCJtZXRhZGF0YSI6eyJuYW1lIjoiRHJhZ29uIiwic3ltYm9sIjoiRFJBR09OIn19fQ==",
+      "gas": 30000000000000,
+      "deposit": "0"
+     }
+    }
+   ]
+  },
+  "execution_outcome": {
+   "block_timestamp": "1794300000000000000",
+   "block_height": 200000000,
+   "outcome": {
+    "logs": [],
+    "status": {
+     "SuccessValue": ""
+    }
+   }
+  },
+  "receipts": [
+   {
+    "receipt": {
+     "receipt_id": "S9-0",
+     "predecessor_id": "dev.near",
+     "receiver_id": "tkn.near",
+     "receipt": {
+      "Action": {
+       "signer_id": "dev.near",
+       "actions": [
+        {
+         "FunctionCall": {
+          "method_name": "x"
+         }
+        }
+       ]
+      }
+     }
+    },
+    "execution_outcome": {
+     "block_height": 200000000,
+     "block_timestamp": "1794300000000000000",
+     "outcome": {
+      "executor_id": "tkn.near",
+      "logs": [],
+      "status": {
+       "SuccessValue": ""
+      }
+     }
+    }
+   }
+  ]
+ }
+}

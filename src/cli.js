@@ -27,11 +27,14 @@
 //   node src/cli.js incident <account|tx hash|target:<contract>> [--no-ai]   trace a hack: attacker accounts, target, losses, victims, money trail
 //   node src/cli.js accuracy                           score gates, rule score, audit risk, AI and group verdicts against what happened
 //   node src/cli.js backtest KEY=VALUE ...             replay the gates on every stored check with config.rules changed (e.g. minBuyers=8)
-//   node src/cli.js truth <kind> <id> bad|good|clear [note]   hand label (kind: token|group|wallet|collection)
+//   node src/cli.js truth <kind> <id> bad|good|clear [note]   hand label (kind: token|group|wallet|collection|incident|detection|account|contract)
 //   node src/cli.js feedback [accept|reject <id>]      list pending reports, or review one
 //   node src/cli.js case-add <case id | account> <plan.json> [--dry]   add accounts, funded edges, suspected links to a confirmed case (docs/incidents.md)
 //   node src/cli.js ring-scan [case id]                look for laundering rings (memecoins bought by wallets a confirmed case paid); stores proposals
 //   node src/cli.js ring-approve <id> [--dry] | ring-reject <id> ["reason"]   an operator applies a proposal with case-add, or drops it
+//   node src/cli.js trace-replay [--limit N] [--only <id prefix>]   re-trace stored cases with the current code and diff them against what is stored (no AI, nothing saved)
+//   node src/cli.js truth-backfill [--dry]             build status_history for stored cases and count how many are labelled bad / good / unknown
+//   node src/cli.js fixture-tx <hash> <name> [--note "<text>"] [--stdout]   capture a real transaction as a test fixture (test/fixtures/tx/<name>.json)
 //   node src/cli.js what-is <account>                  the ontology's answer for an account: class, why, conflicts, its edges
 //   node src/cli.js ontology-backfill [--dry]          turn today's data into ontology facts (--dry: check them and the golden set, write nothing)
 //   node src/cli.js ontology-apply [--dry]             recompute the grouping kinds stored on wallets with the current rule, then regroup
@@ -309,6 +312,34 @@ try {
   } else if (cmd === 'ontology-parity') {
     const { parity } = await import('./ontology/backfill.js');
     console.log(JSON.stringify(await parity(), null, 1));
+  } else if (cmd === 'trace-replay') {
+    // re-trace stored cases with the current code and diff them against what is stored (nothing saved; no AI)
+    const { traceReplay } = await import('./ontology/replay.js'), { refreshSnapshot } = await import('./ontology/sync.js');
+    await refreshSnapshot({ force: true });
+    const li = args.indexOf('--limit'), oi = args.indexOf('--only');
+    const r = await traceReplay({ limit: li >= 0 ? Number(args[li + 1]) : 0, only: oi >= 0 ? args[oi + 1] : null, log: (l) => console.error(l) });
+    console.log(JSON.stringify(r, null, 1));
+  } else if (cmd === 'truth-backfill') {
+    // build status_history for cases stored before histories existed, from first_seen_ts + status + tags (--dry: counts only); then the labels they end up with
+    const { historyFromStored, incidentTruth } = await import('./accuracy/truth.js');
+    const dry = args.includes('--dry'), man = await col('ground_truth').find({ kind: 'incident' }).toArray(), counts = { cases: 0, with_history: 0, built: 0, bad: 0, good: 0, unlabelled: 0, by_source: {} };
+    for (const inc of await col('incidents').find({}).toArray()) {
+      counts.cases++;
+      if (Array.isArray(inc.status_history) && inc.status_history.length) counts.with_history++;
+      else { counts.built++; if (!dry) await col('incidents').updateOne({ _id: inc._id }, { $set: { status_history: historyFromStored(inc) } }); }
+      const t = incidentTruth(inc, man.find((m) => m.id === inc._id)?.label);
+      counts[t.label || 'unlabelled']++; if (t.source) counts.by_source[t.source] = (counts.by_source[t.source] || 0) + 1;
+    }
+    console.log(JSON.stringify({ dry, ...counts }, null, 1));
+  } else if (cmd === 'fixture-tx') {
+    const [hash, name] = args;
+    if (!hash || !name || !/^[a-z0-9-]+$/.test(name)) throw new Error('usage: fixture-tx <hash> <name (a-z 0-9 -)> [--note "<text>"] [--stdout]');
+    const { txIndexer } = await import('./near/rpc.js'), { shrinkTx, fixtureDoc } = await import('./near/fixture.js');
+    const j = await txIndexer('/v0/transactions', { tx_hashes: [hash] });
+    const tx = j?.transactions?.[0]; if (!tx) throw new Error('transaction not found');
+    const ni = args.indexOf('--note'), doc = fixtureDoc({ name, note: ni >= 0 ? args[ni + 1] : '', hash, tx: shrinkTx(tx), synthetic: false });
+    if (args.includes('--stdout')) console.log(JSON.stringify(doc)); // the Railway file system is not kept: copy this into test/fixtures/tx/<name>.json
+    else { const fs = await import('node:fs'); fs.mkdirSync('test/fixtures/tx', { recursive: true }); fs.writeFileSync(`test/fixtures/tx/${name}.json`, JSON.stringify(doc, null, 1) + '\n'); console.log(`wrote test/fixtures/tx/${name}.json`); }
   } else if (cmd === 'ontology-apply') {
     // recompute the grouping kinds stored on wallets with the current rule (--dry: count only), then regroup
     const { applyGroupingKinds } = await import('./ontology/apply.js');

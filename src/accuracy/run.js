@@ -4,6 +4,7 @@
 // someone labelled it by hand (ground_truth, e.g. from a report or reviewed feedback). Results are kept in meta "accuracy".
 import { col, metaSet } from '../db.js';
 import { groundingTotals } from '../ai/tools/grounding.js';
+import { securityAccuracy } from './security.js';
 import { config } from '../config.js';
 import { info } from '../log.js';
 import { priceSeries, priceAt } from '../collect/analyze.js';
@@ -90,7 +91,7 @@ export async function evaluateAccuracy() {
     groups: await groupVerdicts(),
     feedback_pending: await col('feedback').countDocuments({ status: 'pending' }),
     // WP-09: how often an AI text quoted an account or number that was not in its evidence (30 days, per path). WP-03 adds its blocks beside this one.
-    security: { ai_grounding: await groundingTotals() },
+    security: { ...(await securityAccuracy().catch((e) => ({ error: e.message }))), ai_grounding: await groundingTotals() },
   };
   out.took_ms = Date.now() - t0;
   await metaSet('accuracy', out);

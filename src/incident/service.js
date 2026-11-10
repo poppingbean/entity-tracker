@@ -10,6 +10,7 @@ import { traceIncident } from './trace.js';
 import { aiIncidentReport } from './ai.js';
 import { scheduleReview } from './deepreview.js';
 import { followUpIncident } from './followup.js';
+import { nextHistory } from '../accuracy/truth.js';
 
 // a case traced by an older version is traced in full once more (the rules improve); after that, re-runs are follow-ups
 export const INCIDENT_V = 3;
@@ -91,7 +92,7 @@ export async function investigate(input, { ai = true, detected = null, review = 
     info(`incident ${prior._id}: full trace (${r.full})`);
   }
   const inc = await traceIncident(input, { log });
-  const prev = await col('incidents').findOne({ _id: inc._id }, { projection: { confirmed_by: 1, followups: 1, first_seen_ts: 1, detected: 1, ai: 1, alerted: 1, review: 1, tags: 1, status: 1, cleared: 1, accounts: 1 } });
+  const prev = await col('incidents').findOne({ _id: inc._id }, { projection: { confirmed_by: 1, followups: 1, first_seen_ts: 1, detected: 1, ai: 1, alerted: 1, review: 1, tags: 1, status: 1, cleared: 1, accounts: 1, status_history: 1 } });
   // accounts an analyst added by hand survive the re-trace (before the confirmation, so a public report's role still wins)
   if (prev?.accounts) keepHandAdded(inc, prev.accounts);
   // confirmed by a public report (an operator, with its source): it stays a hack whatever the chain alone can prove
@@ -99,7 +100,7 @@ export async function investigate(input, { ai = true, detected = null, review = 
   // cleared by a deep review and still not confirmed by the rules: it stays cleared
   else if (prev?.status === 'cleared' && inc.status !== 'confirmed') inc.status = 'cleared';
   const report = ai && inc.status !== 'nothing_found' ? await aiIncidentReport(inc).catch((e) => { warn(`incident AI: ${e.message}`); return null; }) : null;
-  const doc = { ...inc, v: INCIDENT_V, ...(prev?.followups ? { followups: prev.followups } : {}), ai: report || prev?.ai || null, detected: detected || prev?.detected || null, first_seen_ts: prev?.first_seen_ts || Date.now(), updated_ts: Date.now(), ...(prev?.alerted ? { alerted: true } : {}), ...(prev?.review ? { review: prev.review } : {}), ...(prev?.tags ? { tags: prev.tags } : {}), ...(prev?.cleared ? { cleared: prev.cleared } : {}) };
+  const doc = { ...inc, v: INCIDENT_V, ...(prev?.followups ? { followups: prev.followups } : {}), ai: report || prev?.ai || null, detected: detected || prev?.detected || null, first_seen_ts: prev?.first_seen_ts || Date.now(), updated_ts: Date.now(), ...(prev?.alerted ? { alerted: true } : {}), ...(prev?.review ? { review: prev.review } : {}), ...(prev?.tags ? { tags: prev.tags } : {}), ...(prev?.cleared ? { cleared: prev.cleared } : {}), status_history: nextHistory(prev?.status_history, prev?.status, inc, inc.confirmed_by ? 'report' : 'rules') };
   await col('incidents').replaceOne({ _id: doc._id }, doc, { upsert: true });
   if (review && !prev && !detected && ['confirmed', 'suspected'].includes(doc.status)) await scheduleReview(doc._id, 'incident').catch(() => {});
   // traced from one of its wallets and re-rooted: an earlier empty investigation of that wallet now points here
@@ -149,7 +150,7 @@ function applyConfirmation(inc, cb) {
   // the report names who lost the money: that is the victim; the accounts the trace saw paying the collector are kept apart (its swaps,
   // its other counterparties), never shown as people who lost money to it
   if (cb.target) { inc.counterparties = inc.victims; inc.victims = [{ account: cb.target, contract: true, label: 'named in public reports', lost_usd: cb.loss_usd ? Math.round(cb.loss_usd) : null, tokens: [], txs: [] }]; }
-  if (cb.loss_usd) { inc.stolen_usd = Math.round(cb.loss_usd); inc.prices_note = 'as reported publicly'; }
+  if (cb.loss_usd) { inc.traced_usd = inc.traced_usd ?? inc.stolen_usd; inc.stolen_usd = Math.round(cb.loss_usd); inc.prices_note = 'as reported publicly'; }
   inc.signals = [`confirmed by public reports: ${cb.reason}`, ...(inc.signals || []).filter((s) => !/^confirmed by public reports/.test(s))];
 }
 
@@ -180,7 +181,7 @@ export async function unconfirmIncident(account, { by = 'operator', reason = 'un
   await col('incidents').updateOne({ _id: id }, {
     $unset: { confirmed_by: '' },
     $set: { status: 'suspected', updated_ts: Date.now() },
-    $push: { tags: { $each: [{ tag: 'review', ts: Date.now(), why: reason, by }], $slice: -10 } }
+    $push: { tags: { $each: [{ tag: 'review', ts: Date.now(), why: reason, by }], $slice: -10 }, status_history: { $each: [{ ts: Date.now(), status: 'suspected', kind: inc.kind || null, by: 'operator' }], $slice: -30 } }
   });
   await col('deep_reviews').deleteOne({ _id: id }).catch(() => {});
   const doc = await investigate({ account }, { full: true });
@@ -199,7 +200,7 @@ export async function clearIncident(account, { by = 'operator', reason = 'Normal
   await col('incidents').updateOne({ _id: id }, {
     $unset: { confirmed_by: '' },
     $set: { status: 'cleared', cleared, updated_ts: Date.now() },
-    $push: { tags: { $each: [{ tag: 'safe', ts: Date.now(), why: reason, by }], $slice: -10 } }
+    $push: { tags: { $each: [{ tag: 'safe', ts: Date.now(), why: reason, by }], $slice: -10 }, status_history: { $each: [{ ts: Date.now(), status: 'cleared', kind: inc.kind || null, by: 'operator' }], $slice: -30 } }
   });
   await col('firewall_flags').deleteMany({ source: 'incident', incident: id });
   await col('alerts').updateMany({ $or: [{ _id: `incident:${id}` }, { 'data.incident': id }, { 'related.wallets': account, type: { $in: ['drain_suspected', 'incident'] } }], title: { $not: /^(Not a hack|Retracted|Safe)/ } }, [{ $set: { title: { $concat: ['Safe after review: ', '$title'] }, severity: 'info' } }]).catch(() => {});

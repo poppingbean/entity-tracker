@@ -1,0 +1,63 @@
+{
+ "name": "near-transfer-large",
+ "note": "a plain NEAR transfer from an exchange hot wallet",
+ "hash": "S13",
+ "captured_ts": 1794300000000,
+ "synthetic": true,
+ "tx": {
+  "transaction": {
+   "hash": "S13",
+   "signer_id": "hot.near",
+   "receiver_id": "fresh.near",
+   "actions": [
+    {
+     "Transfer": {
+      "deposit": "123456000000000000000000000"
+     }
+    }
+   ]
+  },
+  "execution_outcome": {
+   "block_timestamp": "1794300000000000000",
+   "block_height": 200000000,
+   "outcome": {
+    "logs": [],
+    "status": {
+     "SuccessValue": ""
+    }
+   }
+  },
+  "receipts": [
+   {
+    "receipt": {
+     "receipt_id": "S13-0",
+     "predecessor_id": "hot.near",
+     "receiver_id": "fresh.near",
+     "receipt": {
+      "Action": {
+       "signer_id": "hot.near",
+       "actions": [
+        {
+         "Transfer": {
+          "deposit": "123456000000000000000000000"
+         }
+        }
+       ]
+      }
+     }
+    },
+    "execution_outcome": {
+     "block_height": 200000000,
+     "block_timestamp": "1794300000000000000",
+     "outcome": {
+      "executor_id": "fresh.near",
+      "logs": [],
+      "status": {
+       "SuccessValue": ""
+      }
+     }
+    }
+   }
+  ]
+ }
+}
