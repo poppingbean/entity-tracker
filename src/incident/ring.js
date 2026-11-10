@@ -11,7 +11,7 @@ import { info } from '../log.js';
 import { sendTelegram } from '../alerts/deliver.js';
 import { config } from '../config.js';
 import { accountRows, fetchTxs } from '../near/indexer.js';
-import { classOf } from '../ontology/sync.js';
+import { classOf, refreshSnapshot, snapshotSize } from '../ontology/sync.js';
 import { isKnownQuote } from '../near/quotes.js';
 import { addToCase } from './caseadd.js';
 
@@ -140,6 +140,9 @@ export async function proposeRings(inc, found) {
 
 /** One worker pass: the longest-unscanned recent confirmed case. */
 export async function ringPass({ max = 1, log = () => {} } = {}) {
+  // without the ontology snapshot only code-level facts are known: an exchange hot wallet would not cut a path and could end up in a plan
+  await refreshSnapshot();
+  if (!snapshotSize()) { log('ring detector: ontology snapshot not loaded yet, skipped'); return 0; }
   // one case a pass, only cases with activity in the last activeDays: a scan reads a few thousand transactions
   const cases = await col('incidents').find({ status: 'confirmed', updated_ts: { $gt: Date.now() - RING.activeDays * 86400e3 } }, { projection: { accounts: 1, target: 1, started_ts: 1, kind: 1 } }).sort({ ring_scan_ts: 1 }).limit(max).toArray();
   let total = 0;

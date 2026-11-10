@@ -61,9 +61,13 @@ export function checkPlan(raw) {
 }
 
 /** NEAR sent from -> to, read from the chain: { near, n, tx, ts } of the first transfer (null when none). `cache` is shared per run. */
-export async function edgeEvidence(from, to, { cache = new Map(), sinceTs = null, minNear = 0.05 } = {}) {
+export async function edgeEvidence(from, to, { cache = new Map(), minNear = 0.05 } = {}) {
+  // the oldest and the newest 400 transactions of each side: a busy account's later payment is past its oldest 400
   const hist = async (acc) => {
-    if (!cache.has(acc)) { const { rows } = await accountRows(acc, { desc: false, maxRows: 400 }); cache.set(acc, await fetchTxs(rows.filter((r) => !sinceTs || r.ts >= sinceTs).map((r) => r.hash))); }
+    if (!cache.has(acc)) {
+      const [old, recent] = await Promise.all([accountRows(acc, { desc: false, maxRows: 400 }), accountRows(acc, { desc: true, maxRows: 400 })]);
+      cache.set(acc, await fetchTxs([...old.rows, ...recent.rows].map((r) => r.hash))); // fetchTxs de-duplicates and sorts oldest first
+    }
     return cache.get(acc);
   };
   for (const side of [to, from]) {

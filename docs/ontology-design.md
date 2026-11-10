@@ -187,12 +187,12 @@ type is its resolved class. No graph database: the edge list is `ontology_facts`
 | `label` | account → text | `labels`, `known.js`, entity hand labels | `intents.near` → "NEAR Intents" |
 | `operated_by` | account → operator | `exchange_wallets`, `labels`, `known.js` | the Binance hot wallets → `org:binance` |
 | `swept_to` | account → account | `exchange_wallets` | hot → `binancecold3.near` |
-| `funded` | account → account | `entities` (the early wallets each entity funded) | the edge carries the NEAR amount, tx and time |
+| `funded` | account → account | `entities` (the early wallets each entity funded); `case-add/<name>` (an analyst's or an approved ring's case edges, with tx evidence) | the edge carries the NEAR amount, tx and time |
 | `solver_for` | account → account | the solver check in the backfill (`intentsSolver()`) | a busy account settling through `intents.near` |
 | `controls` | account → account | audits | owner / DAO / multisig → contract |
 | `deployed`, `created_by` | account → account | **not written yet** (step G: the tracer and the deploy watcher) | attacker → fake token |
-| `member_of` | account → group | `clusters`, `KNOWN_ACTORS` | early wallets of one buyer |
-| `role_in` | account → case | incidents (`public_report` when confirmed by a report, else `trace`) | attacker / accomplice / victim / target / cash_out_wallet / fake_token |
+| `member_of` | account → group | `clusters`, `KNOWN_ACTORS`, `case-add/<name>` (`grp:<name>`) | early wallets of one buyer |
+| `role_in` | account → case | incidents (`public_report` when confirmed by a report, else `trace`); `case-add/<name>` for **suspected** roles only (linked by trading, never flagged) | attacker / accomplice / victim / target / cash_out_wallet / fake_token |
 | `flagged` | account → severity | `firewall_flags` | `critical`, with the reason as evidence |
 | `pass_through` | account → `true` | `known.js` (plus the router, relayer and system classes) | `wrap.near`, `aurora` |
 | `trusted` | account → `true` | `known.js` (the firewall's trusted dapps) | `contract.main.burrow.near` |
@@ -295,6 +295,8 @@ Flipping `ONTOLOGY_READ` re-syncs in the other direction. Stored hack cases are 
   - the tracer when it confirms a case and its roles;
   - the audit when it classifies a contract;
   - `confirm-incident` for public reports.
+
+  `case-add` (docs/incidents.md) already writes this way: an analyst's case accounts, `funded` edges and suspected roles are asserted at once, and the ring detector's approvals go through it.
 
   The backfill then goes away, and so does the drift between a change and the next daily run.
 - **Remove the old rules:** the three router lists, `classifyAccount`'s rules, `TRUSTED` as a separate list, the entity table's own labels. Shadow mode, the gate, `triage.json` and the heartbeat steps then have nothing left to compare, and go too.
