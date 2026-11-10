@@ -153,14 +153,22 @@ test('the operator buttons send the x-tracker header the server requires', async
   const { readFileSync } = await import('node:fs');
   const ui = readFileSync(new URL('../src/web/public/assets/js/pages/incidents.js', import.meta.url), 'utf8');
   assert.match(ui, /const incPost = [^\n]*'x-tracker': '1'/);
-  for (const ep of ['confirm', 'unconfirm', 'clear']) assert.ok(ui.includes(`incPost('/api/incident/${ep}'`), ep);
-  assert.ok(!/fetch\('\/api\/incident\/(confirm|unconfirm|clear)/.test(ui), 'a raw fetch would miss the header');
+  for (const ep of ['confirm', 'clear']) assert.ok(ui.includes(`incPost('/api/incident/${ep}'`), ep);
+  assert.ok(!/fetch\('\/api\/incident\/(confirm|clear)/.test(ui), 'a raw fetch would miss the header');
+});
+
+test('a hack confirmation cannot be revoked from the page or the API (only by hand, from the CLI)', async () => {
+  const { readFileSync } = await import('node:fs');
+  const ui = readFileSync(new URL('../src/web/public/assets/js/pages/incidents.js', import.meta.url), 'utf8');
+  const srv = readFileSync(new URL('../src/web/server.js', import.meta.url), 'utf8');
+  assert.ok(!/Revoke Hack Confirmation|incUnconfirm|\/api\/incident\/unconfirm/.test(ui), 'no revoke button on the page');
+  assert.ok(!/'\/api\/incident\/unconfirm'|unconfirmIncident/.test(srv), 'no revoke endpoint');
 });
 
 test('the operator endpoints are closed on a public deployment without a password, and the actor is not taken from the request', async () => {
   const { readFileSync } = await import('node:fs');
   const srv = readFileSync(new URL('../src/web/server.js', import.meta.url), 'utf8');
-  assert.match(srv, /OPERATOR_POSTS = new Set\(\['\/api\/incident\/confirm', '\/api\/incident\/unconfirm', '\/api\/incident\/clear'\]\)/);
+  assert.match(srv, /OPERATOR_POSTS = new Set\(\['\/api\/incident\/confirm', '\/api\/incident\/clear'\]\)/);
   assert.match(srv, /OPERATOR_POSTS\.has\(u\.pathname\) && exposed\(\) && !config\.web\.password/);
   assert.ok(!/by: b\.by/.test(srv), 'by comes from the server');
 });

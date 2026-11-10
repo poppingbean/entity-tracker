@@ -130,8 +130,9 @@ async function incidentPage(id) {
   const isHack = incTag(d) === 'hack';
   let h = pasted && pasted !== d.attacker.account ? `<div class="banner neutral" style="display:block"><b>${esc(short(pasted, 40))}</b> is part of this ${isHack ? 'incident' : 'case'}: ${esc((isHack ? INC_ROLE_TXT : INC_ROLE_TXT_N)[(d.accounts || []).find((a) => a.account === pasted)?.role] || 'one of its wallets')}. The investigation follows the money from where it first arrived.</div>` : '';
   h = `<div style="margin-bottom:10px"><a href="/firewall" onclick="return navA(event,this)" class="cta" style="padding:7px 14px;font-size:13px">← Safety Check</a></div>` + h;
+  // a confirmed hack is never revoked from the page: that is done by hand (node src/cli.js unconfirm-incident <account> "<reason>")
   const manualControls = d.status === 'confirmed'
-    ? `<button onclick="incUnconfirm('${esc(d.attacker.account)}')" class="button" style="border-color:var(--bad);color:var(--bad);margin-left:8px" title="Revoke hack confirmation">Revoke Hack Confirmation</button>`
+    ? ''
     : `<button onclick="incConfirmModal('${esc(d.attacker.account)}')" class="cta" style="background:var(--bad);color:#fff;border:none;margin-left:8px;padding:6px 12px" title="Manually confirm this case as a hack">Confirm as Hack</button><button onclick="incClearModal('${esc(d.attacker.account)}')" class="button" style="margin-left:6px" title="Mark as normal moved funds / solver activity">Mark Normal / Moved Funds</button>`;
 
   h += `<div class="card"><div class="bar"><h2 style="margin:0">${esc(incTag(d) === 'safe' ? `Normal activity${d.review?.ai?.what_it_is ? `: ${d.review.ai.what_it_is}` : ''}` : !isHack ? `${INC_KIND_N[d.kind] || 'Large transfers'}` : drain ? `${INC_KIND[d.kind] || 'Incident'}` : A?.attack_type || INC_KIND[d.kind] || 'Incident')}${drain ? ` from ${esc(d.drain?.exchange || 'an exchange')}` : d.target?.account ? ` ${isHack ? 'on' : 'from'} ${esc(d.target.account)}` : ''}</h2>${incStatus(d.status, d)}${d.detected ? '<span class="chip">caught live</span>' : ''}${foundLate(d.started_ts, d.first_seen_ts) ? lateChip(d.started_ts, d.first_seen_ts) : ''}<span class="spacer"></span>
@@ -229,13 +230,6 @@ async function incConfirmModal(account) {
   if (source && !/^https?:\/\//i.test(source)) { alert('Source must be a valid https:// URL or left empty'); return; }
   const r = await incPost('/api/incident/confirm', { account, reason, source });
   if (r.error) alert('Error confirming hack: ' + r.error);
-  else render();
-}
-
-async function incUnconfirm(account) {
-  if (!confirm(`Revoke hack confirmation for ${account}? The case will be set to suspected / under review.`)) return;
-  const r = await incPost('/api/incident/unconfirm', { account });
-  if (r.error) alert('Error unconfirming: ' + r.error);
   else render();
 }
 

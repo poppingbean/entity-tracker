@@ -31,7 +31,7 @@ import { checkRequest, accountReputation, FIREWALL_VERSION } from '../firewall/s
 import { AUTO_AUDIT_V } from '../audit/auto.js';
 import { contractReport, startAutoAudit, auditJob } from '../audit/report.js';
 import { inspect } from '../firewall/inspect.js';
-import { parseInvestigation, startInvestigation, investigationJob, confirmIncident, unconfirmIncident, clearIncident } from '../incident/service.js';
+import { parseInvestigation, startInvestigation, investigationJob, confirmIncident, clearIncident } from '../incident/service.js';
 import { report } from '../incident/signals.js';
 import { walletView } from '../near/walletview.js';
 import { entityView } from '../ontology/index.js';
@@ -64,7 +64,7 @@ const watchHits = new Map(), keyHits = new Map(), feedbackHits = new Map();
 /** Watchlist changes over POST (JSON body): create a key, add / remove an item, set an API key's webhook. */
 const reportHits = new Map();
 // these change what the Safety Check warns about: never open on a public deployment without DASHBOARD_PASSWORD
-const OPERATOR_POSTS = new Set(['/api/incident/confirm', '/api/incident/unconfirm', '/api/incident/clear']);
+const OPERATOR_POSTS = new Set(['/api/incident/confirm', '/api/incident/clear']);
 const POSTS = {
   /** Report a hack, a drainer or stolen funds: it is investigated from the chain (never flagged on the report alone). */
   '/api/report': async (b, ip) => {
@@ -116,16 +116,7 @@ const POSTS = {
       return { ok: true, incident: doc };
     } catch (e) { return { error: e.message }; }
   },
-  /** Revoke hack confirmation, reverting to suspected. */
-  '/api/incident/unconfirm': async (b) => {
-    try {
-      const doc = await unconfirmIncident(String(b.account || '').toLowerCase().trim(), {
-        reason: b.reason || 'Unconfirmed manually by operator',
-        by: 'operator',
-      });
-      return { ok: true, incident: doc };
-    } catch (e) { return { error: e.message }; }
-  },
+  // revoking a hack confirmation has no API: it is done by hand (node src/cli.js unconfirm-incident <account> "<reason>")
   /** Mark as normal fund movement (cleared), removing all flags and alerts. */
   '/api/incident/clear': async (b) => {
     try {
