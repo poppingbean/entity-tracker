@@ -45,6 +45,24 @@ async function flagAccounts(inc) {
   return rows.length;
 }
 
+/**
+ * A full trace rebuilds a case's accounts from the chain, so accounts an analyst added by hand (marked `added_by`: a manual trace, a
+ * laundering ring found by looking at tokens) would drop out, and their flags and role_in facts with them. They are carried over: an
+ * account the new trace found too keeps the trace's role and gets the mark, so a later trace that loses it still keeps it. The target
+ * and the victims are never added back as the attacker's.
+ */
+export function keepHandAdded(inc, prevAccounts) {
+  inc.accounts = inc.accounts || [];
+  const not = new Set([inc.target?.account, ...(inc.victims || []).map((v) => v.account)].filter(Boolean));
+  for (const a of prevAccounts || []) {
+    if (!a?.added_by || !a.account || not.has(a.account)) continue;
+    const now = inc.accounts.find((x) => x.account === a.account);
+    if (now) now.added_by ??= a.added_by;
+    else inc.accounts.push(a);
+  }
+  return inc;
+}
+
 /** A saved case that a re-run can follow up rather than trace again: the account's own case, or the case it was re-rooted into. */
 async function followable(input) {
   if (!input.account) return null;
@@ -72,7 +90,9 @@ export async function investigate(input, { ai = true, detected = null, review = 
     info(`incident ${prior._id}: full trace (${r.full})`);
   }
   const inc = await traceIncident(input, { log });
-  const prev = await col('incidents').findOne({ _id: inc._id }, { projection: { confirmed_by: 1, followups: 1, first_seen_ts: 1, detected: 1, ai: 1, alerted: 1, review: 1, tags: 1, status: 1, cleared: 1 } });
+  const prev = await col('incidents').findOne({ _id: inc._id }, { projection: { confirmed_by: 1, followups: 1, first_seen_ts: 1, detected: 1, ai: 1, alerted: 1, review: 1, tags: 1, status: 1, cleared: 1, accounts: 1 } });
+  // accounts an analyst added by hand survive the re-trace (before the confirmation, so a public report's role still wins)
+  if (prev?.accounts) keepHandAdded(inc, prev.accounts);
   // confirmed by a public report (an operator, with its source): it stays a hack whatever the chain alone can prove
   if (prev?.confirmed_by) applyConfirmation(inc, prev.confirmed_by);
   // cleared by a deep review and still not confirmed by the rules: it stays cleared

@@ -65,6 +65,8 @@ Past reports are checked by the worker, a few per pass, and by `node src/cli.js 
 
 **Re-traces keep flags in sync.** When an incident is re-traced or followed up, accounts no longer in the attacker's set lose its flag. An incident that is no longer confirmed loses all its flags, and its alert is marked "Retracted (not a hack)".
 
+**Hand-added accounts survive a full re-trace.** A full trace rebuilds the account list from the chain. Accounts an analyst added by hand carry `added_by` (the writer, e.g. `trace/binance-hack-laundering-tokens`). These are carried over, with their role and their flag, unless the new trace finds them to be the target or a victim. If the trace finds such an account itself, the trace's role wins, and the account keeps its `added_by` mark. A case confirmed by a public report still gets the report's `accomplice` role for the accounts the report names. Revoking a confirmation is done by hand: `node src/cli.js unconfirm-incident <account> "<reason>"` (there is no button or API for it).
+
 A confirmed incident:
 - raises an `incident` alert;
 - flags the attacker's accounts in `firewall_flags`:
