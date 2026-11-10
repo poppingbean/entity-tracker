@@ -36,7 +36,7 @@
 //   node src/cli.js link-eval                          pairwise precision / recall of the wallet grouping against pairs of known owners (changes nothing)
 //   node src/cli.js exchanges-prune [--apply]          list (or remove) registry entries that rest only on being busy (IDENTIFY_BUSY_NEUTRAL)
 //   node src/cli.js golden-candidates [--class <class>] [--limit N]   resolved accounts not in the golden set, strongest evidence first (JSON lines; writes nothing)
-//   node src/cli.js trace-replay [--limit N] [--only <id prefix>]   re-trace stored cases with the current code and diff them against what is stored (no AI, nothing saved)
+//   node src/cli.js trace-replay [--limit N] [--only <id prefix>] [--resume <earlier log>]   re-trace stored cases with the current code and diff them against what is stored (no AI, nothing saved)
 //   node src/cli.js truth-backfill [--dry]             build status_history for stored cases and count how many are labelled bad / good / unknown
 //   node src/cli.js fixture-tx <hash> <name> [--note "<text>"] [--stdout]   capture a real transaction as a test fixture (test/fixtures/tx/<name>.json)
 //   node src/cli.js what-is <account>                  the ontology's answer for an account: class, why, conflicts, its edges
@@ -343,8 +343,10 @@ try {
     // re-trace stored cases with the current code and diff them against what is stored (nothing saved; no AI)
     const { traceReplay } = await import('./ontology/replay.js'), { refreshSnapshot } = await import('./ontology/sync.js');
     await refreshSnapshot({ force: true });
-    const li = args.indexOf('--limit'), oi = args.indexOf('--only');
-    const r = await traceReplay({ limit: li >= 0 ? Number(args[li + 1]) : 0, only: oi >= 0 ? args[oi + 1] : null, log: (l) => console.error(l) });
+    const li = args.indexOf('--limit'), oi = args.indexOf('--only'), si = args.indexOf('--resume');
+    // --resume <log file of an earlier run>: skip the cases that run already logged (the log prints the first 26 characters of each id)
+    const skip = si >= 0 ? (await import('node:fs')).readFileSync(args[si + 1], 'utf8').split(String.fromCharCode(10)).map((l) => l.split(' ')[0]).filter((x) => x.startsWith('inc:')) : [];
+    const r = await traceReplay({ limit: li >= 0 ? Number(args[li + 1]) : 0, only: oi >= 0 ? args[oi + 1] : null, skip, log: (l) => console.error(l) });
     console.log(JSON.stringify(r, null, 1));
   } else if (cmd === 'truth-backfill') {
     // build status_history for cases stored before histories existed, from first_seen_ts + status + tags (--dry: counts only); then the labels they end up with

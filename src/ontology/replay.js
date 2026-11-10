@@ -65,11 +65,12 @@ export function replayText(r) {
  * attacker, target, accounts, sources, exits, the loss figure, the number of accounts and the exit USD per kind. The before / after check of
  * WP-08, WP-10 and WP-11 (a switch is flipped between two runs of this command).
  */
-export async function traceReplay({ limit = 0, only = null, log = () => {} } = {}) {
+export async function traceReplay({ limit = 0, only = null, skip = [], log = () => {} } = {}) {
   const q = only ? { _id: new RegExp('^' + only) } : {};
   const cases = await col('incidents').find(q).sort({ first_seen_ts: 1 }).limit(limit || 0).toArray(), rows = [];
   const exitUsd = (inc) => Object.fromEntries(Object.entries(inc.trail?.exit_usd || {}).map(([k, v]) => [k, Math.round(v)]));
   for (const c of cases) {
+    if (skip.some((p) => String(c._id).startsWith(p))) { rows.push({ id: c._id, skipped: 'already replayed' }); continue; }
     if (!c.input) { rows.push({ id: c._id, skipped: 'no input' }); continue; }
     const t0 = Date.now(), stored = { ...brief(c), exit_usd: exitUsd(c), accounts_n: (c.accounts || []).length };
     let now;
