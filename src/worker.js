@@ -19,6 +19,7 @@ import { refreshExchangeRegistry } from './incident/exchanges.js';
 import { reviewDetections } from './incident/detect.js';
 import { processDeepReview, backfillReviews } from './incident/deepreview.js';
 import { pollNews } from './incident/signals.js';
+import { ringPass } from './incident/ring.js';
 import { evaluateGroups, reviewPending } from './evaluate/run.js';
 import { profileCreators } from './evaluate/creators.js';
 import { checkAi, aiEnabled, aiStatus } from './ai/tools/nearai.js';
@@ -26,7 +27,7 @@ import { scanTick, followUpTick, blacklistCreator } from './scanner/pipeline.js'
 import { managePositions } from './sim/portfolio.js';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-export const runtime = { startedTs: Date.now(), cycles: 0, lastCycleTs: null, stopping: false, lastEvalTs: 0, lastPositionCheck: 0, lastRugCheck: 0, lastCreatorCheck: 0, reviewing: null, reviewed: 0, nft: null, nftLast: null, alerts: null, lastAlerts: 0, telegram: null, accuracy: null, lastAccuracy: 0, autoAudit: null, lastAutoAudit: 0, incident: null, lastIncident: 0, deepReview: null, lastDeepReview: 0, registry: null, lastRegistry: 0, news: null, lastNews: 0 };
+export const runtime = { startedTs: Date.now(), cycles: 0, lastCycleTs: null, stopping: false, lastEvalTs: 0, lastPositionCheck: 0, lastRugCheck: 0, lastCreatorCheck: 0, reviewing: null, reviewed: 0, nft: null, nftLast: null, alerts: null, lastAlerts: 0, telegram: null, accuracy: null, lastAccuracy: 0, autoAudit: null, lastAutoAudit: 0, incident: null, lastIncident: 0, deepReview: null, lastDeepReview: 0, registry: null, lastRegistry: 0, news: null, lastNews: 0, ring: null, lastRing: 0 };
 
 /** One pass of the pipeline. Returns what it did, so callers (the CLI) can loop until idle. */
 export async function cycle({ evaluate = true } = {}) {
@@ -80,6 +81,11 @@ export async function cycle({ evaluate = true } = {}) {
     runtime.lastIncident = Date.now();
     if (!runtime.reviewsBackfilled) { runtime.reviewsBackfilled = true; backfillReviews().catch(() => {}); retractMoveAlerts().catch(() => {}); } // findings from before the deep review; moves of cleared cases
     runtime.incident = reviewDetections(3).catch((e) => warn(`drain review: ${e.message}`)).then(() => processIncidentQueue()).catch((e) => warn(`incident queue: ${e.message}`)).finally(() => { runtime.incident = null; });
+  }
+  // laundering rings: confirmed cases' money bought into memecoins; proposals only (an operator approves), one case every RING_EVERY_MINUTES
+  if (config.incidents.enabled && config.incidents.ringEveryMinutes > 0 && !runtime.ring && Date.now() - runtime.lastRing > config.incidents.ringEveryMinutes * 60e3) {
+    runtime.lastRing = Date.now();
+    runtime.ring = ringPass().catch((e) => warn(`ring detector: ${e.message}`)).finally(() => { runtime.ring = null; });
   }
   // deep reviews on their own lane: a slow investigation in the queue must not hold them up
   if (config.incidents.enabled && !runtime.deepReview && Date.now() - runtime.lastDeepReview > config.incidents.everyMs) {

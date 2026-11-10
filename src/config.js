@@ -100,6 +100,8 @@ export const config = {
     followMinUsd: num(process.env.INCIDENT_FOLLOW_MIN_USD, 100000),  // a move of stolen funds worth an alert (only >= $100k)
     liveMinUsd: num(process.env.INCIDENT_LIVE_MIN_USD, 100000),     // safety live feed / caught live threshold (only >= $100k)
     registryEveryHours: num(process.env.EXCHANGE_REGISTRY_EVERY_HOURS, 24), // rediscover exchange wallets and their baselines
+    ringEveryMinutes: num(process.env.RING_EVERY_MINUTES, 360),    // laundering-ring detector, one case a pass (proposals for an operator; 0 = off)
+    ringOperatorChat: process.env.RING_OPERATOR_CHAT_ID || '',      // private Telegram chat for new ring proposals (never the public channel)
     newsEveryMinutes: num(process.env.NEWS_EVERY_MINUTES, 15),     // security news feeds (0 = off)
     newsFeeds: (process.env.NEWS_FEEDS || 'https://cointelegraph.com/rss,https://www.theblock.co/rss.xml,https://decrypt.co/feed,https://rekt.news/rss/feed.xml,https://cryptoslate.com/feed/').split(',').map((s) => s.trim()).filter(Boolean),
   },

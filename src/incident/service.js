@@ -26,7 +26,7 @@ export function parseInvestigation(q) {
 }
 
 /** Flag the attacker's own accounts (not 1Click deposit addresses or the target) so every check that touches them warns. */
-async function flagAccounts(inc) {
+export async function flagAccounts(inc) {
   if (inc.status !== 'confirmed') return 0;
   const what = `${inc.kind === 'wallet_drainer' ? 'drained wallets' : inc.kind === 'exchange_drain' ? `received the money drained from ${inc.drain?.exchange || 'an exchange'}'s hot wallets` : `exploited ${inc.target?.account || 'a contract'}`}${inc.started_ts ? ` on ${new Date(inc.started_ts).toISOString().slice(0, 10)}` : ''} (~$${Math.round(inc.stolen_usd).toLocaleString('en-US')} taken)`;
   const reason = what;
@@ -43,6 +43,24 @@ async function flagAccounts(inc) {
       detail: DETAIL[a.role], source: 'incident', incident: inc._id }, $setOnInsert: { ts: Date.now() } }, { upsert: true }).catch((e) => { if (e.code !== 11000) throw e; });
   }
   return rows.length;
+}
+
+/**
+ * A full trace rebuilds a case's accounts from the chain, so accounts an analyst added by hand (marked `added_by`: a manual trace, a
+ * laundering ring found by looking at tokens) would drop out, and their flags and role_in facts with them. They are carried over: an
+ * account the new trace found too keeps the trace's role and gets the mark, so a later trace that loses it still keeps it. The target
+ * and the victims are never added back as the attacker's.
+ */
+export function keepHandAdded(inc, prevAccounts) {
+  inc.accounts = inc.accounts || [];
+  const not = new Set([inc.target?.account, ...(inc.victims || []).map((v) => v.account)].filter(Boolean));
+  for (const a of prevAccounts || []) {
+    if (!a?.added_by || !a.account || not.has(a.account)) continue;
+    const now = inc.accounts.find((x) => x.account === a.account);
+    if (now) now.added_by ??= a.added_by;
+    else inc.accounts.push(a);
+  }
+  return inc;
 }
 
 /** A saved case that a re-run can follow up rather than trace again: the account's own case, or the case it was re-rooted into. */
@@ -72,7 +90,9 @@ export async function investigate(input, { ai = true, detected = null, review = 
     info(`incident ${prior._id}: full trace (${r.full})`);
   }
   const inc = await traceIncident(input, { log });
-  const prev = await col('incidents').findOne({ _id: inc._id }, { projection: { confirmed_by: 1, followups: 1, first_seen_ts: 1, detected: 1, ai: 1, alerted: 1, review: 1, tags: 1, status: 1, cleared: 1 } });
+  const prev = await col('incidents').findOne({ _id: inc._id }, { projection: { confirmed_by: 1, followups: 1, first_seen_ts: 1, detected: 1, ai: 1, alerted: 1, review: 1, tags: 1, status: 1, cleared: 1, accounts: 1 } });
+  // accounts an analyst added by hand survive the re-trace (before the confirmation, so a public report's role still wins)
+  if (prev?.accounts) keepHandAdded(inc, prev.accounts);
   // confirmed by a public report (an operator, with its source): it stays a hack whatever the chain alone can prove
   if (prev?.confirmed_by) applyConfirmation(inc, prev.confirmed_by);
   // cleared by a deep review and still not confirmed by the rules: it stays cleared
