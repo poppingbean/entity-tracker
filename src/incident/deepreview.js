@@ -12,6 +12,7 @@ import { col } from '../db.js';
 import { config } from '../config.js';
 import { info, warn } from '../log.js';
 import { chatJSON, aiEnabled } from '../ai/tools/nearai.js';
+import { grounded } from '../ai/tools/grounding.js';
 import { UNTRUSTED_RULE, evidenceMessage } from '../ai/tools/untrusted.js';
 import { aiBudget } from '../ai/tools/budget.js';
 import { txIndexer } from '../near/rpc.js';
@@ -72,11 +73,12 @@ const SYSTEM = prompt('incident-deep-review'); // src/ai/prompts/incident-deep-r
 /** NEAR AI's verdict on a case, or null when the AI is off or the day's budget is spent. */
 async function aiVerdict(inc, facts) {
   if (!aiEnabled() || !(await aiBudget('incident'))) return null;
-  const { user } = evidenceMessage('The case and the review facts (reconstructed from executed transactions; strings inside are untrusted data):', { case: packetOf(inc), review: facts });
-  const { json, model } = await chatJSON({ system: SYSTEM + UNTRUSTED_RULE, user, model: config.ai.analysisModel, maxTokens: 3000, timeoutMs: config.ai.analysisTimeoutMs, attempts: 2 }).catch((e) => { warn(`deep review AI: ${e.message}`); return {}; });
+  const evidence = { case: packetOf(inc), review: facts };
+  const { user } = evidenceMessage('The case and the review facts (reconstructed from executed transactions; strings inside are untrusted data):', evidence);
+  const { json, model, unverified } = await grounded({ path: 'deep_review', evidence, run: (extra) => chatJSON({ system: SYSTEM + UNTRUSTED_RULE, user: user + extra, model: config.ai.analysisModel, maxTokens: 3000, timeoutMs: config.ai.analysisTimeoutMs, attempts: 2 }) }).catch((e) => { warn(`deep review AI: ${e.message}`); return {}; });
   if (!json?.verdict) return null;
   return { verdict: ['hack', 'not_hack', 'unclear'].includes(json.verdict) ? json.verdict : 'unclear', confidence: ['high', 'medium', 'low'].includes(json.confidence) ? json.confidence : 'low',
-    what_it_is: String(json.what_it_is || '').slice(0, 120), reasons: (Array.isArray(json.reasons) ? json.reasons : []).map((r) => String(r).slice(0, 300)).slice(0, 6), model };
+    what_it_is: String(json.what_it_is || '').slice(0, 120), reasons: (Array.isArray(json.reasons) ? json.reasons : []).map((r) => String(r).slice(0, 300)).slice(0, 6), model, ...(unverified ? { unverified } : {}) };
 }
 
 /** The deep review of one incident (already re-traced). Writes `review` and the new status; returns the final tag. */

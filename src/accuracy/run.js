@@ -3,6 +3,7 @@
 // config.accuracy.badBelow of it; the 24 h return itself is reported too, which needs no threshold), unless
 // someone labelled it by hand (ground_truth, e.g. from a report or reviewed feedback). Results are kept in meta "accuracy".
 import { col, metaSet } from '../db.js';
+import { groundingTotals } from '../ai/tools/grounding.js';
 import { config } from '../config.js';
 import { info } from '../log.js';
 import { priceSeries, priceAt } from '../collect/analyze.js';
@@ -88,6 +89,8 @@ export async function evaluateAccuracy() {
     replay_current_gates: (() => { const xs = replayGates(all); return { ...confusion(xs.map((x) => ({ flagged: !x.replay_pass, bad: x.bad }))), returns: returnSplit(xs.map((x) => ({ flagged: !x.replay_pass, ret: x.ret }))), note: 'the current gates replayed on every stored check, imported ones included' }; })(),
     groups: await groupVerdicts(),
     feedback_pending: await col('feedback').countDocuments({ status: 'pending' }),
+    // WP-09: how often an AI text quoted an account or number that was not in its evidence (30 days, per path). WP-03 adds its blocks beside this one.
+    security: { ai_grounding: await groundingTotals() },
   };
   out.took_ms = Date.now() - t0;
   await metaSet('accuracy', out);

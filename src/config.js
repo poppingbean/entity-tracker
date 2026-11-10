@@ -20,6 +20,7 @@ export const config = {
     analysisTimeoutMs: num(process.env.NEAR_AI_ANALYSIS_TIMEOUT_SECONDS, 600) * 1000,
     maxTokens: num(process.env.NEAR_AI_MAX_TOKENS, 4000),
     analysisMaxTokens: num(process.env.ANALYSIS_MAX_TOKENS, 12000), // the token analyst writes a full report and a post
+    groundingRetry: process.env.AI_GROUNDING_RETRY !== 'false', // a write-up quoting an account or number that is not in its evidence is asked again once; false = only mark it
   },
 
   rpcUrls: list(process.env.NEAR_RPC_URLS, ['https://rpc.mainnet.fastnear.com', 'https://free.rpc.fastnear.com', 'https://near.lava.build']),

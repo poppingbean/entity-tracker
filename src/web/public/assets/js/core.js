@@ -125,3 +125,6 @@ function ontologyCard(o) {
     ${(o.overruled || []).length ? `<p class="small">Overruled: ${o.overruled.map((c) => `${esc(c.is)} <span class="muted">(${esc(ONT_SOURCE[c.source] || c.source)}: ${esc(c.evidence || '')})</span>`).join('; ')}</p>` : ''}
     ${edges.length ? `<table><tr><th>Link</th><th>Account</th><th>From</th></tr>${edges.map((e) => { const out = e.from === o.account; return `<tr><td>${out ? '' : '← '}${esc(pred[e.predicate] || e.predicate)}${e.role ? ` (${esc(e.role)})` : ''}</td><td>${who(out ? e.to : e.from)}</td><td class="muted small">${esc(ONT_SOURCE[e.source] || e.source)}${e.evidence ? ' · ' + esc(short(e.evidence, 70)) : ''}</td></tr>`; }).join('')}</table>` : ''}</div>`;
 }
+
+// ---- an AI text with an account or number that is not in its evidence (set by src/ai/tools/grounding.js) gets a muted line under it
+const ungroundedLine = (u) => (u && ((u.accounts || []).length || (u.amounts || []).length) ? `<div class="muted small" style="margin:4px 0">Not found in the evidence: ${esc([...(u.accounts || []), ...(u.amounts || [])].slice(0, 10).join(', '))}. Treat these as unconfirmed.</div>` : '');
