@@ -295,7 +295,7 @@ Names come from hand-set labels first, then built-in name patterns (Binance, OKX
 
 ## Web UI
 
-The UI is organised around **tokens**, **wallets / groups** and **safety** (Safety Check, contract audits, hacks), plus the scanner. AI write-ups are credited to **NEAR AI**: the page never names the model, and API responses drop `model` fields. A search box at the top (press `/`) finds tokens by symbol or account, early wallets by account, and groups by id, AI label or member wallet. A NEAR account it doesn't know can still be sent to the contract audit. Dark by default, with a light theme toggle.
+The UI is organised around **tokens**, **wallets / groups** and **safety** (Safety Check, contract audits, hacks), plus the scanner. AI write-ups are credited to **NEAR AI**: the page never names the model, and API responses drop `model` fields. A search box at the top (press `/`) searches everything at once: tokens (symbol or account), wallets, groups (id, AI label or member), token creators, funders and entities (by name, e.g. "binance"), audited contracts (account, token name or symbol), hack cases (an account in the case, its target, or words of its headline), flagged accounts and NFT collections. Paste a full account, a transaction hash or a link and the first results are **Is it safe?** (the Safety Check, with what the ontology calls the account and whether it is flagged), its wallet page, and for a contract its audit, whether Safe Near has seen it before or not. Dark by default, with a light theme toggle.
 
 | Section | Pages |
 |---|---|

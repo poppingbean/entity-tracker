@@ -59,7 +59,9 @@
   .sr-h { padding:8px 10px 4px; font-size:10.5px; font-weight:700; letter-spacing:.8px; text-transform:uppercase; color:var(--faint); }
   .sr-i { display:flex; align-items:center; gap:10px; padding:7px 10px; border-radius:8px; color:var(--text); text-decoration:none !important; }
   .sr-i:hover, .sr-i.on { background:var(--hover); }
-  .sr-i b { display:block; font-weight:600; } .sr-i small { display:block; color:var(--muted); font-size:11.5px; }
+  .sr-i > span:last-child { min-width:0; } .sr-i b { display:block; font-weight:600; overflow-wrap:anywhere; } .sr-i small { display:block; color:var(--muted); font-size:11.5px; overflow-wrap:anywhere; }
+  .topbar .sr { left:auto; width:min(520px, 94vw); }
+  .sr .acct { white-space:normal; word-break:break-all; }
   .sr-empty { padding:14px; color:var(--muted); }
 
   /* ---------- page ---------- */

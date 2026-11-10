@@ -768,16 +768,36 @@ const routes = {
         wallet_age_days: w?.created_ts ? Math.round((e.first_buy_ts - w.created_ts) / 86400e3) : null, rugger: ruggerWallet(w, c), wallet_tag: tagOf(w?.tag), wallet_profit_rate: w?.stats?.profit_rate ?? null, tag: tagOf(c ? c.tag : w?.tag), cluster: c ? { id: c._id, size: c.size, tag: tagOf(c.tag), rugger: ruggerGroup(c), label: c.ai?.label || c.rule?.tags?.[0] || null } : null }; }) };
   },
 
-  /** One box for everything: tokens by symbol / account, wallets by account, groups by id / AI label. */
+  /** One box for everything Safe Near knows: tokens, wallets, groups, creators, entities, contracts, hack cases, flagged accounts, NFT collections. */
   '/api/search': async (u) => {
-    const q = (u.searchParams.get('q') || '').trim().slice(0, 80);
-    if (q.length < 2) return { tokens: [], wallets: [], groups: [] };
-    const [tokens, wallets, groups] = await Promise.all([
-      col('tokens').find({ $or: [{ symbol: rx(q) }, { _id: rx(q) }] }, { projection: { symbol: 1, launchpad: 1, live_ts: 1, 'outcome.rugged': 1 } }).sort({ live_ts: -1 }).limit(6).toArray(),
-      col('wallets').find({ _id: rx(q), is_early: true }, { projection: { cluster_id: 1, tag: 1, 'stats.tokens_n': 1 } }).limit(6).toArray(),
-      col('clusters').find({ $or: [{ _id: rx(q) }, { 'ai.label': rx(q) }, { members: q }] }, { projection: { tag: 1, size: 1, 'ai.label': 1 } }).sort({ size: -1 }).limit(6).toArray(),
+    const q = (u.searchParams.get('q') || '').trim().replace(/^\$/, '').slice(0, 80);
+    if (q.length < 2) return { tokens: [], wallets: [], groups: [], creators: [], entities: [], contracts: [], cases: [], flagged: [], collections: [], account: null };
+    const lq = q.toLowerCase(), safe = (p) => p.catch(() => []);
+    const [tokens, wallets, groups, creators, entities, contracts, cases, flagged, collections] = await Promise.all([
+      safe(col('tokens').find({ $or: [{ symbol: rx(q) }, { _id: rx(q) }] }, { projection: { symbol: 1, launchpad: 1, live_ts: 1, 'outcome.rugged': 1 } }).sort({ live_ts: -1 }).limit(6).toArray()),
+      safe(col('wallets').find({ _id: rx(q) }, { projection: { cluster_id: 1, tag: 1, 'stats.tokens_n': 1, is_early: 1 } }).sort({ is_early: -1 }).limit(6).toArray()),
+      safe(col('clusters').find({ $or: [{ _id: rx(q) }, { 'ai.label': rx(q) }, { members: q }] }, { projection: { tag: 1, size: 1, 'ai.label': 1 } }).sort({ size: -1 }).limit(5).toArray()),
+      safe(col('tokens').aggregate([{ $match: { creator: rx(q) } }, { $group: { _id: '$creator', launches: { $sum: 1 }, rugged: { $sum: { $cond: ['$outcome.rugged', 1, 0] } } } }, { $sort: { launches: -1 } }, { $limit: 4 }]).toArray()),
+      safe(col('entities').find({ $or: [{ _id: rx(q) }, { label: rx(q) }] }, { projection: { label: 1, type: 1, kind: 1, funded_n: 1 } }).sort({ funded_n: -1 }).limit(5).toArray()),
+      safe(col('audits').find({ $or: [{ _id: rx(q) }, { tokenSymbol: rx(q) }, { tokenName: rx(q) }] }, { projection: { tokenName: 1, tokenSymbol: 1, 'auto.level': 1, 'auto.label': 1, 'risk.level': 1 } }).limit(5).toArray()),
+      safe(col('incidents').find({ status: { $in: ['confirmed', 'suspected'] }, $or: [{ _id: rx(q) }, { 'accounts.account': rx(q) }, { 'target.account': rx(q) }, { 'victims.account': rx(q) }, { 'ai.headline': rx(q) }] },
+        { projection: { status: 1, kind: 1, stolen_usd: 1, started_ts: 1, 'ai.headline': 1, 'attacker.account': 1, 'target.account': 1 } }).sort({ started_ts: -1 }).limit(4).toArray()),
+      safe(col('firewall_flags').find({ _id: rx(q) }, { projection: { severity: 1, reason: 1, incident: 1 } }).limit(4).toArray()),
+      safe(col('nft_collections').find({ $or: [{ _id: rx(q) }, { name: rx(q) }] }, { projection: { name: 1 } }).limit(4).toArray()),
     ]);
-    return { tokens: tokens.map(strip), wallets: wallets.map(strip), groups: groups.map(strip) };
+    // exact matches first in every list
+    const exact = (rows, key = (r) => r._id) => rows.sort((a, b) => (String(key(b)).toLowerCase() === lq) - (String(key(a)).toLowerCase() === lq));
+    exact(tokens, (t) => t.symbol); exact(wallets); exact(entities); exact(contracts); exact(creators);
+    // a full account id: what the ontology calls it, whether the database has seen it or not
+    let account = null;
+    if (validNearAddress(lq)) {
+      const o = await entityView(lq).catch(() => null);
+      if (o) account = { id: lq, class: o.class, is: o.is, label: o.label, flagged: o.flagged, cases: (o.cases || []).length };
+    }
+    return { tokens: tokens.map(strip), wallets: wallets.map(strip), groups: groups.map(strip), creators: creators.map(strip), entities: entities.map(strip),
+      contracts: contracts.map((a) => ({ id: a._id, name: a.tokenSymbol || a.tokenName || null, type: a.auto?.label || null, level: a.auto?.level || a.risk?.level || null })),
+      cases: cases.map((c) => ({ id: c._id, status: c.status, kind: c.kind, stolen_usd: c.stolen_usd || 0, started_ts: c.started_ts || null, headline: c.ai?.headline || null })),
+      flagged: flagged.map(strip), collections: collections.map(strip), account };
   },
 
   /** Token creators: launches, rugged launches, dev-rug blacklist, and the group they belong to. */
