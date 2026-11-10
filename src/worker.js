@@ -27,7 +27,7 @@ import { scanTick, followUpTick, blacklistCreator } from './scanner/pipeline.js'
 import { managePositions } from './sim/portfolio.js';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-export const runtime = { startedTs: Date.now(), cycles: 0, lastCycleTs: null, stopping: false, lastEvalTs: 0, lastPositionCheck: 0, lastRugCheck: 0, lastCreatorCheck: 0, reviewing: null, reviewed: 0, nft: null, nftLast: null, alerts: null, lastAlerts: 0, telegram: null, accuracy: null, lastAccuracy: 0, autoAudit: null, lastAutoAudit: 0, incident: null, lastIncident: 0, deepReview: null, lastDeepReview: 0, registry: null, lastRegistry: 0, news: null, lastNews: 0, ring: null, lastRing: 0 };
+export const runtime = { startedTs: Date.now(), cycles: 0, lastCycleTs: null, stopping: false, lastEvalTs: 0, lastPositionCheck: 0, lastRugCheck: 0, lastCreatorCheck: 0, reviewing: null, reviewed: 0, nft: null, nftLast: null, alerts: null, lastAlerts: 0, telegram: null, accuracy: null, lastAccuracy: 0, autoAudit: null, lastAutoAudit: 0, incident: null, lastIncident: 0, deepReview: null, lastDeepReview: 0, registry: null, lastRegistry: 0, dataCheck: null, lastDataCheck: 0, news: null, lastNews: 0, ring: null, lastRing: 0 };
 
 /** One pass of the pipeline. Returns what it did, so callers (the CLI) can loop until idle. */
 export async function cycle({ evaluate = true } = {}) {
@@ -91,6 +91,11 @@ export async function cycle({ evaluate = true } = {}) {
   if (config.incidents.enabled && !runtime.deepReview && Date.now() - runtime.lastDeepReview > config.incidents.everyMs) {
     runtime.lastDeepReview = Date.now();
     runtime.deepReview = processDeepReview().catch((e) => warn(`deep review: ${e.message}`)).finally(() => { runtime.deepReview = null; });
+  }
+  // data health: a sample of recent transactions checked against RPC on another host, beside the loop
+  if (config.data.checkEveryMinutes > 0 && !runtime.dataCheck && Date.now() - runtime.lastDataCheck > config.data.checkEveryMinutes * 60e3) {
+    runtime.lastDataCheck = Date.now();
+    runtime.dataCheck = import('./near/health.js').then((m) => m.runCrossCheck()).catch((e) => warn(`data health: ${e.message}`)).finally(() => { runtime.dataCheck = null; });
   }
   // measured accuracy: recomputed every hour beside the loop
   if (!runtime.accuracy && Date.now() - runtime.lastAccuracy > config.accuracy.everyMs) {
