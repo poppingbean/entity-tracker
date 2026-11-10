@@ -1,13 +1,16 @@
-// Backfill: turn what Safe Near already knows into ontology facts (migration step 1). Idempotent: every run re-asserts what it sees and
-// closes the facts of earlier runs it did not see again (a case cleared, an exchange wallet dropped from the registry).
-//   node src/cli.js ontology-backfill [--dry]
+// The fact writers. Each writer reads one collection and returns its facts; `runWriters` asserts them as `writer/<name>` and closes that
+// writer's facts it did not see again (a case cleared, an exchange wallet dropped from the registry), then re-resolves only the accounts
+// it touched. Step G1: modules call it (through writers.js) right after they change their data, so new data reaches the ontology at once.
+// The daily backfill is the same runner over every writer, kept as a safety net until G2 (docs/ontology-design.md 6.5).
+//   node src/cli.js ontology-backfill [--dry]      node src/cli.js ontology-parity
 import { col, bulkReplace } from '../db.js';
 import { info } from '../log.js';
 import { fromAuditRole } from './classes.js';
-import { assert, retire, invalid, factDoc, clearCache } from './index.js';
+import { assert, retire, invalid, factDoc, factId, clearCache } from './index.js';
 import { virtualFacts } from './known.js';
 import { resolve } from './resolve.js';
 import { intentsSolver } from '../incident/origin.js';
+import { refreshSnapshot } from './sync.js';
 
 const NO_CODE = '11111111111111111111111111111111';
 const BUSY_TX = 15000; // grouping's hub threshold: this many transactions is busy like an exchange, a bot or a market maker
@@ -63,9 +66,10 @@ export const WRITERS = {
     return out;
   },
 
-  async audits() {
+  // scope { ids }: only these accounts (one audit just finished); its facts are the accounts' is_a and the controls edges into them
+  async audits({ ids = null } = {}) {
     const out = [];
-    const cur = col('audits').find({ auto: { $exists: true } }, { projection: { 'auto.role': 1, 'auto.label': 1, 'auto.confidence': 1, 'auto.control': 1, 'raw.account.code_hash': 1, 'raw.account.global_contract_hash': 1, 'raw.account.global_contract_account_id': 1 } });
+    const cur = col('audits').find({ auto: { $exists: true }, ...(ids ? { _id: { $in: ids } } : {}) }, { projection: { 'auto.role': 1, 'auto.label': 1, 'auto.confidence': 1, 'auto.control': 1, 'raw.account.code_hash': 1, 'raw.account.global_contract_hash': 1, 'raw.account.global_contract_account_id': 1 } });
     for await (const a of cur) {
       const acc = a.raw?.account, code = !!acc && (acc.code_hash && acc.code_hash !== NO_CODE || !!acc.global_contract_hash || !!acc.global_contract_account_id);
       const cls = fromAuditRole(a.auto?.role) || (code ? 'contract/other' : null);
@@ -125,21 +129,85 @@ export const WRITERS = {
   },
 };
 
-/** Run the writers. `dry`: collect and check the facts, write nothing. Returns { run, facts, per, rejected }. */
-export async function backfill({ dry = false, only = null } = {}) {
-  const run = Date.now(), per = {}, facts = [], rejected = [];
-  for (const [name, fn] of Object.entries(WRITERS)) {
-    if (only && !only.includes(name)) continue;
-    const got = (await fn()).map((f) => ({ ...f, by: `backfill/${name}`, run }));
+// a writer's own name, and the name the daily backfill used before G1 (its facts are closed by the writer's first run)
+export const writerBy = (name) => `writer/${name}`;
+const legacyBy = (name) => `backfill/${name}`;
+// the facts a scoped run owns: an audit run for some accounts closes only those accounts' facts
+// (inside $and: retire() and the lookups add their own $or for 'still live', which would replace a top-level one)
+const SCOPES = { audits: ({ ids }) => ({ $and: [{ $or: [{ subject: { $in: ids }, predicate: 'is_a' }, { object: { $in: ids }, predicate: 'controls' }] }] }) };
+
+/**
+ * Run some writers: assert their facts, close the ones they no longer see, re-resolve the accounts touched. `scope` = { <writer>: args }
+ * narrows a writer that supports it (audits: { ids }). `dry`: build and check only. Returns { run, per, written, retired, touched, facts?, rejected }.
+ */
+export async function runWriters(names, { dry = false, scope = {}, now = Date.now() } = {}) {
+  const run = now, per = {}, facts = [], rejected = [];
+  for (const name of names) {
+    if (!WRITERS[name]) throw new Error(`unknown writer ${name}`);
+    const got = (await WRITERS[name](scope[name] || {})).map((f) => ({ ...f, by: writerBy(name), run }));
     const ok = got.filter((f) => { const p = invalid(f); if (p) rejected.push({ writer: name, problem: p, subject: f.subject }); return !p; });
     per[name] = ok.length; facts.push(...ok);
   }
   if (dry) return { run, facts, per, rejected, dry: true };
   const written = await assert(facts, { now: run });
-  const retired = await retire({ by: { $in: Object.keys(per).map((n) => `backfill/${n}`) }, run: { $ne: run } }, { now: run });
+  let retired = 0;
+  const touched = new Set(facts.map((f) => f.subject));
+  for (const name of Object.keys(per)) {
+    const closing = { by: { $in: [writerBy(name), legacyBy(name)] }, run: { $ne: run }, ...(scope[name] && SCOPES[name] ? SCOPES[name](scope[name]) : {}) };
+    if (scope[name] && !SCOPES[name]) throw new Error(`writer ${name} has no scope`);
+    for (const f of await col('ontology_facts').find({ $and: [closing, { $or: [{ valid_to: null }, { valid_to: { $gt: run } }] }] }, { projection: { subject: 1 } }).toArray()) touched.add(f.subject);
+    retired += await retire(closing, { now: run });
+  }
+  await resolveSubjects([...touched], { now: run });
+  return { run, per, written, retired, touched: touched.size, rejected };
+}
+
+/** Every writer, then a full rebuild of `ontology_entities` (the daily safety net; G2 turns it off). Same return as runWriters plus `entities`. */
+export async function backfill({ dry = false, only = null } = {}) {
+  const r = await runWriters(only || Object.keys(WRITERS), { dry });
+  if (dry) return r;
   const entities = await rebuildEntities();
-  info(`ontology backfill: ${written} facts written, ${retired} retired, ${entities} entities resolved`);
-  return { run, per, written, retired, entities, rejected };
+  info(`ontology backfill: ${r.written} facts written, ${r.retired} retired, ${entities} entities resolved`);
+  return { ...r, entities };
+}
+
+/**
+ * Parity (the G2 gate): what every writer would write now against what is stored. `missing`: a fact a writer makes that is not stored
+ * (a module changed its data without running its writer); `stale`: a stored fact no writer makes any more (a close that never ran).
+ * Legacy `backfill/*` facts count as stored until a writer has replaced them. Writes nothing.
+ */
+export async function parity({ now = Date.now() } = {}) {
+  const dry = await runWriters(Object.keys(WRITERS), { dry: true, now });
+  const out = {};
+  for (const name of Object.keys(WRITERS)) {
+    // only facts that would be live: a cleared case's roles are written already closed (valid_to = the clear time)
+    const live = (f) => f.valid_to == null || f.valid_to > now;
+    const want = new Map(dry.facts.filter((f) => f.by === writerBy(name) && live(f)).map((f) => [factId(f), f]));
+    const stored = await col('ontology_facts').find({ by: { $in: [writerBy(name), legacyBy(name)] }, $or: [{ valid_to: null }, { valid_to: { $gt: now } }] }, { projection: { subject: 1, predicate: 1, object: 1, by: 1 } }).toArray();
+    // a legacy fact stands for the same fact under the writer's name
+    const have = new Set(stored.map((f) => (f.by === writerBy(name) ? f._id : factId({ subject: f.subject, predicate: f.predicate, object: f.object, by: writerBy(name) }))));
+    const missing = [...want.keys()].filter((id) => !have.has(id));
+    const stale = [...have].filter((id) => !want.has(id));
+    out[name] = { facts: want.size, missing: missing.length, stale: stale.length, legacy: stored.filter((f) => f.by === legacyBy(name)).length,
+      sample_missing: missing.slice(0, 3).map((id) => { const f = want.get(id); return `${f.subject} ${f.predicate} ${JSON.stringify(f.object)}`; }) };
+  }
+  return { ts: now, writers: out, clean: Object.values(out).every((w) => !w.missing && !w.stale && !w.legacy) };
+}
+
+/** Re-resolve some accounts into `ontology_entities` (an account left with no stored facts loses its row). */
+export async function resolveSubjects(subjects, { now = Date.now() } = {}) {
+  for (let i = 0; i < subjects.length; i += 500) {
+    const part = subjects.slice(i, i + 500);
+    const per = new Map(part.map((a) => [a, virtualFacts(a)])), has = new Set();
+    for await (const f of col('ontology_facts').find({ subject: { $in: part }, $or: [{ valid_to: null }, { valid_to: { $gt: now } }] })) { per.get(f.subject).push(f); has.add(f.subject); }
+    const docs = part.filter((a) => has.has(a)).map((a) => ({ _id: a, ...resolve(a, per.get(a), now), resolved_ts: now }));
+    if (docs.length) await bulkReplace('ontology_entities', docs);
+    const gone = part.filter((a) => !has.has(a));
+    if (gone.length) await col('ontology_entities').deleteMany({ _id: { $in: gone } });
+  }
+  clearCache();
+  if (subjects.length) await refreshSnapshot({ force: true }).catch(() => {});
+  return subjects.length;
 }
 
 /** Recompute `ontology_entities` (one resolved answer per account that has stored facts), for pages and the gate. */

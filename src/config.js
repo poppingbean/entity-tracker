@@ -85,6 +85,7 @@ export const config = {
     // which modules decide with the ontology (comma list of pass_through, tracer, grouping, firewall; "none" = all back on their old rules, the rollback)
     read: process.env.ONTOLOGY_READ ?? 'pass_through,tracer,grouping,firewall', // false on a local copy pointed at the production database: the gate trusts heartbeats
     backfillEveryHours: num(process.env.ONTOLOGY_BACKFILL_EVERY_HOURS, 24), // re-derive the facts from the other collections (0 = never)
+    directWriters: process.env.ONTOLOGY_DIRECT_WRITERS !== 'false', // step G1: modules write their facts when they change their data (false = backfill only)
   },
   incidents: {
     enabled: process.env.INCIDENTS_ENABLED !== 'false',

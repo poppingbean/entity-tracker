@@ -11,7 +11,7 @@ import { col } from '../db.js';
 import { info } from '../log.js';
 import { accountRows, fetchTxs } from '../near/indexer.js';
 import { assert, invalid, clearCache } from '../ontology/index.js';
-import { backfill } from '../ontology/backfill.js';
+import { runWriters } from '../ontology/backfill.js';
 import { blacklistCreator } from '../scanner/pipeline.js';
 import { flagAccounts } from './service.js';
 
@@ -122,7 +122,7 @@ export async function addToCase(caseQuery, rawPlan, { dry = false, log = () => {
   for (const b of plan.blacklist) if (await blacklistCreator(b.account, { account: b.account, case: inc._id, reason: b.why, ...(b.token ? { laundering_token: b.token } : {}) })) out.blacklisted++;
   await col('ontology_facts').deleteMany({ by: BY });
   out.facts_written = await assert(facts);
-  const r = await backfill({ only: ['incidents', 'firewall_flags'] });
+  const r = await runWriters(['incidents', 'firewall_flags']); // the writers themselves, not a throttled sync: the result is reported
   out.backfill = { written: r.written, retired: r.retired };
   clearCache();
   info(`case-add ${BY} -> ${inc._id}: ${add.length} accounts, ${edges.length} edges, ${out.facts_written} facts, ${out.blacklisted} blacklisted`);

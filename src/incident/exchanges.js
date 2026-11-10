@@ -76,6 +76,7 @@ export async function refreshExchangeRegistry({ log = info } = {}) {
   for (const [cold, exchange] of colds) rows.push({ _id: cold, exchange, kind: 'cold', how: 'exchange-named account', updated_ts: Date.now(), source: 'named' });
   if (rows.length) await col('exchange_wallets').bulkWrite(rows.map((r) => ({ replaceOne: { filter: { _id: r._id }, replacement: r, upsert: true } })), { ordered: false });
   cache.ts = 0;
+  await (await import('../ontology/writers.js')).syncFacts(['exchange_wallets', 'solvers']); // G1: new exchange wallets cut paths at once; solvers re-checked with the registry
   log(`exchange registry: ${rows.filter((r) => r.kind === 'hot').length} hot wallets (${rows.filter((r) => r.kind === 'hot' && r.exchange).length} named), ${colds.size} cold wallets`);
   return { wallets: rows.length, exchanges: [...new Set(rows.map((r) => r.exchange).filter(Boolean))] };
 }
@@ -85,6 +86,7 @@ export async function addExchangeWallet(id, exchange, kind = 'hot') {
   const p = await profileWallet(id).catch(() => ({}));
   await col('exchange_wallets').replaceOne({ _id: id }, { _id: id, exchange, kind, how: 'named by hand', tx_count: p.total ?? null, balance_near: p.balance_near ?? null, baseline: p.baseline || null, source: 'manual', updated_ts: Date.now() }, { upsert: true });
   cache.ts = 0;
+  await (await import('../ontology/writers.js')).syncFacts(['exchange_wallets']); // G1
 }
 
 const cache = { ts: 0, map: new Map() };

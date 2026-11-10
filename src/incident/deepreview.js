@@ -104,6 +104,7 @@ export async function reviewIncident(inc) {
     await col('firewall_flags').deleteMany({ source: 'incident', incident: inc._id });
     await col('alerts').updateMany({ $or: [{ _id: `incident:${inc._id}` }, { 'related.wallets': inc.attacker.account, type: { $in: ['drain_suspected', 'incident'] } }], title: { $not: /^(Not a hack|Retracted|Safe)/ } }, [{ $set: { title: { $concat: ['Safe after review: ', '$title'] }, severity: 'info' } }]).catch(() => {});
   }
+  await (await import('../ontology/writers.js')).syncFacts(['incidents', 'firewall_flags']); // G1
   info(`deep review ${inc._id}: ${tag} (${why})${ai ? ` · NEAR AI: ${ai.verdict}, ${ai.confidence}` : ''}`);
   return { tag, why, status, ai_missing: aiMissing };
 }

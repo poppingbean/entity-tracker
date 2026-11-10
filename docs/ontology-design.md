@@ -179,7 +179,7 @@ type is its resolved class. No graph database: the edge list is `ontology_facts`
 
 ### 5.2 Edges (schema)
 
-"Written by" is what writes the edge **today**: the backfill writers (`backfill/<collection>`) or the code-level facts (`known.js`, computed, never stored). Step G moves the writing into the modules themselves.
+"Written by" is the writer that owns the edge: `writer/<collection>` (`src/ontology/backfill.js` WRITERS), or the code-level facts (`known.js`, computed, never stored). Since G1 a module runs its writer right after it changes that collection (6.5); before G1 the same writers ran only in the daily backfill, as `backfill/<collection>`.
 
 | predicate | from → to | written by (today) | example |
 |---|---|---|---|
@@ -209,7 +209,7 @@ The 2026-11-04 false drain was a **graph error**: money from two solvers was rea
   through NEAR Intents") and stops. Two wallets paid by the same solver are **not** linked.
 - **Labels do not spread along `funded`.** Being paid by an attacker does not make an account an attacker. Only `role_in` with
   a role, written by the tracer or a public report, does.
-- **Derived facts can be undone.** Today this holds through the backfill: each run closes every fact it did not see again, so a dropped exchange wallet's facts close within a day, and a cleared case's `role_in` facts close at the next run, dated to the clear time. Explicit `derived_from: [fact ids]` links, for facts made from other facts, are not built yet; they come with step G, when facts are no longer re-derived daily.
+- **Derived facts can be undone.** Every writer run closes the facts of that writer it did not see again. Since G1 this happens when the module changes its data: a cleared case's `role_in` facts close when it is cleared (dated to the clear time), a dropped exchange wallet's at the registry refresh. Explicit `derived_from: [fact ids]` links, for facts made from other facts, are not built yet; nothing stored is derived from other facts today.
 - **The ontology's own output is never evidence** (6.3). Kinds and labels that modules computed by reading the ontology must not come back as facts.
 
 ### 5.4 Storage and queries
@@ -288,21 +288,38 @@ Grouping stores the kind of every account it saw on each wallet, so a rule chang
 
 Flipping `ONTOLOGY_READ` re-syncs in the other direction. Stored hack cases are not rewritten: they change only when re-traced (a follow-up or a deep review). Facts refresh with the daily backfill.
 
-### 6.5 Still to do: step G (after 14/11)
+### 6.5 Step G, in three parts
 
-- **Writers assert facts as they learn them:**
-  - the registry when it finds a hot wallet;
-  - the tracer when it confirms a case and its roles;
-  - the audit when it classifies a contract;
-  - `confirm-incident` for public reports.
+Before G, the ontology learnt only from the daily backfill. New data, such as a confirmed case, an exchange hot wallet the registry just found, or a contract just audited, reached `whatIs` and `classOf` up to 24 hours later. Readers that still read their collection directly saw it at once: the firewall reads `firewall_flags`, and the tracer's identify step reads `exchange_wallets`. Readers that only ask the ontology did not: path cutting in grouping, the money-following, the firewall context and the ring detector. That is the same kind of error as the 2026-11-04 false drain, only narrower.
 
-  `case-add` (docs/incidents.md) already writes this way: an analyst's case accounts, `funded` edges and suspected roles are asserted at once, and the ring detector's approvals go through it.
+G is split by risk. Only G3 removes anything a rollback needs.
 
-  The backfill then goes away, and so does the drift between a change and the next daily run.
-- **Remove the old rules:** the three router lists, `classifyAccount`'s rules, `TRUSTED` as a separate list, the entity table's own labels. Shadow mode, the gate, `triage.json` and the heartbeat steps then have nothing left to compare, and go too.
-- **Close the remaining gap:** an account no collection has seen and no name explains still falls back to the old on-chain checks, so a never-seen busy account can still be called an exchange hot wallet unless the solver check fires.
+| Part | What | Gate | Rollback |
+|---|---|---|---|
+| **G1** | Writers assert facts at the source (below). Additive: the daily backfill keeps running. | Started before the 7-day window, by the operator's choice (2026-11-10). It changes no decision, so #74's production days protect nothing here. | `ONTOLOGY_DIRECT_WRITERS=false` |
+| **G2** | Turn off the daily backfill (`ONTOLOGY_BACKFILL_EVERY_HOURS=0`). Its `backfill/*` facts are already replaced by the first daily run after G1. `ontology-backfill` stays as a manual repair. | **Parity**: `GATE.parityRuns` (3) daily checks in a row after G1 runs, nothing missing or stale. The throttled writers (`entities`, `clusters`) may lag 1% of their facts. | Set the hours back to 24 (no deploy) |
+| **G3** | Remove the old rules: the router lists (`ROUTERS` in detect.js and origin.js, `PASS_THROUGH` in trace.js), `TRUSTED` (firewall/rules.js), `classifyAccount`'s rules, the entity table's own labels, the 13 `reads()` call sites, shadow mode, `triage.json`, the heartbeat steps, the gate. This includes the `ONTOLOGY_READ` switch. | The 7-day window on #74's readers (C–F), the golden set, the stored-case replay, the group comparison (as in #74). | A revert and a deploy |
 
-Checks before G merges: the golden set, the stored-case replay, and the group comparison, as in #74.
+**G1 as built.** The writers are the backfill's own functions (`WRITERS` in `src/ontology/backfill.js`). `runWriters(names)` asserts a writer's facts as `writer/<name>`, closes that writer's facts it did not see again, and re-resolves only the accounts it touched in `ontology_entities`, then the snapshot. A module calls `syncFacts(names)` (`src/ontology/writers.js`) right after it changes its data:
+
+| Writer | Run by | When |
+|---|---|---|
+| `incidents`, `firewall_flags` | `investigate` (full traces and follow-ups), `clearIncident`, the deep review, the live detector, `reflagIncidents`, `case-add` | after a case's accounts, status or flags change; `confirm-incident` and `unconfirm-incident` go through `investigate` |
+| `firewall_flags` | `flagAccount`, `unflagAccount` | a hand report |
+| `exchange_wallets`, `solvers` | `refreshExchangeRegistry`; `addExchangeWallet` (exchange_wallets only) | the solver check used to run only inside the backfill; it now runs with the registry it reads |
+| `audits` (scoped to the account) | the automated audit, the token audit | after an account's audit is saved |
+| `labels` | `node src/cli.js label` | a hand label |
+| `clusters`, `entities` | `evaluateGroups` | throttled to every 10 minutes (they change all the time) |
+
+Because a direct write and the backfill run the same writer, the two make the same facts. What G1 can miss is an *event*: a module that changes a collection without calling `syncFacts`. The **parity check** measures exactly that (`node src/cli.js ontology-parity`, and daily in the worker *before* the backfill repairs anything, kept in `meta.ontology_parity`):
+- **missing:** a fact a writer would make that is not stored;
+- **stale:** a stored fact no writer makes any more.
+
+A sync never throws into the caller (it is logged, and the daily backfill repairs it until G2). Measured on production data on 2026-11-10: every writer at parity except one fact, an audit saved after the last backfill. A scoped audit write closed it in 1.7 s.
+
+**Still open after G1:**
+- `created_by` / `deployed` edges: the tracer (fake tokens, sub-accounts) and the launch scanner (token creators; smithii is not watched yet) should write them.
+- The remaining gap: an account no collection has seen and no name explains still falls back to the old on-chain checks, so a never-seen busy account can still be called an exchange hot wallet unless the solver check fires. This can be closed in G3, with the old rules.
 
 ## 7. Not in scope
 

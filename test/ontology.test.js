@@ -153,3 +153,20 @@ test('the firewall hook passes compareFirewall(old), not the factory', async () 
   const r = compareFirewall({ severity: 'critical', exchange: false })({ class: 'unknown', top: 'unknown', flagged: { severity: 'critical' } });
   assert.equal(r.agree, true);
 });
+
+test('G2 parity: nothing missing or stale, except a small lag for the throttled writers; old backfill names keep it open', async () => {
+  const { parityProblems } = await import('../src/ontology/gate.js');
+  const w = (facts, missing = 0, stale = 0, legacy = 0) => ({ facts, missing, stale, legacy, sample_missing: missing ? ['x is_a "exchange"'] : [] });
+  assert.deepEqual(parityProblems({ writers: { incidents: w(80), entities: w(4000, 30, 5) } }), []); // entities: 35 <= 1% of 4000
+  assert.equal(parityProblems({ writers: { incidents: w(80, 1) } }).length, 1);                      // an event writer: none allowed
+  assert.equal(parityProblems({ writers: { entities: w(4000, 50) } }).length, 1);                     // past the lag share
+  assert.match(parityProblems({ writers: { audits: w(10, 0, 0, 10) } })[0], /old backfill/);          // the first run after deploy
+});
+
+test('direct writers are named for the writer, and a legacy fact maps onto the same id', async () => {
+  const { writerBy } = await import('../src/ontology/backfill.js');
+  assert.equal(writerBy('audits'), 'writer/audits');
+  const f = { subject: 'a.near', predicate: 'is_a', object: 'contract/token' };
+  assert.equal(factId({ ...f, by: writerBy('audits') }), factId({ ...f, by: 'writer/audits' }));
+  assert.notEqual(factId({ ...f, by: 'backfill/audits' }), factId({ ...f, by: 'writer/audits' }));
+});

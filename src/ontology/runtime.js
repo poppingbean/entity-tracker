@@ -3,7 +3,8 @@
 import { config } from '../config.js';
 import { warn } from '../log.js';
 import { startHeartbeat, shadow, comparePass } from './shadow.js';
-import { backfill } from './backfill.js';
+import { backfill, parity } from './backfill.js';
+import { metaGet, metaSet } from '../db.js';
 import { refreshSnapshot } from './sync.js';
 import { syncGroupingIfChanged } from './apply.js';
 
@@ -20,7 +21,12 @@ export async function shadowLists() {
 async function runBackfill() {
   if (backfilling) return;
   backfilling = true;
-  try { await backfill(); await refreshSnapshot({ force: true }); await shadowLists(); } catch (e) { warn(`ontology backfill failed: ${e.message}`); } finally { backfilling = false; }
+  try {
+    // G2's evidence: what the direct writers left missing or stale, measured before the backfill repairs it (14 days kept)
+    const p = await parity().catch((e) => { warn(`ontology parity failed: ${e.message}`); return null; });
+    if (p) await metaSet('ontology_parity', [...(await metaGet('ontology_parity', [])), { ts: p.ts, clean: p.clean, writers: p.writers }].slice(-14));
+    await backfill(); await refreshSnapshot({ force: true }); await shadowLists();
+  } catch (e) { warn(`ontology backfill failed: ${e.message}`); } finally { backfilling = false; }
 }
 
 /** role: 'web' | 'worker' | 'all'. */
