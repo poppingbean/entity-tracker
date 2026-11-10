@@ -234,7 +234,15 @@ Replaying the drain's blocks, the exchange-drain detector flags the first transf
 
 ## Laundering rings and `case-add`
 
-**Ring detector** (`src/incident/ring.js`, worker, hourly; `RING_EVERY_MINUTES=0` turns it off). For each confirmed case it follows the NEAR the case's accounts paid out, three hops, the biggest 40 receivers per hop (exchanges, solvers and other hubs never count). It then reads which tokens those wallets bought and who else bought each one. A token where at least 2 linked wallets are at least 80% of the buyers is a ring. It only **proposes**: a `ring_proposals` row and an alert. It never flags anything, because flags change what other people see.
+**Ring detector** (`src/incident/ring.js`, worker). Every `RING_EVERY_MINUTES` (default 360; 0 turns it off), it scans one confirmed case, the one scanned longest ago. Only cases updated in the last 60 days are scanned, because a scan reads a few thousand transactions.
+
+How a scan works:
+- It follows the NEAR the case's accounts paid out after the hack, three hops deep. It keeps the 40 biggest receivers per hop, and exchanges, solvers and other hubs never count.
+- It reads which tokens those wallets bought, and who else bought each one.
+- It skips bridge and factory tokens, and tokens with more than 20,000 transactions.
+- A token where at least 2 linked wallets make up at least 80% of the buyers is a ring.
+
+It only **proposes**: a `ring_proposals` row, a log line, and a private message to `RING_OPERATOR_CHAT_ID` when that is set. It never raises a public alert and never flags anything. An unapproved suspicion must not name wallets in the public channel, and flags change what other people see. A re-scan updates an open proposal but never one that was approved or rejected.
 
 ```bash
 node src/cli.js ring-scan [case id]          # scan now, store proposals
@@ -243,7 +251,11 @@ node src/cli.js ring-approve <id>            # an operator applies it (case-add)
 node src/cli.js ring-reject <id> "reason"
 ```
 
-A proposal's plan: the buyers and the wallets that paid them become the case's `cash_out_wallet` accounts (flagged high); the token's creator is only **suspected** (an `accomplice` role with status `suspected`, confidence 0.6, "linked by trading, no traced payment"), is not flagged, and is added to the scanner's creator blacklist. Tested on the Binance case with the hand-added accounts removed, it finds `olccl-4` and `mmli-6` with the right creators; the other four tokens' buyers are outside the per-hop cap, so extend the plan by hand.
+A proposal's plan:
+- **The whole path from the case to each buyer** (attacker → hub → funder → buyer) becomes the case's `cash_out_wallet` accounts, flagged high, with each hop's `funded` edge as evidence. A buyer is never flagged without the payments that tie it to the hack.
+- **The token's creator** is only **suspected**: an `accomplice` role with status `suspected`, confidence 0.6, "linked by trading, no traced payment". It is not flagged, and it is added to the scanner's creator blacklist. A creator the case paid directly is already on the path, so it is never also "suspected".
+
+**Tested** on the Binance case with the hand-added accounts removed. It finds `olccl-4` and `mmli-6` with the right creators, and their full paths from the attacker. It misses the other four tokens, because their buyers fall outside the per-hop cap. For those, extend the plan by hand.
 
 **`case-add`** is the one writer for an analyst's findings (the detector's approval uses it too):
 

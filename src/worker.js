@@ -82,7 +82,7 @@ export async function cycle({ evaluate = true } = {}) {
     if (!runtime.reviewsBackfilled) { runtime.reviewsBackfilled = true; backfillReviews().catch(() => {}); retractMoveAlerts().catch(() => {}); } // findings from before the deep review; moves of cleared cases
     runtime.incident = reviewDetections(3).catch((e) => warn(`drain review: ${e.message}`)).then(() => processIncidentQueue()).catch((e) => warn(`incident queue: ${e.message}`)).finally(() => { runtime.incident = null; });
   }
-  // laundering rings: confirmed cases' money bought into memecoins; proposals only (an operator approves), one pass an hour
+  // laundering rings: confirmed cases' money bought into memecoins; proposals only (an operator approves), one case every RING_EVERY_MINUTES
   if (config.incidents.enabled && config.incidents.ringEveryMinutes > 0 && !runtime.ring && Date.now() - runtime.lastRing > config.incidents.ringEveryMinutes * 60e3) {
     runtime.lastRing = Date.now();
     runtime.ring = ringPass().catch((e) => warn(`ring detector: ${e.message}`)).finally(() => { runtime.ring = null; });

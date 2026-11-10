@@ -95,7 +95,8 @@ export async function addToCase(caseQuery, rawPlan, { dry = false, log = () => {
   }
   // 2) the case's accounts
   const have = new Set((inc.accounts || []).map((a) => a.account));
-  const add = plan.accounts.filter((a) => !have.has(a.account) && a.account !== inc.target?.account).map((a) => ({ account: a.account, role: a.role, ts: Date.now(), added_by: BY, ...(a.why ? { why: a.why } : {}) }));
+  const notOwn = new Set([inc.target?.account, ...(inc.victims || []).map((v) => v.account)].filter(Boolean)); // never the attacker's
+  const add = plan.accounts.filter((a) => !have.has(a.account) && !notOwn.has(a.account)).map((a) => ({ account: a.account, role: a.role, ts: Date.now(), added_by: BY, ...(a.why ? { why: a.why } : {}) }));
   // 3) the facts this writer owns
   const facts = [];
   for (const e of edges) facts.push({ subject: e.from, predicate: 'funded', object: e.to, source: 'trace', confidence: 0.9, evidence: `${Number(e.near || 0).toFixed(2)} NEAR in ${e.n || 1} transfer(s), first ${e.tx}`, near: e.near ?? null, tx: e.tx, ts: e.ts ?? null, by: BY });
