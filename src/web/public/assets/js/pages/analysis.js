@@ -91,7 +91,7 @@ function anaAiBody(a) {
   let h = `<div class="card"><div class="head"><h2>NEAR AI analyst ${risk(ai.risk_level)}${ai.previous_risk && ai.previous_risk !== ai.risk_level ? ` <span class="muted small">was ${esc(ai.previous_risk)}</span>` : ''}
       <span class="muted small">${ai.mode === 'update' ? 'update' : 'first assessment'} · ${when(ai.ts)} · confidence ${n(ai.confidence, 2)} · NEAR AI</span></h2>${btn}</div>${status}`;
   if (ai.changes?.length) h += `<h3>Since the previous assessment <span class="muted small">${when(ai.since_ts)}${ai.window ? ` · ${ai.window.trades} trades · ${n(ai.window.buy_near, 1)} N in / ${n(ai.window.sell_near, 1)} N out` : ''}</span></h3>${ul(ai.changes)}`;
-  h += `${ai.changes?.length ? '<h3>Current assessment</h3>' : ''}${ai.headline ? `<p><b>${esc(ai.headline)}</b></p>` : ''}<p>${esc(ai.summary)}</p>${ul(ai.findings)}<p><b>Conclusion.</b> ${esc(ai.conclusion)}</p>`;
+  h += `${ai.changes?.length ? '<h3>Current assessment</h3>' : ''}${ai.headline ? `<p><b>${esc(ai.headline)}</b></p>` : ''}<p>${esc(ai.summary)}</p>${ungroundedLine(ai.unverified)}${ul(ai.findings)}<p><b>Conclusion.</b> ${esc(ai.conclusion)}</p>`;
   h += aiReport(ai.report) + aiPost(ai.telegram_post);
   const hist = a.ai_history || [];
   if (hist.length) h += `<details><summary class="muted small">Earlier runs (${hist.length}), kept with the figures they were written from</summary>${hist.map((x) => `<div style="margin:8px 0;padding-top:6px;border-top:1px solid var(--line)">

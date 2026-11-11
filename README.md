@@ -247,6 +247,8 @@ Everything the AI reads comes from the chain, and anyone can write it: a token c
 
 A token or NFT collection whose name or symbol addresses AI reviewers fails the scanner gate `no_ai_manipulation` and gets a high risk note on its analysis page.
 
+**Grounding check.** Every AI text shown to users (incident reports, deep reviews, follow-up notes, token and NFT analyses, group reviews) is checked against the evidence the model was given: each NEAR account it names (full, sub-account or shortened `abcd1234…`), each dollar figure and each quantity with a unit (NEAR, %, x) must appear in the evidence (6 % tolerance, `5%` matches `0.05`). A text that fails is asked again once (`AI_GROUNDING_RETRY`); if it still fails it is kept and marked on the page "Not found in the evidence: …" (`unverified` on the stored text). The check only marks text and never changes a verdict. Counts per path over 30 days are in the Accuracy output (`security.ai_grounding`). Code: `src/ai/tools/verify.js` (pure checks), `src/ai/tools/grounding.js` (retry and counters), `test/grounding.test.js`.
+
 ## Measured accuracy
 
 The **Accuracy** page (`/accuracy`) scores every early judgment against what happened afterwards, never before. Ground truth for a launch is what a buyer at the moment of the first check held 24 h later: "bad" when the price fell below `ACCURACY_BAD_BELOW` (0.85) of it; the 24 h return of what each check let through or blocked is shown too, which needs no threshold. Hand labels override it (`ground_truth`): `node src/cli.js truth <kind> <id> bad|good|clear`, or a reviewed report.

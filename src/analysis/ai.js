@@ -5,6 +5,7 @@
 // against); every run is also kept for good in `analysis_runs`, with its evidence and, for an update, what changed since the run before.
 import { col } from '../db.js';
 import { chatJSON } from '../ai/tools/nearai.js';
+import { grounded } from '../ai/tools/grounding.js';
 import { config } from '../config.js';
 import { UNTRUSTED_RULE, evidenceMessage, maxRisk, riskFloor } from '../ai/tools/untrusted.js';
 import { tagOf } from '../evaluate/tags.js';
@@ -146,10 +147,10 @@ async function marketOf(analysis) {
 async function ask(system, preamble, evidence, flags) {
   evidence = { ...evidence, ...actorsIn(evidence) };
   const { user, findings } = evidenceMessage(preamble, evidence, { trusted: ['previous'] });
-  const { json, model } = await chatJSON({ system: system + UNTRUSTED_RULE, user, model: config.ai.analysisModel, maxTokens: config.ai.analysisMaxTokens, timeoutMs: config.ai.analysisTimeoutMs, attempts: 2, stream: true });
+  const { json, model, unverified } = await grounded({ path: 'analysis', evidence, run: (extra) => chatJSON({ system: system + UNTRUSTED_RULE, user: user + extra, model: config.ai.analysisModel, maxTokens: config.ai.analysisMaxTokens, timeoutMs: config.ai.analysisTimeoutMs, attempts: 2, stream: true }) });
   const floor = maxRisk(riskFloor(flags), findings.length ? 'high' : 'low');
   const raised = ['low', 'medium', 'high'].indexOf(floor) > ['low', 'medium', 'high'].indexOf(json?.risk_level);
-  return { json: { ...json, risk_level: raised ? floor : json?.risk_level }, model, guard: { floor, raised, ...(findings.length ? { injection: findings } : {}) } };
+  return { json: { ...json, risk_level: raised ? floor : json?.risk_level }, model, unverified, guard: { floor, raised, ...(findings.length ? { injection: findings } : {}) } };
 }
 
 /**
@@ -161,8 +162,8 @@ export async function assessWithAi(analysis) {
   const prev = doc?.ai?.snapshot ? doc.ai : null;
   if (!prev) {
     const snapshot = aiPacket(analysis);
-    const { json, model, guard } = await ask(SYSTEM, 'Evidence packet for this token:', { ...snapshot, market: await marketOf(analysis) }, analysis.flags);
-    const ai = { ...clean(json), guard, mode: 'initial', model, ts: Date.now(), data_to_ts: analysis.data_to_ts, for_built_ts: analysis.built_ts, snapshot };
+    const { json, model, guard, unverified } = await ask(SYSTEM, 'Evidence packet for this token:', { ...snapshot, market: await marketOf(analysis) }, analysis.flags);
+    const ai = { ...clean(json), guard, ...(unverified ? { unverified } : {}), mode: 'initial', model, ts: Date.now(), data_to_ts: analysis.data_to_ts, for_built_ts: analysis.built_ts, snapshot };
     await col('analyses').updateOne({ _id: analysis.token }, { $set: { ai } }, { upsert: true });
     await saveRun(analysis.token, ai);
     return ai;
@@ -174,8 +175,8 @@ export async function assessWithAi(analysis) {
   }
   const now = { age_min: cur.age_min, data_to_ts: cur.data_to_ts, market: await marketOf(analysis), launch: cur.launch, flows: cur.flows, early: cur.early, groups: cur.groups, repeat: cur.repeat, sellers: cur.sellers, creator: cur.creator && { balance: cur.creator.balance, balance_share: cur.creator.balance_share, traded: cur.creator.traded }, holders: cur.holders, token_flows: cur.token_flows, flags: cur.flags };
   const packet = { previous: { ts: prev.ts, risk_level: prev.risk_level, confidence: prev.confidence, summary: prev.summary, findings: prev.findings, conclusion: prev.conclusion, changes: prev.changes }, since, now };
-  const { json, model, guard } = await ask(SYSTEM_UPDATE, 'Previous assessment, what changed since, and the current state:', packet, analysis.flags);
-  const ai = { ...clean(json), guard, mode: 'update', model, ts: Date.now(), since_ts: prev.ts, since_data_to_ts: prev.data_to_ts, data_to_ts: analysis.data_to_ts, for_built_ts: analysis.built_ts,
+  const { json, model, guard, unverified } = await ask(SYSTEM_UPDATE, 'Previous assessment, what changed since, and the current state:', packet, analysis.flags);
+  const ai = { ...clean(json), guard, ...(unverified ? { unverified } : {}), mode: 'update', model, ts: Date.now(), since_ts: prev.ts, since_data_to_ts: prev.data_to_ts, data_to_ts: analysis.data_to_ts, for_built_ts: analysis.built_ts,
     window: { trades: since.trades.trades, buy_near: since.trades.buy_near, sell_near: since.trades.sell_near }, previous_risk: prev.risk_level, snapshot: cur };
   await col('analyses').updateOne({ _id: analysis.token }, { $set: { ai } });
   await saveRun(analysis.token, ai, since);
@@ -185,7 +186,7 @@ export async function assessWithAi(analysis) {
 /** A first-run assessment written and returned without saving anything (to try the prompt on a token without publishing a run). */
 export async function previewAssessment(analysis) {
   const evidence = { ...aiPacket(analysis), market: await marketOf(analysis) };
-  const { json, model, guard } = await ask(SYSTEM, 'Evidence packet for this token:', evidence, analysis.flags);
+  const { json, model, guard, unverified } = await ask(SYSTEM, 'Evidence packet for this token:', evidence, analysis.flags);
   return { ...clean(json), guard, model, evidence: { market: evidence.market, ...actorsIn(evidence) } };
 }
 
