@@ -74,7 +74,7 @@ export async function setStatus(wid, status, { by = 'rules', review = null, inci
   if (!w) return false;
   const closing = status === 'normal' || status === 'confirmed'; // a suspicious watch is still followed (its incident follows it too)
   await col('watches').updateOne({ _id: wid }, {
-    $set: { status, ...(closing ? { closed_ts: now } : {}), ...(incident ? { incident } : {}), ...(review ? { last_review_ts: now, moved_since_review_usd: 0, new_exit: false } : {}) },
+    $set: { status, ...(closing ? { closed_ts: now } : {}), ...(incident ? { incident } : {}), ...(review ? { last_review_ts: now, moved_since_review_usd: 0, new_exit: false, ai_missing: false } : {}) },
     $push: { status_history: { ts: now, status, by, ...(why ? { why } : {}) }, ...(review ? { reviews: review } : {}) },
   });
   if (closing) {
@@ -93,8 +93,8 @@ export async function reopen(wid, { by = 'operator', why = 'reported by a person
 }
 
 /** Record a review that did not change the status (keep watching): moves the review clock. */
-export async function noteReview(wid, review) {
-  await col('watches').updateOne({ _id: wid }, { $set: { last_review_ts: Date.now(), moved_since_review_usd: 0, new_exit: false }, $push: { reviews: { $each: [review], $slice: -30 } } });
+export async function noteReview(wid, review, { aiMissing = false } = {}) {
+  await col('watches').updateOne({ _id: wid }, { $set: { last_review_ts: Date.now(), moved_since_review_usd: 0, new_exit: false, ai_missing: aiMissing }, $push: { reviews: { $each: [review], $slice: -30 } } });
 }
 
 /** The open watches that have an account `account` (for a report by address). */

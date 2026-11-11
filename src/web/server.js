@@ -56,7 +56,7 @@ function asset(pathname) {
 // Google Search Console ownership file for app.safe-near.org, served as is at /<name>.html (before the password check, so Google can read it).
 const SITE_VERIFY = { '/google65675d2fcb9ab898.html': fs.readFileSync(new URL('./google65675d2fcb9ab898.html', import.meta.url), 'utf8') };
 // pages of the single-page UI; each is served the same HTML and the browser routes with the History API (no # in URLs)
-const UI_VIEWS = new Set(['incidents', 'firewall', 'accuracy', 'alerts', 'nfts', 'taggroups', 'analysis', 'creators', 'explore', 'audit', 'monitor', 'sim', 'scans', 'overview', 'signals', 'groups', 'entities', 'wallets', 'tokens', 'logs', 'config']);
+const UI_VIEWS = new Set(['incidents', 'firewall', 'accuracy', 'moneywatch', 'alerts', 'nfts', 'taggroups', 'analysis', 'creators', 'explore', 'audit', 'monitor', 'sim', 'scans', 'overview', 'signals', 'groups', 'entities', 'wallets', 'tokens', 'logs', 'config']);
 const HIDDEN_PUBLIC = new Set(['/api/logs', '/api/config']);
 const auditHits = new Map(); // ip -> [timestamps]
 const analysisHits = new Map(), aiHits = new Map();
@@ -65,7 +65,9 @@ const watchHits = new Map(), keyHits = new Map(), feedbackHits = new Map();
 /** Watchlist changes over POST (JSON body): create a key, add / remove an item, set an API key's webhook. */
 const reportHits = new Map();
 // these change what the Safety Check warns about: never open on a public deployment without DASHBOARD_PASSWORD
-const OPERATOR_POSTS = new Set(['/api/incident/confirm', '/api/incident/clear']);
+/** The money watch is not public: on a public deployment it needs the dashboard password (like confirming a hack). */
+const mwPrivate = () => (exposed() && !config.web.password ? { error: 'the money watch is private: it needs DASHBOARD_PASSWORD on a public deployment' } : null);
+const OPERATOR_POSTS = new Set(['/api/incident/confirm', '/api/incident/clear', '/api/money-watch/report']);
 const POSTS = {
   /** Report a hack, a drainer or stolen funds: it is investigated from the chain (never flagged on the report alone). */
   '/api/report': async (b, ip) => {
@@ -100,6 +102,11 @@ const POSTS = {
   '/api/feedback': async (b, ip) => {
     if (limited(feedbackHits, ip, 10)) return { error: 'too many reports, try again later' };
     try { const f = await addFeedback({ kind: b.kind, id: b.id, verdict: b.verdict, note: b.note, from: b.from }); return { ok: true, id: String(f._id) }; }
+    catch (e) { return { error: e.message }; }
+  },
+  /** A person reports an address as part of a hack (money watch): stored as evidence, re-reviewed, or confirmed when a link to the report is given. */
+  '/api/money-watch/report': async (b) => {
+    try { return await (await import('../watch/report.js')).reportAddress(String(b.address || ''), { source: b.source || null, note: b.note || null, by: 'operator' }); }
     catch (e) { return { error: e.message }; }
   },
   /** Manual confirm a hack by an operator / human reviewer. */
@@ -645,6 +652,22 @@ const routes = {
     }
     return doc ? { incident: doc, live_moves: await col('incident_moves').find({ incident: doc._id }).sort({ ts: -1 }).limit(100).toArray() } : { error: 'no such incident' };
   },
+  /** Money watch (docs/money-watch-design.md): every movement of $100k or more, followed until the reviewer calls it normal. Private: only on the dashboard. */
+  '/api/money-watch': async (u) => {
+    if (mwPrivate()) return mwPrivate();
+    const status = u.searchParams.get('status'), f = status ? { status } : {}, offset = Math.max(0, Number(u.searchParams.get('offset')) || 0);
+    const day = new Date().toISOString().slice(0, 10), now = Date.now();
+    const [rows, total, by, ai, opened24] = await Promise.all([
+      col('watches').find(f, { projection: { status: 1, opened_ts: 1, last_move_ts: 1, closed_ts: 1, receiver: 1, trigger: 1, 'origin.class': 1, 'origin.lean': 1, accounts: 1, 'moves.exit': 1, last_review_ts: 1, incident: 1, 'reviews': { $slice: -1 }, reports: 1 } }).sort({ opened_ts: -1 }).skip(offset).limit(60).toArray(),
+      col('watches').countDocuments(f), col('watches').aggregate([{ $group: { _id: '$status', n: { $sum: 1 }, usd: { $sum: '$trigger.usd' } } }]).toArray(),
+      col('meta').findOne({ _id: `watch:ai:${day}` }), col('watches').countDocuments({ opened_ts: { $gt: now - 86400e3 } }),
+    ]);
+    return { rows: rows.map((w) => ({ id: w._id, status: w.status, opened_ts: w.opened_ts, last_move_ts: w.last_move_ts, closed_ts: w.closed_ts || null, receiver: w.receiver, usd: w.trigger?.usd, token: w.trigger?.symbol || w.trigger?.token, from: w.trigger?.from,
+      origin: w.origin?.class || null, lean: w.origin?.lean || null, accounts: (w.accounts || []).length, active: (w.accounts || []).filter((a) => a.state === 'active').length, exits: (w.moves || []).filter((m) => m.exit).length,
+      review: w.reviews?.[0] ? { verdict: w.reviews[0].verdict, by: w.reviews[0].by, what_it_is: w.reviews[0].what_it_is, ts: w.reviews[0].ts } : null, reports: (w.reports || []).length, incident: w.incident || null })),
+      total, by: Object.fromEntries(by.map((x) => [x._id, { n: x.n, usd: Math.round(x.usd || 0) }])), opened_24h: opened24, ai_calls_today: ai?.value?.calls || 0, ai_budget: config.watch.aiPerDay, enabled: config.watch.enabled, min_usd: config.watch.minUsd };
+  },
+  '/api/money-watch/case': async (u) => { if (mwPrivate()) return mwPrivate(); const w = await col('watches').findOne({ _id: String(u.searchParams.get('id') || '') }); return w ? { watch: w } : { error: 'no such watch' }; },
   /** Investigate an account, a tx hash or target:<contract>: the saved incident if there is one, else (run=1) start a trace here. */
   '/api/incident/investigate': async (u, req) => {
     let input; try { input = parseInvestigation(u.searchParams.get('q')); } catch (e) { return { error: e.message }; }

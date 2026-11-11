@@ -80,7 +80,7 @@ export function reviewDue(watch, now = Date.now(), W = config.watch) {
   if (!OPEN.includes(watch.status)) return false;
   if (!watch.last_review_ts) return true;
   if (now - watch.last_review_ts < W.reviewGapMinutes * 60e3) return false;
-  return (watch.moved_since_review_usd || 0) >= W.reviewMinUsd || !!watch.new_exit;
+  return (watch.moved_since_review_usd || 0) >= W.reviewMinUsd || !!watch.new_exit || !!watch.ai_missing; // ai_missing: the AI was off or over budget last time
 }
 
 /**

@@ -99,3 +99,9 @@ test('look back: the first account of a case within the hops, with the path', as
   assert.equal(await lookBack('z', { hops: 2, ...opts }), null, 'out of hops');
   assert.equal(await lookBack('nobody', { hops: 3, ...opts }), null);
 });
+
+test('review due: a watch whose AI verdict was missing is retried after the gap', () => {
+  const now = 1e12;
+  assert.equal(reviewDue({ status: 'watching', last_review_ts: now - 120 * 60e3, ai_missing: true }, now, W), true);
+  assert.equal(reviewDue({ status: 'watching', last_review_ts: now - 10 * 60e3, ai_missing: true }, now, W), false, 'not before the gap');
+});

@@ -2,7 +2,7 @@
 // ================================================================== shell + router (History API: /tokens/<id>, /groups/<id>, no #)
 const SECTIONS = [
   { label: 'Explore', views: [['explore', 'Explore']] },
-  { label: 'Safety Check', views: [['firewall', 'Is it safe?']] },
+  { label: 'Safety Check', views: [['firewall', 'Is it safe?'], ['moneywatch', 'Money watch']] },
   { label: 'Monitoring', views: [['alerts', 'Monitoring']] },
   { label: 'Tokens & Scanner', views: [['tokens', 'Launches'], ['signals', 'Smart-money signals'], ...(SHOW_SIM ? [['sim', 'Simulated wallet']] : []), ['analysis', 'On-chain analysis'], ['scans', 'Evaluations'], ['audit', 'Contract audit']] },
   { label: 'NFT Collectibles', views: [['nfts', 'Collections']] },
@@ -15,6 +15,7 @@ const TITLES = {
   groups: ['Linked groups', 'Wallets one owner controls, linked by money only: funding, transfers, shared funders and destinations (co-buy partners are marked apart)'],
   incidents: ['Hacks & incidents', 'Exploits and drainers traced from the chain: the attacker\'s accounts, the target, how much was taken and from whom, and where the money went, across chains'],
   firewall: ['Safety check', 'Is it safe? One answer for anything you paste, the hacks it is linked to, and a live watch of every new contract and every drain on NEAR'],
+  moneywatch: ['Money watch', 'Every movement of $100k or more, whatever the token: where the money came from, where it goes, and whether it is normal. Private; a watch is not an accusation'],
   accuracy: ['Measured accuracy', 'How often the gates, rule score, contract audit, AI analyst and group verdicts were right, scored against what happened afterwards'],
   alerts: ['Monitoring', 'Rugs in progress, contract changes, ruggers launching again, NFT team selling and wash trades, and everything on your watchlist'],
   nfts: ['NFT Collectibles', 'NFT collections: who minted (and whether the team minted its own), minter groups linked by money, the secondary market with wash-trade checks, holders'],

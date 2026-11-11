@@ -1,6 +1,6 @@
 # Money watch: every large movement gets a case, and an AI reviewer decides when it is normal
 
-Status: design, nothing built. Written 2026-11-11 from the request: *every transfer worth more than $100k, whatever the token, becomes a watch case; look back at where the money came from; follow where it goes; keep watching until the AI reviewer says it is normal; a person can report a hack by address.*
+Status: **built 2026-11-11** (see "As built" at the end for where the build differs from this design). Written 2026-11-11 from the request: *every transfer worth more than $100k, whatever the token, becomes a watch case; look back at where the money came from; follow where it goes; keep watching until the AI reviewer says it is normal; a person can report a hack by address.*
 
 ## 1. What exists today, and what is new
 
@@ -130,3 +130,14 @@ Implementation: the per-block hook that `followStolen` uses today, extended to r
 4. **AI budget.** 100 calls per day for watches: enough? What may it cost per month?
 5. **Wording and publication.** Watches stay private. Do `normal` ones ever show on the public site?
 6. **Follow into DeFi.** "Parked in a protocol" ends a branch here; following the position inside the protocol is more work and probably not needed.
+
+## 11. As built
+
+Code in `src/watch/` (`rules.js` pure rules, `store.js` collection and index, `scan.js` the block scan, `review.js` the review lane, `report.js` people), the prompt `src/ai/prompts/watch-review.md`, the page `src/web/public/assets/js/pages/moneywatch.js`, CLI `watch-list`, `watch-show`, `watch-scan`, `watch-report`, `watch-confirm`, `watch-close`, `watch-review`. Tests: `test/watch-rules.test.js` (pure rules, the decision table, the look back); the block scan, the follow rule, the review and the reports were also run end to end on a scratch database.
+
+Differences from the design:
+- **Partial or full send** is judged from what the case itself tracked (what an account received from the case minus what it sent on), not from a balance read on the chain: it works for any token, and costs no RPC. An account that held its own money before the case may therefore look "fully sent" earlier than it is.
+- **A suspicious watch keeps being followed and reviewed** (the incident opened from it follows only confirmed cases' accounts). The reviewer can still call it normal later, unless an incident from it is still open or a person gave a source.
+- **Everything ships on, in one step**, not shadow-first: `WATCH_ENABLED=true`. Watches raise no alert; the first week's numbers (the Money watch page shows opened in 24 h and AI calls against the budget) say whether the rules need tightening. `WATCH_ENABLED=false` switches it off without a deploy of code.
+- **No existing data is read, changed or backfilled.** The only new collection is `watches`; the only change to an existing one is the new `watch` AI budget counter in `meta`.
+- **Not built:** "parked in a protocol" does not wake when the money later leaves the protocol (the branch ends there); a report with a link on an address found only by the look back does not confirm the case it was funded from (it asks for a re-review).

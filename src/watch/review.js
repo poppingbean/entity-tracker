@@ -102,7 +102,7 @@ export async function reviewWatch(w) {
     info(`watch ${w._id}: suspicious (${d.why}) → incident queued`);
     return 'suspicious';
   }
-  await noteReview(w._id, review);
+  await noteReview(w._id, review, { aiMissing: !ai && config.watch.ai && aiEnabled() && !(rulesOnly.action === 'normal') }); // a missing AI verdict is retried after the review gap
   info(`watch ${w._id}: keep watching (${d.why})`);
   return 'keep';
 }
@@ -113,7 +113,7 @@ export async function processWatches() {
   if (!W.enabled) return null;
   const idle = await col('watches').find({ status: { $in: OPEN }, last_move_ts: { $lt: now - W.maxIdleDays * 86400e3 } }).limit(20).toArray();
   for (const w of idle) if (isIdle(w, now, W)) await setStatus(w._id, 'normal', { by: 'rules', why: `idle for ${W.maxIdleDays} days`, review: { ts: now, verdict: 'normal', by: 'rules', what_it_is: 'idle', reasons: [`no move for ${W.maxIdleDays} days`] } });
-  const due = await col('watches').find({ status: { $in: OPEN }, $or: [{ last_review_ts: null }, { moved_since_review_usd: { $gte: W.reviewMinUsd } }, { new_exit: true }] }).sort({ opened_ts: 1 }).limit(25).toArray();
+  const due = await col('watches').find({ status: { $in: OPEN }, $or: [{ last_review_ts: null }, { moved_since_review_usd: { $gte: W.reviewMinUsd } }, { new_exit: true }, { ai_missing: true }] }).sort({ opened_ts: 1 }).limit(25).toArray();
   const w = due.find((x) => reviewDue(x, now, W));
   if (!w) return null;
   return { id: w._id, did: await reviewWatch(w) };
