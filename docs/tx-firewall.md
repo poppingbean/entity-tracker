@@ -51,6 +51,7 @@ Meta transactions are unpacked: the actions inside a `Delegate` are checked as t
   ],
   "explanation": { "headline": "…", "explanation": "…", "advice": ["…"] },
   "context": { "complete": true, "accounts_checked": 1 },
+  "value": { "near_usd": 3.58, "moves": [] },
   "checked_ts": 1793250000000,
   "took_ms": 220
 }
@@ -65,7 +66,9 @@ Meta transactions are unpacked: the actions inside a `Delegate` are checked as t
 | `caution` | medium | Show the findings next to the sign button. |
 | `ok` | info / none | Sign as usual (still show the action lines). |
 
-The verdict always comes from deterministic rules; the AI explanation can never change it. `context.complete: false` means some lookups (RPC, database) didn't answer within the 2.5 s budget. The verdict is then based on what was known; treat a missing fact as unknown, not safe.
+The verdict always comes from deterministic rules; the AI explanation can never change it. `context.complete: false` means some lookups (RPC, database) didn't answer within the 2.5 s budget. The verdict is then based on what was known; treat a missing fact as unknown, not safe (the Agent Guard answers `ask_human` then).
+
+**What it sends out (`value`).** Besides attached NEAR, a transaction can move tokens and NEAR Intents balances. `value.moves` lists them, valued at today's prices: `ft_transfer` / `ft_transfer_call` (any NEP-141 token, wNEAR included) and Intents `ft_withdraw`, `mt_transfer`, `mt_batch_transfer`, each as `{ tx, action, token, raw, to, via, symbol, amount, usd }` (`usd: null` when the token has no price). `value.near_usd` is NEAR's price, to value attached NEAR. A wallet can show "you are sending ≈ $500 of USDC"; the Agent Guard's USD limits count them.
 
 ### What it catches
 
@@ -163,9 +166,9 @@ GET /api/v1/flags?since=0&min=high
 
 Accounts are flagged only by confirmed incidents (and accounts that receive money from them, as it moves) and by operator reports, never by a public report alone.
 
-## `GET /api/v1/incidents`, `GET /api/v1/incident?id=<id>`
+## `GET /api/v1/incidents`, `GET /api/v1/incident?id=<id>`, `GET /api/v1/incident?q=<anything>`
 
-Traced hacks, newest first, and one incident in full: attacker accounts, target, losses, victims, the money trail and the NEAR AI write-up. See [incidents.md](incidents.md).
+Confirmed hacks, newest first, and one incident in full: attacker accounts, target, losses, victims, the money trail and the NEAR AI write-up. `?q=` takes an account, a transaction hash, a NearBlocks link or a case id and answers with the confirmed case it belongs to and its role in it (`{ incident, role }`), `{ checked: true }` when it was looked at and nothing was confirmed, or `{}`; unconfirmed suspicions are never returned as hacks. See [incidents.md](incidents.md).
 
 ## Integrating
 

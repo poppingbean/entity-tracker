@@ -227,14 +227,31 @@ export async function inspectAccount(id, extra = {}) {
 }
 
 async function trackerToken(id) {
-  const t = await col('tokens').findOne({ _id: id }, { projection: { symbol: 1, name: 1, creator: 1, launchpad: 1, live_ts: 1, status: 1, tax: 1, outcome: 1, 'scan.decision': 1 } });
+  const t = await col('tokens').findOne({ _id: id }, { projection: { symbol: 1, name: 1, creator: 1, launchpad: 1, source: 1, factory: 1, live_ts: 1, status: 1, tax: 1, outcome: 1, 'scan.decision': 1 } });
   if (!t) return null;
-  const [black, rec, an] = await Promise.all([
+  const [black, rec, an, hackLinks] = await Promise.all([
     t.creator ? col('blacklist').findOne({ _id: t.creator }) : null,
     t.creator ? col('tokens').aggregate([{ $match: { creator: t.creator } }, { $group: { _id: null, launches: { $sum: 1 }, rugged: { $sum: { $cond: ['$outcome.rugged', 1, 0] } } } }]).toArray() : [],
     col('analyses').findOne({ _id: id }, { projection: { 'ai.summary': 1, 'ai.ts': 1, 'ai.verdict': 1 } }),
+    tokenHackLinks(id, t.creator).catch(() => null),
   ]);
-  return { ...t, creator_blacklisted: !!black, creator_record: rec[0] || null, analysis: an?.ai || null };
+  return { ...t, creator_blacklisted: !!black, creator_record: rec[0] || null, analysis: an?.ai || null, hack_links: hackLinks };
+}
+
+/**
+ * Is a token tied to a hack? Its creator, or the wallets that bought it, as accounts of a confirmed case (the Binance-case laundering memecoins were
+ * bought almost only by wallets the attacker's account paid). Returns { creator: { case, role } | null, buyers: n (buyers in a case), early: n (all buyers), cases: [ids] }.
+ */
+async function tokenHackLinks(id, creator) {
+  // every wallet that bought it, not only the early ones: laundering wallets often buy hours after the launch
+  const early = (await col('trades').distinct('trader', { token: id, buy: true }).catch(() => [])).slice(0, 3000);
+  const ids = [...new Set([creator, ...early].filter(Boolean))];
+  if (!ids.length) return null;
+  const cases = await col('incidents').find({ status: 'confirmed', 'accounts.account': { $in: ids } }, { projection: { 'accounts.account': 1, 'accounts.role': 1 } }).limit(20).toArray();
+  const roleOf = new Map();
+  for (const c of cases) for (const a of c.accounts || []) if (ids.includes(a.account) && !roleOf.has(a.account)) roleOf.set(a.account, { case: c._id, role: a.role });
+  const buyers = early.filter((w) => roleOf.has(w) && w !== creator).length;
+  return { creator: creator && roleOf.get(creator) || null, buyers, early: early.length, cases: [...new Set([...roleOf.values()].map((x) => x.case))] };
 }
 
 async function inspectContract(id, state, extra) {
@@ -255,6 +272,10 @@ async function inspectContract(id, state, extra) {
     const T = tok.tax || {}, fee = Math.round(Math.max(Number(T.sellBps ?? T.sell_bps ?? 0) / 100, Number(T.transferFeePips ?? 0) / 1e4) * 100) / 100;
     if (fee >= 10) points.push(pt('bad', `Selling costs a ${fee}% fee.`)); else if (fee > 0) points.push(pt('info', `It takes a ${fee}% fee on trades.`));
     if (!o.rugged && o.drawdown >= 0.9) points.push(pt('warn', `The price is ${Math.round(o.drawdown * 100)}% below its peak.`));
+    const H = tok.hack_links;
+    if (H?.creator) points.push(pt('bad', `Its creator ${short(tok.creator)} is part of a confirmed hack case (${String(H.creator.role || 'linked').replace(/_/g, ' ')}).`));
+    if (H?.buyers) points.push(pt(H.buyers >= 3 || H.buyers / Math.max(1, H.early) >= 0.3 ? 'bad' : 'warn', `${H.buyers} of the ${H.early} wallets that bought it are wallets of a confirmed hack case: money from a hack bought this token.`));
+    if (tok.source === 'deploy') points.push(pt('info', `Found from its deploy${tok.factory ? ` through ${tok.factory}` : ''} and its first liquidity, not from a launchpad.`));
   }
   // the automated contract audit
   let auditing = false;

@@ -13,7 +13,26 @@ export async function localApi() {
     contract: (id) => contractReport(id),
     account: (id) => accountReputation(id),
     whatIs: (id) => entityView(id),
+    incidents: () => incidentsList(),
+    incident: (q) => incidentLookup(q),
   };
+}
+
+/** The latest confirmed cases (the same list as GET /api/v1/incidents). */
+export async function incidentsList(limit = 100) {
+  const { col } = await import('../db.js');
+  const rows = await col('incidents').find({ status: 'confirmed' }, { projection: { status: 1, kind: 1, 'attacker.account': 1, 'target.account': 1, stolen_usd: 1, held_usd: 1, started_ts: 1, 'ai.headline': 1, 'trail.exit_usd': 1 } }).sort({ started_ts: -1 }).limit(limit).toArray();
+  return { incidents: rows };
+}
+
+/** The confirmed case an account, transaction, link or case id belongs to: { incident, role } | { checked: true } | {} (GET /api/v1/incident?q=). */
+export async function incidentLookup(q) {
+  const { findIncident } = await import('../incident/botinfo.js');
+  const f = await findIncident(q);
+  if (!f) return {};
+  if (f.checked) return { checked: true };
+  const { trail, ...inc } = f.inc;
+  return { incident: { ...inc, trail: { exit_usd: trail?.exit_usd || {}, exits: (trail?.exits || []).slice(0, 20) } }, role: f.role || null };
 }
 
 /** The checks, through the public API of a deployment (default the hosted one). `apiKey` lifts the per-IP rate limit. */
@@ -31,5 +50,7 @@ export function httpApi({ base = process.env.SAFE_NEAR_URL || 'https://app.safe-
     contract: (id) => call(`/contract?id=${encodeURIComponent(id)}`),
     account: (id) => call(`/account?id=${encodeURIComponent(id)}`),
     whatIs: (id) => call(`/entity?id=${encodeURIComponent(id)}`),
+    incidents: () => call('/incidents'),
+    incident: (q) => call(`/incident?q=${encodeURIComponent(q)}`),
   };
 }

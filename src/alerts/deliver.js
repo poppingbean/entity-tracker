@@ -44,7 +44,7 @@ export async function postWebhook(url, payload) {
 }
 
 // ---------------------------------------------------------------- Telegram
-const tg = (method, body) => fetch(`https://api.telegram.org/bot${config.alerts.telegramToken}/${method}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body), signal: AbortSignal.timeout(10000) }).then((r) => r.json());
+export const tg = (method, body) => fetch(`https://api.telegram.org/bot${config.alerts.telegramToken}/${method}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body), signal: AbortSignal.timeout(10000) }).then((r) => r.json());
 const escHtml = (s) => String(s ?? '').replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
 const ICON = { high: '🔴', medium: '🟠', info: '🔵' };
 /** The transaction an alert is about, on NearBlocks (null for alerts about a state, e.g. a rug flag or a code change). */
