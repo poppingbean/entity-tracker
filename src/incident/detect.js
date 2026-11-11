@@ -34,7 +34,7 @@ export const ROUTERS = new Set(['wrap.near', 'intents.near', 'aggregatedex.near'
 const isRouter = (id) => (reads('pass_through') ? passThrough(id) : ROUTERS.has(id));
 
 let protoCache = { ts: 0, set: PROTOCOLS };
-async function protocols() {
+export async function protocols() {
   if (Date.now() - protoCache.ts < 600e3) return protoCache.set;
   const typed = await col('audits').find({ 'auto.role': { $in: PROTOCOL_ROLES } }, { projection: { _id: 1 } }).limit(5000).toArray().catch(() => []);
   protoCache = { ts: Date.now(), set: new Set([...PROTOCOLS, ...typed.map((d) => d._id)]) };

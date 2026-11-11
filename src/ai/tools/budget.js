@@ -7,7 +7,7 @@ import { aiEnabled } from './nearai.js';
 
 const day = () => new Date().toISOString().slice(0, 10);
 // each scope has its own count, so a busy day of contract audits cannot leave the hack investigations without NEAR AI
-const SCOPES = { audit: () => config.autoAudit.aiDailyBudget, incident: () => config.incidents.aiPerDay };
+const SCOPES = { audit: () => config.autoAudit.aiDailyBudget, incident: () => config.incidents.aiPerDay, watch: () => config.watch.aiPerDay };
 
 /** Take one call from today's budget of `scope` (audit or incident); false when it is spent (or the AI is off). */
 export async function aiBudget(scope = 'audit') {

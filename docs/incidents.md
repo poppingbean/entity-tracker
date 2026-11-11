@@ -111,6 +111,10 @@ A suspect:
 
 The watcher also writes `security:watch` (block reached, lag, last check), which the live feed shows.
 
+## Money watch: every large movement
+
+Beyond hacks: every movement worth $100k or more (whatever the token) opens a **watch**, a case that is followed until it is judged normal. See [money-watch-design.md](money-watch-design.md): where the money came from, where it goes (a partial send keeps both accounts watched, a full send drops the sender), an AI review with its own daily budget, and reports by address from people. A watch is private and is not an accusation; only a suspicious one opens an incident (the cases above).
+
 ## Early warning for crimes that are not on-chain hacks
 
 Some thefts happen off-chain: an exchange's signing keys or withdrawal system is compromised, and the chain only sees the exchange's own wallets sending money, signed with their usual key. Nothing on-chain is broken, but the money movement is unmistakable. Four parts watch for it.

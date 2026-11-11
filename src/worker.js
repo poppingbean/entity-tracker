@@ -18,6 +18,7 @@ import { processIncidentQueue, retractMoveAlerts } from './incident/service.js';
 import { refreshExchangeRegistry } from './incident/exchanges.js';
 import { reviewDetections } from './incident/detect.js';
 import { processDeepReview, backfillReviews } from './incident/deepreview.js';
+import { processWatches } from './watch/review.js';
 import { pollNews } from './incident/signals.js';
 import { ringPass } from './incident/ring.js';
 import { evaluateGroups, reviewPending } from './evaluate/run.js';
@@ -91,6 +92,11 @@ export async function cycle({ evaluate = true } = {}) {
   if (config.incidents.enabled && !runtime.deepReview && Date.now() - runtime.lastDeepReview > config.incidents.everyMs) {
     runtime.lastDeepReview = Date.now();
     runtime.deepReview = processDeepReview().catch((e) => warn(`deep review: ${e.message}`)).finally(() => { runtime.deepReview = null; });
+  }
+  // money watch: the look back and the AI review of the next watch that is due, on its own lane
+  if (config.watch.enabled && !runtime.watchReview && Date.now() - (runtime.lastWatchReview || 0) > config.watch.everyMs) {
+    runtime.lastWatchReview = Date.now();
+    runtime.watchReview = processWatches().catch((e) => warn(`money watch: ${e.message}`)).finally(() => { runtime.watchReview = null; });
   }
   // data health: a sample of recent transactions checked against RPC on another host, beside the loop
   if (config.data.checkEveryMinutes > 0 && !runtime.dataCheck && Date.now() - runtime.lastDataCheck > config.data.checkEveryMinutes * 60e3) {

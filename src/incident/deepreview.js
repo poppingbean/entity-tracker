@@ -45,7 +45,7 @@ export async function scheduleReview(subject, kind, foundTs = Date.now()) {
 }
 
 // ---- the receiver's past with whoever paid it
-async function pastTransfers(receiver, payers, beforeTs, { maxRows = 3000 } = {}) {
+export async function pastTransfers(receiver, payers, beforeTs, { maxRows = 3000 } = {}) {
   const want = new Set(payers), per = new Map(payers.map((p) => [p, { n: 0, usd: 0, first_ts: null, last_ts: null }]));
   let resume = null, rows = 0;
   while (rows < maxRows) {
