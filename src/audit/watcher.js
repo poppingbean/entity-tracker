@@ -10,6 +10,7 @@ import { raise } from '../alerts/store.js';
 import { STRONG_FINDINGS } from './service.js';
 import { scanBlocks } from '../incident/detect.js';
 import { scanWatches } from '../watch/scan.js';
+import { trackLiquidity } from '../collect/liquidity.js';
 import { gapRuns, confirmGap, recordGap } from '../near/health.js';
 
 const AUTH = () => (config.fastnearApiKey ? { authorization: `Bearer ${config.fastnearApiKey}` } : {});
@@ -87,6 +88,8 @@ export async function watchDeploys() {
   const drains = await scanBlocks(blocks).catch((e) => { warn(`incident detector: ${e.message}`); return []; });
   // money watch: every movement of $100k or more opens a watch case; moves out of watched accounts are followed (src/watch)
   await scanWatches(blocks).catch((e) => warn(`money watch: ${e.message}`));
+  // tokens from deploys: a contract deployed on NEAR becomes a tracked token the second liquidity is first added for it (any factory, no launchpad needed)
+  await trackLiquidity(blocks).catch((e) => warn(`tokens from deploys: ${e.message}`));
   // what the live feed shows: where the watch is, and that it is moving
   const lastTs = blocks.length ? Number(blocks[blocks.length - 1].block.header.timestamp_nanosec) / 1e6 : null;
   await metaSet('security:watch', { height: last, tip: top, behind: top - last, block_ts: lastTs, blocks: last - cursor, deploys: found.length, drains: drains.length, tick_ts: Date.now() });

@@ -44,12 +44,15 @@ function refv2PoolId(tx, token) {
   return null;
 }
 
-/** The first pool event naming `token` in these transactions: a DCL create_pool / liquidity_added / swap, or a Ref v2 swap against wNEAR. */
+const REF_ADDED = /^Liquidity added \[(.*)\], minted/;
+/** The first pool event naming `token` in these transactions: a DCL create_pool / liquidity_added / swap, or a Ref v2 add_liquidity or swap against wNEAR. */
 export function poolHit(token, txs) {
   for (const tx of txs) {
     if (tx.failed) continue;
     const e = tx.events.find((x) => x.executor === DCL && ['create_pool', 'liquidity_added', 'swap'].includes(x.event) && (x.data?.[0]?.pool_id || '').split('|').slice(0, 2).includes(token));
     if (e) return { tx, pool: { dex: 'dcl', poolId: e.data[0].pool_id, quote: e.data[0].pool_id.split('|').slice(0, 2).find((x) => x !== token) } };
+    const added = tx.logs.find((l) => { const m = l.executor === REFV2 && REF_ADDED.exec(l.text); return m && m[1].includes(` ${token}"`) && m[1].includes(` ${WNEAR}"`); });
+    if (added) return { tx, pool: { dex: 'refv2', poolId: tx.calls.find((c) => c.method === 'add_liquidity')?.args?.pool_id ?? refv2PoolId(tx, token) ?? null, quote: WNEAR } };
     const swap = tx.logs.some((l) => { const m = l.executor === REFV2 && REF_SWAP.exec(l.text); return m && ((m[2] === token && m[4] === WNEAR) || (m[2] === WNEAR && m[4] === token)); });
     if (swap) return { tx, pool: { dex: 'refv2', poolId: refv2PoolId(tx, token) ?? QUOTES[token]?.bridge?.poolId ?? null, quote: WNEAR } };
   }
@@ -62,16 +65,22 @@ export function poolHit(token, txs) {
  * transaction is the token's live time. A token whose pool is already known (a quote bridge in near/quotes.js) falls back to that pool
  * when the walk finds nothing (an airdrop can fill thousands of transactions before the first trade). Returns true when a pool was stored.
  */
-export async function checkTknPool(t, { maxRows = 200 } = {}) {
-  const now = Date.now();
+/** The first pool event in a token's history, oldest first, up to `maxRows` transactions. Returns { hit, seen } (hit null when none). */
+export async function firstPool(id, { maxRows = 200 } = {}) {
   let hit = null, resume = null, seen = 0;
   while (!hit && seen < maxRows) {
-    const p = await accountPage(t._id, { desc: false, limit: Math.min(200, maxRows - seen), resume });
+    const p = await accountPage(id, { desc: false, limit: Math.min(200, maxRows - seen), resume });
     seen += p.rows.length;
-    hit = poolHit(t._id, await fetchTxs(p.rows.filter((r) => r.ok).map((r) => r.hash)));
+    hit = poolHit(id, await fetchTxs(p.rows.filter((r) => r.ok).map((r) => r.hash)));
     if (!p.resume || !p.rows.length) break;
     resume = p.resume;
   }
+  return { hit, seen };
+}
+
+export async function checkTknPool(t, { maxRows = 200 } = {}) {
+  const now = Date.now();
+  let { hit, seen } = await firstPool(t._id, { maxRows });
   const known = QUOTES[t._id]?.bridge;
   if (!hit && known) hit = { tx: null, pool: { ...known, quote: WNEAR } }; // keeps the token's own live time
   if (!hit) {
