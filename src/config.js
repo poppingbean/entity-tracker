@@ -121,6 +121,12 @@ export const config = {
     newsEveryMinutes: num(process.env.NEWS_EVERY_MINUTES, 15),     // security news feeds (0 = off)
     newsFeeds: (process.env.NEWS_FEEDS || 'https://cointelegraph.com/rss,https://www.theblock.co/rss.xml,https://decrypt.co/feed,https://rekt.news/rss/feed.xml,https://cryptoslate.com/feed/').split(',').map((s) => s.trim()).filter(Boolean),
   },
+  // tokens found from the chain, not from a launchpad (src/collect/liquidity.js): a contract the deploy watcher saw deployed becomes a tracked
+  // token the moment liquidity is first added for it (Ref v2 add_liquidity, Ref DCL liquidity_added) against a quote the tracker can value
+  tokensFromDeploys: {
+    enabled: process.env.TOKENS_FROM_DEPLOYS !== 'false',
+    maxAgeDays: num(process.env.TOKENS_FROM_DEPLOYS_MAX_AGE_DAYS, 14), // a pool for a token deployed longer ago than this is not a launch
+  },
   // money watch (docs/money-watch-design.md): every movement of minUsd or more opens a watch case; the money is followed until the reviewer calls it normal
   watch: {
     enabled: process.env.WATCH_ENABLED !== 'false',

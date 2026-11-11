@@ -33,6 +33,7 @@
 //   node src/cli.js ring-scan [case id]                look for laundering rings (memecoins bought by wallets a confirmed case paid); stores proposals
 //   node src/cli.js ring-approve <id> [--dry] | ring-reject <id> ["reason"]   an operator applies a proposal with case-add, or drops it
 //   node src/cli.js chain-links                        addresses on other chains that received money from 2+ NEAR cases (leads; flags nothing)
+//   node src/cli.js tokens-from-deploys [days] [--dry]   open tokens deployed in the last N days (default 7) that already have a pool (any factory, no launchpad)
 //   node src/cli.js watch-list [--status s] [--limit N]   money watch cases (docs/money-watch-design.md); watch-show <id>; watch-scan [N] (read-only: what would open in the latest N blocks)
 //   node src/cli.js watch-report <address> [--source <link>] [--note "<text>"]   a person reports an address; watch-confirm <id> [--source]; watch-close <id> <reason>; watch-review <id>
 //   node src/cli.js link-eval                         pairwise precision / recall of the wallet grouping against pairs of known owners (changes nothing)
@@ -269,6 +270,11 @@ try {
     const { addExchangeWallet } = await import('./incident/exchanges.js');
     if (!args[0] || !args[1]) throw new Error('usage: exchange-wallet <account> <exchange> [hot|cold]');
     await addExchangeWallet(args[0], args[1], args[2] === 'cold' ? 'cold' : 'hot'); info(`exchange wallet ${args[0]}: ${args[1]}`);
+  } else if (cmd === 'tokens-from-deploys') {
+    // node src/cli.js tokens-from-deploys [days] [--dry]: tokens deployed while the liquidity watch was not running, opened from their first pool
+    const { backfillFromDeploys } = await import('./collect/liquidity.js');
+    const r = await backfillFromDeploys(Number(args.find((a) => /^\d+$/.test(a))) || 7, { dry: args.includes('--dry'), log: (m) => info(m) });
+    console.log(`${r.tokens.length} tokens ${args.includes('--dry') ? 'would be opened' : `opened (${r.tokens.filter((x) => x.opened).length} new)`} of ${r.checked} contracts checked${r.failed.length ? `; ${r.failed.length} could not be read (run it again)` : ''}`);
   } else if (cmd === 'watch-list') {
     // money watch cases (docs/money-watch-design.md): node src/cli.js watch-list [--status watching|suspicious|normal|confirmed] [--limit N]
     const si = args.indexOf('--status'), li = args.indexOf('--limit');

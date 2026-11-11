@@ -124,6 +124,19 @@ export const WRITERS = {
     return out;
   },
 
+  // every tracked token: who created it (a launchpad launch or a contract the deploy watcher saw, then its first liquidity). The scanner,
+  // the audit, Safety Check and the ring detector read the same edge. scope { ids }: only these tokens (one was just opened)
+  async tokens({ ids = null } = {}) {
+    const out = [];
+    for (const t of await col('tokens').find({ creator: { $nin: [null, ''] }, ...(ids ? { _id: { $in: ids } } : {}) }, { projection: { creator: 1, launchpad: 1, source: 1, live_tx: 1, 'deploy.ts': 1 } }).toArray()) {
+      if (t.creator === t._id) continue;
+      const how = t.source === 'deploy' ? `deployed${t.launchpad !== 'direct' ? ` through ${t.launchpad}` : ''}, then its first liquidity was added` : `launched on ${t.launchpad}`;
+      out.push({ subject: t._id, predicate: 'created_by', object: t.creator, source: 'trace', confidence: 0.9, evidence: `${how}${t.live_tx ? ` (tx ${t.live_tx})` : ''}` },
+        { subject: t.creator, predicate: 'deployed', object: t._id, source: 'trace', confidence: 0.9, evidence: how });
+    }
+    return out;
+  },
+
   async clusters() {
     const out = [];
     for (const c of await col('clusters').find({}, { projection: { members: 1, verdict: 1 } }).toArray()) {
@@ -142,6 +155,7 @@ const SCOPES = {
   audits: ({ ids }) => ({ $and: [{ $or: [{ subject: { $in: ids }, predicate: 'is_a' }, { object: { $in: ids }, predicate: 'controls' }] }] }),
   incidents: ({ ids }) => ({ $and: [{ $or: [{ object: { $in: ids }, predicate: 'role_in' }, { subject: { $in: ids }, predicate: 'sent_to' }] }] }),
   firewall_flags: ({ ids }) => ({ $and: [{ subject: { $in: ids }, predicate: 'flagged' }] }),
+  tokens: ({ ids }) => ({ $and: [{ $or: [{ subject: { $in: ids }, predicate: 'created_by' }, { object: { $in: ids }, predicate: 'deployed' }] }] }),
 };
 
 // One run of a writer at a time across every process (the worker's daily backfill, a sync in the worker, a hand flag in the web process).

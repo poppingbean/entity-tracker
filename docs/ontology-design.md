@@ -318,7 +318,7 @@ Because a direct write and the backfill run the same writer, the two make the sa
 A sync never throws into the caller (it is logged, and the daily backfill repairs it until G2). **One run of a writer at a time, across processes:** each writer runs under a lock in `meta` (`lock:writer/<name>`, expires after 10 minutes), shared by the daily backfill, direct syncs in the worker and hand flags in the web process; without it, a run could close the facts another run of the same writer had just re-asserted. **Case syncs are scoped:** a trace, follow-up, clear or deep review syncs only that case's `role_in` / `sent_to` facts and its accounts' flags (`syncCase`), not every case. Measured on production data on 2026-11-10: every writer at parity except one fact, an audit saved after the last backfill. A scoped audit write closed it in 1.7 s.
 
 **Still open after G1:**
-- `created_by` / `deployed` edges: the tracer (fake tokens, sub-accounts) and the launch scanner (token creators; smithii is not watched yet) should write them.
+- `created_by` / `deployed` edges: **token creators are written** (writer `tokens`, 2026-11-11): every tracked token, from a launchpad or found from its deploy and first liquidity (any factory, smithii included), gets `token created_by creator` and `creator deployed token`, synced the moment the token opens. The tracer's own (fake tokens, sub-accounts) are still to do.
 - The remaining gap: an account no collection has seen and no name explains still falls back to the old on-chain checks, so a never-seen busy account can still be called an exchange hot wallet unless the solver check fires. This can be closed in G3, with the old rules.
 
 ## 7. Not in scope
