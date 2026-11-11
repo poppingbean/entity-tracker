@@ -5,6 +5,7 @@ import { col } from '../../db.js';
 import { config } from '../../config.js';
 import { KNOWN } from '../../ontology/known.js';
 import { groundingReport } from './verify.js';
+import { aiBudget } from './budget.js';
 
 const ALLOW = Object.keys(KNOWN); // accounts the products themselves name (wrap.near, intents.near, …): a write-up may mention them
 const day = () => new Date().toISOString().slice(0, 10);
@@ -32,13 +33,14 @@ const retryNote = (r) => `\n\nThese are not in the evidence, remove or correct t
 
 /**
  * `run(extra)` makes the model call (its `user` message plus `extra`) and returns the chatJSON result, `{ json, … }`; `pick(result)` is the
- * text to check (default the model's whole answer). Returns the final result with `unverified: { accounts, amounts }` or `null`.
+ * text to check (default the model's whole answer); `budget`: the AI budget scope the retry is charged to (incident, watch). Returns the final result with `unverified: { accounts, amounts }` or `null`.
  */
-export async function grounded({ path, evidence, run, pick = (r) => r.json }) {
+export async function grounded({ path, evidence, run, pick = (r) => r.json, budget = null }) {
   let res = await run('');
   if (!res?.json) return res;
   let rep = groundingReport(pick(res), evidence, { allow: ALLOW }), retried = false;
-  if (!rep.ok && config.ai.groundingRetry) {
+  // the retry is a second model call: on a budgeted path it takes one more call from the same daily budget, and is skipped when that is spent
+  if (!rep.ok && config.ai.groundingRetry && (!budget || await aiBudget(budget).catch(() => false))) {
     retried = true;
     const again = await run(retryNote(rep)).catch(() => null);
     if (again?.json) { const r2 = groundingReport(pick(again), evidence, { allow: ALLOW }); if (r2.ok || r2.accounts.length + r2.amounts.length <= rep.accounts.length + rep.amounts.length) { res = again; rep = r2; } }

@@ -23,6 +23,11 @@ export const isStable = (token) => STABLE.test(baseToken(token));
 
 // ---- NEAR/USD history
 const mem = new Map(); // hour → price
+// a lookup that found nothing is not repeated for every flow: the hours a fetch could not fill are remembered for a day, and a host that
+// failed (blocked, 451 in some regions, down) is left alone for 30 minutes. Without this a trace of hundreds of flows asks hundreds of times.
+const missed = new Map(); // hour → ts of the failed fetch
+const MISS_MS = 24 * HOUR, BACKOFF_MS = 30 * 60e3;
+let hostDownUntil = 0;
 /** Hourly NEAR/USD closes from a klines-style endpoint: [[openTime, open, high, low, close, …]]. Returns Map(hour → close). */
 export function parseKlines(rows) {
   const m = new Map();
@@ -33,7 +38,9 @@ async function fetchHours(fromTs, toTs) {
   const base = config.incidents.priceHistoryUrl;
   if (!base) return new Map();
   const url = `${base}${base.includes('?') ? '&' : '?'}symbol=NEARUSDT&interval=1h&startTime=${Math.floor(fromTs / HOUR) * HOUR}&endTime=${Math.ceil(toTs / HOUR) * HOUR}&limit=1000`;
+  if (Date.now() < hostDownUntil) return new Map();
   const rows = await fetch(url, { signal: AbortSignal.timeout(15000) }).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+  if (!Array.isArray(rows)) hostDownUntil = Date.now() + BACKOFF_MS;
   return parseKlines(rows);
 }
 /** NEAR/USD at `ts`: memory, then `price_history`, then one fetch of the surrounding days (stored for good: past prices do not change). Null when no source answers. */
@@ -43,7 +50,9 @@ export async function nearUsdAt(ts) {
   const hit = await col('price_history').findOne({ _id: `near|${h}` }).catch(() => null);
   if (hit) { mem.set(h, hit.usd); return hit.usd; }
   if (ts > Date.now() - 2 * HOUR) return null; // the hour is not closed yet: "today"
+  if (Date.now() - (missed.get(h) || 0) < MISS_MS) return null;
   const got = await fetchHours(ts - 6 * 24 * HOUR, ts + 6 * 24 * HOUR);
+  if (!got.has(h)) missed.set(h, Date.now());
   if (got.size) {
     await col('price_history').bulkWrite([...got].map(([hh, usd]) => ({ updateOne: { filter: { _id: `near|${hh}` }, update: { $setOnInsert: { _id: `near|${hh}`, usd, ts: hh * HOUR } }, upsert: true } })), { ordered: false }).catch(() => {});
     for (const [hh, usd] of got) mem.set(hh, usd);
@@ -77,8 +86,12 @@ export function impliedPrices(flows, amountOf, known) {
   }
   return out;
 }
-/** An implied price is trusted only when it is within 1000x of today's price (when there is one): a wrong decimals value in the token's metadata makes a dollar token "worth" millions. */
-export const plausible = (implied, today) => !(today > 0) || (implied / today < 1000 && implied / today > 1 / 1000);
+/**
+ * An implied price is trusted only when it is within 1000x of today's price. A token with no price today (the illiquid or self-made tokens
+ * this tier exists for) has nothing to compare with, so it needs `others`: at least one more implied price from another transaction of the
+ * case within 3x of it. One swap at a made-up rate (or a wrong decimals value) can otherwise make a worthless token "worth" millions.
+ */
+export const plausible = (implied, today, others = []) => (today > 0 ? implied / today < 1000 && implied / today > 1 / 1000 : others.some((o) => o > 0 && implied / o < 3 && implied / o > 1 / 3));
 /** The implied price nearest to ts within `withinMs` (default 24 h), or null. */
 export function nearestImplied(list, ts, withinMs = 24 * HOUR) {
   let best = null;
@@ -100,8 +113,10 @@ export async function usdAt(token, ts, opts = {}) {
     const trades = await col('trades').find({ token: id, ts: { $lte: ts } }, { projection: { near: 1, tokens: 1, ts: 1 } }).sort({ ts: -1 }).limit(1).toArray().catch(() => []);
     const t = trades[0];
     if (t && t.tokens > 0 && ts - t.ts <= 6 * HOUR) { const np = await nearUsdAt(ts); if (np) return { usd: (t.near / t.tokens) * np, basis: 'tracker_trades', at_ts: t.ts }; }
-    const imp = nearestImplied(opts.implied?.get(token) || opts.implied?.get(id), ts);
-    if (imp && plausible(imp.usd, await usdPrice(token).catch(() => null))) return { usd: imp.usd, basis: 'implied', at_ts: imp.at_ts };
+    const list = opts.implied?.get(token) || opts.implied?.get(id) || [];
+    const imp = nearestImplied(list, ts);
+    const others = list.filter((p) => !(p.ts === imp?.at_ts && p.usd === imp?.usd)).map((p) => p.usd);
+    if (imp && plausible(imp.usd, await usdPrice(token).catch(() => null), others)) return { usd: imp.usd, basis: 'implied', at_ts: imp.at_ts };
   } catch { /* fall through to today's price */ }
   return today();
 }

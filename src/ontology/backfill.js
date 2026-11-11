@@ -82,9 +82,10 @@ export const WRITERS = {
     return out;
   },
 
-  async incidents() {
+  // scope { ids }: only these cases (one case was traced, followed up, confirmed or cleared): their role_in and sent_to facts
+  async incidents({ ids = null } = {}) {
     const out = [];
-    for (const inc of await col('incidents').find({ status: { $in: ['confirmed', 'suspected', 'cleared'] } }, { projection: { status: 1, kind: 1, accounts: 1, target: 1, victims: 1, confirmed_by: 1, updated_ts: 1, cleared: 1, 'trail.exits': 1 } }).toArray()) {
+    for (const inc of await col('incidents').find({ status: { $in: ['confirmed', 'suspected', 'cleared'] }, ...(ids ? { _id: { $in: ids } } : {}) }, { projection: { status: 1, kind: 1, accounts: 1, target: 1, victims: 1, confirmed_by: 1, updated_ts: 1, cleared: 1, 'trail.exits': 1 } }).toArray()) {
       const source = inc.confirmed_by?.source ? 'public_report' : 'trace';
       const valid_to = inc.status === 'cleared' ? (inc.cleared?.ts || inc.updated_ts || Date.now()) : null;
       const base = { predicate: 'role_in', object: inc._id, source, confidence: inc.status === 'confirmed' ? 0.9 : 0.5, status: inc.status, kind: inc.kind, valid_to };
@@ -97,8 +98,9 @@ export const WRITERS = {
     return out;
   },
 
-  async firewall_flags() {
-    return (await col('firewall_flags').find({}).toArray()).filter((f) => f.severity).map((f) => ({
+  // scope { ids }: only these accounts (one case's accounts, or a hand flag)
+  async firewall_flags({ ids = null } = {}) {
+    return (await col('firewall_flags').find(ids ? { _id: { $in: ids } } : {}).toArray()).filter((f) => f.severity).map((f) => ({
       subject: f._id, predicate: 'flagged', object: f.severity, source: f.source === 'incident' ? 'trace' : 'manual', confidence: 0.9, evidence: f.reason || f.detail || 'reported', case: f.incident || null,
     }));
   },
@@ -136,30 +138,57 @@ export const writerBy = (name) => `writer/${name}`;
 const legacyBy = (name) => `backfill/${name}`;
 // the facts a scoped run owns: an audit run for some accounts closes only those accounts' facts
 // (inside $and: retire() and the lookups add their own $or for 'still live', which would replace a top-level one)
-const SCOPES = { audits: ({ ids }) => ({ $and: [{ $or: [{ subject: { $in: ids }, predicate: 'is_a' }, { object: { $in: ids }, predicate: 'controls' }] }] }) };
+const SCOPES = {
+  audits: ({ ids }) => ({ $and: [{ $or: [{ subject: { $in: ids }, predicate: 'is_a' }, { object: { $in: ids }, predicate: 'controls' }] }] }),
+  incidents: ({ ids }) => ({ $and: [{ $or: [{ object: { $in: ids }, predicate: 'role_in' }, { subject: { $in: ids }, predicate: 'sent_to' }] }] }),
+  firewall_flags: ({ ids }) => ({ $and: [{ subject: { $in: ids }, predicate: 'flagged' }] }),
+};
+
+// One run of a writer at a time across every process (the worker's daily backfill, a sync in the worker, a hand flag in the web process).
+// Without it, run A asserts, run B re-asserts the same fact ids (same _id, `run` overwritten), then A closes every fact whose run is not A:
+// B's facts. The lock lives in `meta` and expires, so a crashed holder cannot block the writer for long.
+const LOCK_MS = 10 * 60e3, LOCK_WAIT_MS = 5 * 60e3;
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+async function withWriterLock(name, fn) {
+  const _id = `lock:${writerBy(name)}`, t0 = Date.now(), owner = `${process.pid}:${Math.random().toString(36).slice(2)}`;
+  for (;;) {
+    const now = Date.now();
+    await col('meta').deleteOne({ _id, until: { $lt: now } }).catch(() => {});
+    const got = await col('meta').insertOne({ _id, owner, until: now + LOCK_MS, ts: now }).then(() => true).catch((e) => { if (e.code === 11000) return false; throw e; });
+    if (got) break;
+    if (Date.now() - t0 > LOCK_WAIT_MS) throw new Error(`writer ${name} is busy (lock held for more than ${LOCK_WAIT_MS / 60e3} minutes)`);
+    await sleep(250);
+  }
+  try { return await fn(); } finally { await col('meta').deleteOne({ _id, owner }).catch(() => {}); }
+}
 
 /**
  * Run some writers: assert their facts, close the ones they no longer see, re-resolve the accounts touched. `scope` = { <writer>: args }
- * narrows a writer that supports it (audits: { ids }). `dry`: build and check only. Returns { run, per, written, retired, touched, facts?, rejected }.
+ * narrows a writer that supports it (audits, incidents, firewall_flags: { ids }). Each writer runs under a lock shared by every process. `dry`: build and check only. Returns { run, per, written, retired, touched, facts?, rejected }.
  */
 export async function runWriters(names, { dry = false, scope = {}, now = Date.now() } = {}) {
-  const run = now, per = {}, facts = [], rejected = [];
+  const per = {}, all = [], rejected = [], touched = new Set();
+  let written = 0, retired = 0, run = now;
   for (const name of names) {
     if (!WRITERS[name]) throw new Error(`unknown writer ${name}`);
-    const got = (await WRITERS[name](scope[name] || {})).map((f) => ({ ...f, by: writerBy(name), run }));
-    const ok = got.filter((f) => { const p = invalid(f); if (p) rejected.push({ writer: name, problem: p, subject: f.subject }); return !p; });
-    per[name] = ok.length; facts.push(...ok);
-  }
-  if (dry) return { run, facts, per, rejected, dry: true };
-  const written = await assert(facts, { now: run });
-  let retired = 0;
-  const touched = new Set(facts.map((f) => f.subject));
-  for (const name of Object.keys(per)) {
-    const closing = { by: { $in: [writerBy(name), legacyBy(name)] }, run: { $ne: run }, ...(scope[name] && SCOPES[name] ? SCOPES[name](scope[name]) : {}) };
     if (scope[name] && !SCOPES[name]) throw new Error(`writer ${name} has no scope`);
-    for (const f of await col('ontology_facts').find({ $and: [closing, { $or: [{ valid_to: null }, { valid_to: { $gt: run } }] }] }, { projection: { subject: 1 } }).toArray()) touched.add(f.subject);
-    retired += await retire(closing, { now: run });
+    const one = async () => {
+      // the run id is taken inside the lock: a later run always has a later id, and closes only what it did not see itself
+      const r = dry ? now : Math.max(Date.now(), run + 1);
+      run = r;
+      const got = (await WRITERS[name](scope[name] || {})).map((f) => ({ ...f, by: writerBy(name), run: r }));
+      const ok = got.filter((f) => { const p = invalid(f); if (p) rejected.push({ writer: name, problem: p, subject: f.subject }); return !p; });
+      per[name] = ok.length; all.push(...ok);
+      if (dry) return;
+      written += await assert(ok, { now: r });
+      for (const f of ok) touched.add(f.subject);
+      const closing = { by: { $in: [writerBy(name), legacyBy(name)] }, run: { $ne: r }, ...(scope[name] ? SCOPES[name](scope[name]) : {}) };
+      for (const f of await col('ontology_facts').find({ $and: [closing, { $or: [{ valid_to: null }, { valid_to: { $gt: r } }] }] }, { projection: { subject: 1 } }).toArray()) touched.add(f.subject);
+      retired += await retire(closing, { now: r });
+    };
+    if (dry) await one(); else await withWriterLock(name, one);
   }
+  if (dry) return { run, facts: all, per, rejected, dry: true };
   await resolveSubjects([...touched], { now: run });
   return { run, per, written, retired, touched: touched.size, rejected };
 }

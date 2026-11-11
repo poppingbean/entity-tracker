@@ -48,7 +48,7 @@ views.accuracy = async () => {
 const nNote = (b) => (b && b.n != null ? `<p class="muted small">${b.n} labelled${b.note ? ` · ${esc(b.note)}` : ''}</p>` : '');
 function securityCards(S) {
   if (!S || S.error) return S?.error ? `<div class="card muted small">Security verdict numbers could not be computed: ${esc(S.error)}</div>` : '';
-  const I = S.incidents, D = S.detections, F = S.firewall, AU = S.audits, O = S.ontology, G = S.ai_grounding, H = S.data_health;
+  const I = S.incidents, D = S.detections, F = S.firewall, AU = S.audits, O = S.ontology, G = S.ai_grounding, H = S.data_health, MW = S.money_watch;
   let h = '<h2 style="margin:18px 0 6px">Security verdicts <span class="muted small">scored against what really happened: public reports, operator confirmations and clears, hand labels</span></h2><div class="grid2">';
   if (I) h += `<div class="card"><h2>Hacks called <span class="muted">${I.called} public calls</span></h2>${cm(I)}
     <p class="small">Precision <b>${pct(I.precision)}</b> · caught by the rules before any report <b>${pct(I.recall_by_rules)}</b> of ${I.labelled_bad} real hacks · median time to detect ${I.time_to_detect_min?.median == null ? '–' : Math.round(I.time_to_detect_min.median) + ' min'} · ${I.found_later} found long after · ${I.unlabelled} cases not labelled yet</p>
@@ -63,5 +63,7 @@ function securityCards(S) {
     ${(O.failures || []).length ? `<p class="small a">Wrong: ${O.failures.slice(0, 6).map((x) => `${esc(short(x.account, 24))} is ${esc(x.got)}, expected ${esc(x.expect)}`).join('; ')}</p>` : ''}</div>`;
   if (G && Object.keys(G).length) h += `<div class="card"><h2>AI texts checked against their evidence <span class="muted">30 days</span></h2><table class="small"><tr><th>Text</th><th class="num">Checked</th><th class="num">Clean</th><th class="num">Asked again</th><th class="num">Marked</th></tr>${Object.entries(G).map(([k, v]) => `<tr><td>${esc(k)}</td><td class="num">${v.checked}</td><td class="num">${v.clean}</td><td class="num">${v.retried}</td><td class="num">${v.unverified}</td></tr>`).join('')}</table></div>`;
   if (H) h += `<div class="card"><h2>Data health <span class="muted">chain data against a second source</span></h2><p class="small">Block gaps in the last 7 days: <b>${H.gaps_7d ?? 0}</b> · transactions cross-checked: <b>${H.checked ?? 0}</b>, mismatches <b class="${H.mismatches ? 'r' : ''}">${H.mismatches ?? 0}</b> · last check ${H.last_check_ts ? since(H.last_check_ts) : 'never'}</p></div>`;
+  if (MW) h += `<div class="card"><h2>Money watch <span class="muted">every movement of $100k or more</span></h2><p class="small">Closed as normal, then shown to be part of a hack: <b class="${MW.normal_later_bad ? 'r' : ''}">${MW.normal_later_bad}</b> of ${MW.closed_normal} (the number to keep at zero) · looked suspicious: ${MW.escalated}, of them confirmed ${MW.escalated_confirmed}${MW.escalated_precision == null ? '' : ` (${pct(MW.escalated_precision)})`} · still watched: ${MW.open}</p>
+    <p class="small muted">Closed by: ${Object.entries(MW.closed_by || {}).map(([k, v]) => `${esc(k)} ${v}`).join(' · ') || '–'}</p>${nNote(MW)}</div>`;
   return h + '</div>';
 }

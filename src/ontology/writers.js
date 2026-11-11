@@ -59,3 +59,13 @@ export async function syncFacts(names, { scope = {} } = {}) {
 export async function flushWriters() {
   await Promise.all([...state.values()].map((s) => s.running).filter(Boolean)).catch(() => {});
 }
+
+/**
+ * Sync one case: its role_in / sent_to facts and the flags of its accounts, not every case and flag (a full run re-resolves thousands of
+ * accounts on each follow-up). `extra` adds accounts whose flag may have gone (the case's accounts before this save, a single new wallet).
+ */
+export async function syncCase(inc, extra = []) {
+  if (!inc?._id) return;
+  const accounts = [...new Set([...(inc.accounts || []).map((a) => a.account), inc.attacker?.account, ...extra].filter(Boolean))];
+  await syncFacts(['incidents', 'firewall_flags'], { scope: { incidents: { ids: [inc._id] }, firewall_flags: { ids: accounts } } });
+}

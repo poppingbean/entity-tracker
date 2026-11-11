@@ -18,7 +18,9 @@ export function movementsOf(flows, { min = config.watch.minUsd, skipFrom = () =>
   for (const f of flows) {
     if (!(f.usd >= min) || SKIP_TOKEN.test(f.token) || f.kind === 'mint' || f.kind === 'burn' || f.from === f.to) continue;
     if (skipFrom(f.from) || skipTo(f.to)) continue;
-    if ((byTx.get(f.tx) || []).some((g) => g !== f && g.from === f.to && g.usd >= 0.5 * f.usd)) continue; // a swap leg
+    // a swap leg: the receiver gives back a DIFFERENT token of comparable value in the same transaction (passing the same token on is a
+    // forward, not a trade: a receive-and-forward in one transaction is still a movement)
+    if ((byTx.get(f.tx) || []).some((g) => g !== f && g.from === f.to && g.token !== f.token && g.usd >= 0.5 * f.usd)) continue;
     const key = [f.tx, f.from, f.to, f.token, f.raw].join('|');
     if (seen.has(key)) continue;
     seen.add(key);
@@ -58,18 +60,22 @@ export const rulesVerdict = (origin) => (origin.lean === 'normal' ? { verdict: '
 
 /**
  * What a move out of a watched account does. `entry`: { in_usd, out_usd, depth } (what the account received from the case and has sent on);
- * `move.usd`; `triggerUsd` the opening movement. `hasRoom`: the case may still add an account.
- * Returns { follow, why, sender: 'keep' | 'drop', depth } (`follow` false = recorded as a move, the receiver is not watched).
- * A partial send keeps the sender; only when (almost) all of what it received has gone does it stop being watched.
+ * `move.usd`; `pendingUsd`: what this watch already sent the same receiver in moves too small to follow (splitting is summed, not lost);
+ * `triggerUsd` the opening movement (used when the account's own in_usd is unknown). `hasRoom`: the case may still add an account.
+ * The floor is a share of what the SENDER received, not of the opening movement, and never more than followCapUsd: after a split, each
+ * part is judged against its own branch, so a $45M drain split into $400k parts is still followed.
+ * Returns { follow, why, sender: 'keep' | 'drop', depth, floor } (`follow` false = recorded as a move, the receiver is not watched).
+ * Every move counts toward what the sender has sent on, followed or not: only when (almost) all of it has gone does the sender stop being watched.
  */
-export function followStep(entry, move, { triggerUsd, hasRoom = true, W = config.watch } = {}) {
-  const floor = Math.max(W.followMinUsd, W.followShare * (triggerUsd || 0));
+export function followStep(entry, move, { triggerUsd, hasRoom = true, pendingUsd = 0, W = config.watch } = {}) {
+  const base = entry.in_usd || triggerUsd || 0;
+  const floor = Math.max(W.followMinUsd, Math.min(W.followShare * base, W.followCapUsd ?? Infinity));
   const out = (entry.out_usd || 0) + move.usd, left = (entry.in_usd || 0) - out;
   const sender = left < Math.max(W.dustUsd, W.dustShare * (entry.in_usd || 0)) ? 'drop' : 'keep';
-  if (move.usd < floor) return { follow: false, why: 'below the follow floor', sender: 'keep', depth: entry.depth };
-  if ((entry.depth || 0) + 1 > W.maxDepth) return { follow: false, why: 'depth limit', sender, depth: entry.depth };
-  if (!hasRoom) return { follow: false, why: 'account limit', sender, depth: entry.depth };
-  return { follow: true, why: null, sender, depth: (entry.depth || 0) + 1 };
+  if ((pendingUsd || 0) + move.usd < floor) return { follow: false, why: 'below the follow floor', sender, depth: entry.depth, floor };
+  if ((entry.depth || 0) + 1 > W.maxDepth) return { follow: false, why: 'depth limit', sender, depth: entry.depth, floor };
+  if (!hasRoom) return { follow: false, why: 'account limit', sender, depth: entry.depth, floor };
+  return { follow: true, why: null, sender, depth: (entry.depth || 0) + 1, floor };
 }
 
 /** A watch with no move for `maxIdleDays` is closed as normal (idle). */
@@ -87,7 +93,9 @@ export function reviewDue(watch, now = Date.now(), W = config.watch) {
  * What a review does, from the rules' origin, the AI's answer (or null: off, budget spent, failed) and the watch.
  * Returns { action: 'normal' | 'keep' | 'suspicious', by: 'rules' | 'ai', why }.
  *   - the rules close what they can (own funds, routine relationship, an exchange in an ordinary amount) unless a person reported the address;
- *   - the AI closes a watch only with medium or high confidence, never one a person reported with a source, and never one whose incident is still open;
+ *   - the AI closes a watch only with medium or high confidence, never one a person reported with a source, never one whose incident is still
+ *     open, and never one whose origin the rules found suspicious (lean 'high': a fresh receiver, an exchange paying a new account or an
+ *     unusual amount): a case the rules found evidence for is never closed by the AI alone (design, section 6). Idle closing still applies;
  *   - the AI can escalate (medium or high confidence); nothing here confirms a hack: only a person or a public report does.
  */
 export function decide(watch, origin, ai, { incidentOpen = false } = {}) {
@@ -97,6 +105,7 @@ export function decide(watch, origin, ai, { incidentOpen = false } = {}) {
   if (!ai) return { action: 'keep', by: 'rules', why: 'no AI verdict (off, budget spent or failed): the watch goes on' };
   const sure = ai.confidence === 'high' || ai.confidence === 'medium';
   if (ai.verdict === 'suspicious' && sure) return { action: 'suspicious', by: 'ai', why: ai.what_it_is || 'suspicious movement' };
+  if (ai.verdict === 'normal' && sure && origin.lean === 'high') return { action: 'keep', by: 'ai', why: `${ai.what_it_is || 'looks normal'}; the rules found the origin suspicious (${origin.class.replace(/_/g, ' ')}), so the AI alone does not close it` };
   if (ai.verdict === 'normal' && sure && !(watch.reports || []).some((r) => r.source) && !incidentOpen) return { action: 'normal', by: 'ai', why: ai.what_it_is || 'normal activity' };
   return { action: 'keep', by: 'ai', why: ai.what_it_is || 'too early to tell' };
 }

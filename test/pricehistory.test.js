@@ -18,7 +18,9 @@ test('an implied price a thousand times away from the price today is not trusted
   assert.equal(plausible(0.25, 0.3), true);
   assert.equal(plausible(999999, 1), false);
   assert.equal(plausible(0.0001, 1), false);
-  assert.equal(plausible(5, null), true, 'no price today: nothing to compare with');
+  assert.equal(plausible(5, null), false, 'no price today and one swap only: not trusted');
+  assert.equal(plausible(5, null, [6]), true, 'no price today: a second swap of the case agrees within 3x');
+  assert.equal(plausible(5, null, [50]), false, 'no price today: the other swap disagrees 10x');
 });
 test('implied prices: the attacker gave token A and received a stablecoin in one transaction', () => {
   const flows = [{ tx: 't1', ts: 1000, token: 'fake.near', from: 'atk', to: 'pool', raw: '2000' }, { tx: 't1', ts: 1000, token: 'usdt.tether-token.near', from: 'pool', to: 'atk', raw: '500' },

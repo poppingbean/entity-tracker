@@ -315,7 +315,7 @@ Because a direct write and the backfill run the same writer, the two make the sa
 - **missing:** a fact a writer would make that is not stored;
 - **stale:** a stored fact no writer makes any more.
 
-A sync never throws into the caller (it is logged, and the daily backfill repairs it until G2). Measured on production data on 2026-11-10: every writer at parity except one fact, an audit saved after the last backfill. A scoped audit write closed it in 1.7 s.
+A sync never throws into the caller (it is logged, and the daily backfill repairs it until G2). **One run of a writer at a time, across processes:** each writer runs under a lock in `meta` (`lock:writer/<name>`, expires after 10 minutes), shared by the daily backfill, direct syncs in the worker and hand flags in the web process; without it, a run could close the facts another run of the same writer had just re-asserted. **Case syncs are scoped:** a trace, follow-up, clear or deep review syncs only that case's `role_in` / `sent_to` facts and its accounts' flags (`syncCase`), not every case. Measured on production data on 2026-11-10: every writer at parity except one fact, an audit saved after the last backfill. A scoped audit write closed it in 1.7 s.
 
 **Still open after G1:**
 - `created_by` / `deployed` edges: the tracer (fake tokens, sub-accounts) and the launch scanner (token creators; smithii is not watched yet) should write them.

@@ -32,10 +32,10 @@ async function count(r) {
 export async function flagAccount(id, severity, reason, detail = '') {
   if (!['critical', 'high', 'medium'].includes(severity)) throw new Error('severity: critical | high | medium');
   await col('firewall_flags').replaceOne({ _id: id }, { _id: id, severity, reason: String(reason).slice(0, 120), detail: String(detail).slice(0, 400), ts: Date.now() }, { upsert: true });
-  await (await import('../ontology/writers.js')).syncFacts(['firewall_flags']); // G1
+  await (await import('../ontology/writers.js')).syncFacts(['firewall_flags'], { scope: { firewall_flags: { ids: [id] } } }); // G1 (this account only)
 }
 export async function unflagAccount(id) {
   const r = await col('firewall_flags').deleteOne({ _id: id });
-  await (await import('../ontology/writers.js')).syncFacts(['firewall_flags']); // G1
+  await (await import('../ontology/writers.js')).syncFacts(['firewall_flags'], { scope: { firewall_flags: { ids: [id] } } }); // G1 (this account only)
   return r;
 }
