@@ -33,7 +33,9 @@
 //   node src/cli.js ring-scan [case id]                look for laundering rings (memecoins bought by wallets a confirmed case paid); stores proposals
 //   node src/cli.js ring-approve <id> [--dry] | ring-reject <id> ["reason"]   an operator applies a proposal with case-add, or drops it
 //   node src/cli.js chain-links                        addresses on other chains that received money from 2+ NEAR cases (leads; flags nothing)
-//   node src/cli.js link-eval                          pairwise precision / recall of the wallet grouping against pairs of known owners (changes nothing)
+//   node src/cli.js watch-list [--status s] [--limit N]   money watch cases (docs/money-watch-design.md); watch-show <id>; watch-scan [N] (read-only: what would open in the latest N blocks)
+//   node src/cli.js watch-report <address> [--source <link>] [--note "<text>"]   a person reports an address; watch-confirm <id> [--source]; watch-close <id> <reason>; watch-review <id>
+//   node src/cli.js link-eval                         pairwise precision / recall of the wallet grouping against pairs of known owners (changes nothing)
 //   node src/cli.js exchanges-prune [--apply]          list (or remove) registry entries that rest only on being busy (IDENTIFY_BUSY_NEUTRAL)
 //   node src/cli.js golden-candidates [--class <class>] [--limit N]   resolved accounts not in the golden set, strongest evidence first (JSON lines; writes nothing)
 //   node src/cli.js trace-replay [--limit N] [--only <id prefix>] [--resume <earlier log>]   re-trace stored cases with the current code and diff them against what is stored (no AI, nothing saved)
@@ -267,6 +269,37 @@ try {
     const { addExchangeWallet } = await import('./incident/exchanges.js');
     if (!args[0] || !args[1]) throw new Error('usage: exchange-wallet <account> <exchange> [hot|cold]');
     await addExchangeWallet(args[0], args[1], args[2] === 'cold' ? 'cold' : 'hot'); info(`exchange wallet ${args[0]}: ${args[1]}`);
+  } else if (cmd === 'watch-list') {
+    // money watch cases (docs/money-watch-design.md): node src/cli.js watch-list [--status watching|suspicious|normal|confirmed] [--limit N]
+    const si = args.indexOf('--status'), li = args.indexOf('--limit');
+    const rows = await col('watches').find(si >= 0 ? { status: args[si + 1] } : {}, { projection: { moves: 0, reviews: 0 } }).sort({ opened_ts: -1 }).limit(li >= 0 ? Number(args[li + 1]) : 30).toArray();
+    for (const w of rows) console.log(`${w._id.slice(0, 40).padEnd(40)} ${w.status.padEnd(10)} $${String(w.trigger.usd).padEnd(9)} ${(w.origin?.class || 'no origin yet').padEnd(26)} accounts ${(w.accounts || []).filter((a) => a.state === 'active').length}/${(w.accounts || []).length}  ${new Date(w.opened_ts).toISOString().slice(0, 16)}`);
+    console.log(`${rows.length} watches`);
+  } else if (cmd === 'watch-show') {
+    console.log(JSON.stringify(await col('watches').findOne({ _id: args[0] }), null, 1));
+  } else if (cmd === 'watch-report') {
+    // a person reports an address as part of a hack: node src/cli.js watch-report <address> [--source <link>] [--note "<text>"]
+    const { reportAddress } = await import('./watch/report.js'), g = (f) => (args.indexOf(f) >= 0 ? args[args.indexOf(f) + 1] : null);
+    console.log(JSON.stringify(await reportAddress(args[0], { source: g('--source'), note: g('--note') }), null, 1));
+  } else if (cmd === 'watch-confirm') {
+    const { confirmWatch } = await import('./watch/report.js'), g = (f) => (args.indexOf(f) >= 0 ? args[args.indexOf(f) + 1] : null);
+    console.log(JSON.stringify(await confirmWatch(args[0], { source: g('--source'), note: g('--note') }), null, 1));
+  } else if (cmd === 'watch-close') {
+    const { setStatus } = await import('./watch/store.js'), why = args.slice(1).join(' ') || 'closed by operator';
+    console.log(await setStatus(args[0], 'normal', { by: 'operator', why, review: { ts: Date.now(), verdict: 'normal', by: 'operator', what_it_is: why, reasons: [] } }) ? 'closed' : 'no such watch');
+  } else if (cmd === 'watch-review') {
+    const { reviewWatch } = await import('./watch/review.js'), w = await col('watches').findOne({ _id: args[0] });
+    console.log(w ? await reviewWatch(w) : 'no such watch');
+  } else if (cmd === 'watch-scan') {
+    // read-only: the movements that WOULD open a watch in the latest N blocks (default 600), nothing written: node src/cli.js watch-scan [N]
+    const { flowsOfBlocks, openingMovements } = await import('./watch/scan.js'), { protocols } = await import('./incident/detect.js');
+    const U = config.autoAudit.neardataUrl, H = config.fastnearApiKey ? { authorization: `Bearer ${config.fastnearApiKey}` } : {};
+    const get = async (p) => { for (let t = 0; t < 3; t++) { try { const r = await fetch(U + p, { headers: H, signal: AbortSignal.timeout(20000) }); if (r.status === 404) return null; if (r.ok) return r.json(); } catch {} } return null; };
+    const tip = (await get('/v0/last_block/final')).block.header.height, n = Number(args[0]) || 600, blocks = [];
+    for (let h = tip - n; h < tip; h += 8) (await Promise.all(Array.from({ length: Math.min(8, tip - h) }, (_, i) => get(`/v0/block/${h + i}`)))).forEach((b) => b?.block && blocks.push(b));
+    const flows = await flowsOfBlocks(blocks), opening = await openingMovements(flows, await protocols());
+    for (const f of opening) console.log(`$${Math.round(f.usd)} ${f.symbol || f.token} ${f.from.slice(0, 24)} → ${f.to.slice(0, 24)} tx ${f.tx}`);
+    console.log(`${blocks.length} blocks, ${flows.length} flows, ${opening.size} would open a watch`);
   } else if (cmd === 'incident') {
     const { investigate, parseInvestigation } = await import('./incident/service.js');
     const d = await investigate(parseInvestigation(args[0]), { ai: !args.includes('--no-ai'), log: (m) => info(m) });

@@ -121,6 +121,24 @@ export const config = {
     newsEveryMinutes: num(process.env.NEWS_EVERY_MINUTES, 15),     // security news feeds (0 = off)
     newsFeeds: (process.env.NEWS_FEEDS || 'https://cointelegraph.com/rss,https://www.theblock.co/rss.xml,https://decrypt.co/feed,https://rekt.news/rss/feed.xml,https://cryptoslate.com/feed/').split(',').map((s) => s.trim()).filter(Boolean),
   },
+  // money watch (docs/money-watch-design.md): every movement of minUsd or more opens a watch case; the money is followed until the reviewer calls it normal
+  watch: {
+    enabled: process.env.WATCH_ENABLED !== 'false',
+    minUsd: num(process.env.WATCH_MIN_USD, 100000),               // one movement worth at least this (USD, whatever the token) opens a watch
+    followMinUsd: num(process.env.WATCH_FOLLOW_MIN_USD, 10000),   // a move out of a watched account worth at least this (and followShare of the trigger) is followed
+    followShare: num(process.env.WATCH_FOLLOW_SHARE, 0.1),
+    dustUsd: num(process.env.WATCH_DUST_USD, 1000),               // an account that sent all but this (or dustShare of what it received) has sent it all: it stops being watched
+    dustShare: num(process.env.WATCH_DUST_SHARE, 0.05),
+    maxAccounts: num(process.env.WATCH_MAX_ACCOUNTS, 40),         // accounts watched at once in one case
+    maxDepth: num(process.env.WATCH_MAX_DEPTH, 6),                // hops from the first receiver
+    maxIdleDays: num(process.env.WATCH_MAX_IDLE_DAYS, 30),        // a watch with no move for this long is closed as normal (idle) and kept
+    ai: process.env.WATCH_AI !== 'false',
+    aiPerDay: num(process.env.WATCH_AI_PER_DAY, 100),             // NEAR AI calls per day for watch reviews (its own budget: the hack investigations keep theirs)
+    everyMs: num(process.env.WATCH_EVERY_SECONDS, 30) * 1000,     // the review lane starts at most this often
+    reviewGapMinutes: num(process.env.WATCH_REVIEW_GAP_MINUTES, 60), // a watch is reviewed again after new moves at most this often
+    reviewMinUsd: num(process.env.WATCH_REVIEW_MIN_USD, 10000),   // ... and only when at least this much moved since the last review (or a new exit appeared)
+    linkHops: num(process.env.WATCH_LINK_HOPS, 3),                // a reported address is looked back this many large movements to find a case
+  },
   // transaction firewall (POST /api/v1/tx/check): open to any wallet / dApp, cross-origin
   firewall: {
     maxBodyBytes: num(process.env.FIREWALL_MAX_BODY_BYTES, 2_000_000),  // a DeployContract carries the code
