@@ -5,6 +5,7 @@ import { decodeRequest } from './decode.js';
 import { buildContext, accountReputation } from './context.js';
 import { checkTransactions } from './rules.js';
 import { explainCheck } from './explain.js';
+import { tokenMoves, valueMoves, nearUsd } from './moves.js';
 
 export const FIREWALL_VERSION = '1.0';
 
@@ -12,10 +13,11 @@ export const FIREWALL_VERSION = '1.0';
 export async function checkRequest(body) {
   const t0 = Date.now();
   const txs = decodeRequest(body || {});
-  const { ctx, complete, accounts_checked } = await buildContext(txs);
+  // what the transactions move besides attached NEAR (tokens, NEAR Intents balances), valued today, beside the context lookups
+  const [{ ctx, complete, accounts_checked }, moves, near_usd] = await Promise.all([buildContext(txs), valueMoves(tokenMoves(txs)), nearUsd()]);
   const result = checkTransactions(txs, ctx);
   const explanation = body.explain ? await explainCheck(result, ctx) : undefined;
-  const out = { version: FIREWALL_VERSION, ...result, ...(explanation !== undefined ? { explanation } : {}), context: { complete, accounts_checked }, checked_ts: Date.now(), took_ms: Date.now() - t0 };
+  const out = { version: FIREWALL_VERSION, ...result, ...(explanation !== undefined ? { explanation } : {}), context: { complete, accounts_checked }, value: { near_usd: near_usd ?? null, moves }, checked_ts: Date.now(), took_ms: Date.now() - t0 };
   count(result).catch(() => {});
   return out;
 }

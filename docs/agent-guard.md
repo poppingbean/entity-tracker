@@ -14,15 +14,17 @@ It runs as an **MCP server** (Model Context Protocol), so any agent that speaks 
 
 ## The tools
 
-Six tools (Agent Guard 1.1.0; `what_is` was added with the ontology layer). A client that connected before may need to reconnect to see the new tool.
+Eight tools (Agent Guard 1.2.0). A client that connected before may need to reconnect to see new tools.
 
 | Tool | What the agent asks | Answer |
 |---|---|---|
-| `guard_transaction` | "May I sign this?" Pass the transaction, the owner's `policy`, and optionally `spent_near_today` | `allow` / `ask_human` / `block`, the reasons, and what each action does in plain words |
+| `guard_transaction` | "May I sign this?" Pass the transaction, the owner's `policy`, and optionally `spent_near_today` / `spent_usd_today` | `allow` / `ask_human` / `block`, the reasons, what each action does in plain words, and what it sends out (`sends`: token, amount, USD). A check that could not finish answers `ask_human`, never `allow`; a guard that fails says *do not sign* |
 | `check_transaction` | The transaction check alone, without a policy | `ok` / `caution` / `warn` / `block`, the findings, and the actions in plain words |
 | `check_account` | "Is it safe to pay or trust this?" Takes an account, token, NFT, contract, tx hash, link or website | `safe` / `caution` / `danger`, and any hack it is linked to |
 | `check_contract` | "What can this contract's owner do to me?" | The automated audit: type, powers, who holds them, findings, and a level (low to critical) |
 | `what_is` | "Is this payer really an exchange? A person?" | What Safe Near calls the account (person, exchange hot / cold wallet, NEAR Intents solver, relayer, router, launchpad, contract …), why, what weaker evidence it overruled, and its known links (operator, sweeps, cases) |
+| `recent_hacks` | "What has been hacked on NEAR lately?" | The latest confirmed cases: kind, who was hit, how much was taken and is still held, the case id |
+| `get_incident` | "Is this account / transaction part of a hack?" | The confirmed case it belongs to and its role (the attacker, a payout wallet, the target …), what was taken, where the money went. Unconfirmed suspicions are never shown as hacks |
 | `plan_scoped_key` | "How do I act for my owner without their full-access key?" | The `AddKey` transaction for a **function-call key** limited to one contract and its methods, with a gas-only allowance (such a key can never send NEAR). The owner signs it once. Also returns the transaction that revokes it |
 
 Transactions are accepted in every shape the firewall reads:
@@ -38,6 +40,8 @@ Transactions are accepted in every shape the firewall reads:
   "max_near_per_tx": 1,
   "max_near_per_request": 2,
   "max_near_per_day": 5,
+  "max_usd_per_tx": 50,
+  "max_usd_per_day": 200,
   "allowed_receivers": ["wrap.near", "*.ref-finance.near"],
   "allowed_methods": ["near_deposit", "swap"],
   "forbidden_actions": ["add_full_access_key", "delete_account", "deploy_contract", "delete_key", "stake"],
@@ -48,7 +52,9 @@ Transactions are accepted in every shape the firewall reads:
 
 - **Every field is optional.** By default nothing is limited, the five dangerous actions above are forbidden, a `block` verdict blocks, and a `warn` verdict asks a human.
 - **Receivers:** `*.ref-finance.near` also matches the account's sub-accounts. A transaction on the agent's own account needs no allow-listing; what it does there (keys, code, deletion) falls under `forbidden_actions`.
-- **Daily limit:** the guard holds no state. The agent's runtime passes `spent_near_today` (the NEAR it already spent today) with each call, so `max_near_per_day` can be enforced.
+- **What counts as spending:** everything the transactions send out, not only attached NEAR: NEAR attached or staked; **wNEAR** sent with `ft_transfer` (counted as NEAR for the NEAR limits); **any token** sent with `ft_transfer` / `ft_transfer_call`; and **NEAR Intents balances** moved with `ft_withdraw`, `mt_transfer` or `mt_batch_transfer`. The check values them in USD at today's prices (`value.moves` in the check), and the `max_usd_*` limits cap them. A token with no price under a USD limit answers `ask_human`: it is never waved through. Tokens sent to the agent's own account are not spending.
+- **Daily limits:** the guard holds no state. The agent's runtime passes `spent_near_today` and `spent_usd_today` (what it already spent today) with each call, so `max_near_per_day` and `max_usd_per_day` can be enforced.
+- **Fail closed:** a check whose lookups did not finish in time (`context.complete: false`) answers `ask_human`; if the guard cannot be reached or fails, the tool says *do NOT sign* and the server's instructions tell the agent to treat it as `ask_human`.
 
 ## Connect your agent
 

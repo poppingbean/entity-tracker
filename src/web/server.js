@@ -206,8 +206,11 @@ async function firewallApi(req, res, u) {
     return;
   }
   if (u.pathname === '/api/v1/incidents' && req.method === 'GET') {
-    const rows = await col('incidents').find({ status: 'confirmed' }, { projection: { status: 1, kind: 1, 'attacker.account': 1, 'target.account': 1, stolen_usd: 1, held_usd: 1, started_ts: 1, 'ai.headline': 1, 'trail.exit_usd': 1 } }).sort({ started_ts: -1 }).limit(100).toArray();
-    send(200, { incidents: rows }); return;
+    send(200, await (await import('../agent/api.js')).incidentsList()); return;
+  }
+  // ?q=<account | tx hash | link | inc:…>: the confirmed case it belongs to, with its role (the Agent Guard's get_incident); ?id= the case itself
+  if (u.pathname === '/api/v1/incident' && req.method === 'GET' && u.searchParams.get('q')) {
+    send(200, await (await import('../agent/api.js')).incidentLookup(String(u.searchParams.get('q')).slice(0, 300))); return;
   }
   if (u.pathname === '/api/v1/incident' && req.method === 'GET') {
     const doc = await col('incidents').findOne({ _id: String(u.searchParams.get('id') || '') }, { projection: { trail: { moves: 0 } } });
