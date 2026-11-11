@@ -214,7 +214,10 @@ export const config = {
   rules: {
     minPoolNear: num(process.env.MIN_POOL_NEAR, 50),
     minUniqueBuyers: num(process.env.MIN_UNIQUE_BUYERS, 11),
-    minMcapUsd: num(process.env.MIN_MCAP_USD, 8500),
+    // market cap at the first check, in NEAR: does not drift with NEAR's price. Measured on 1,113 checks (2026-11-11): >= 1,250 NEAR keeps
+    // 11 of 31 launches that later doubled while passing 11 of 479 rugs; the old $8,500 kept 3. MIN_MCAP_USD (0 = off) can add a USD floor
+    minMcapNear: num(process.env.MIN_MCAP_NEAR, 1250),
+    minMcapUsd: num(process.env.MIN_MCAP_USD, 0),
     maxTaxBps: num(process.env.MAX_TAX_BPS, 1000),
     maxLinkedBuyerShare: num(process.env.MAX_LINKED_BUYER_SHARE, 0.4),
     maxBadGroupShare: num(process.env.MAX_BAD_GROUP_SHARE, 0.4),

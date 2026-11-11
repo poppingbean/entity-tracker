@@ -197,7 +197,7 @@ test('audit: summary for the gates, and the contract_audit_ok gate', () => {
   const sum = summarizeAudit(doc);
   assert.equal(sum.available, true); assert.deepEqual(sum.confirmed_malicious.map((c) => c.key), ['fakeStorageMethod']);
 
-  const base = { pool: { quoteAccepted: true, route: 'direct', lpLocked: true, nearReserve: 200, quoteSymbol: 'wNEAR', quoteForBuy: { tokensOut: 1 } }, contract: { matchesTemplate: true }, market: { mcapUsd: 20000 },
+  const base = { pool: { quoteAccepted: true, route: 'direct', lpLocked: true, nearReserve: 200, quoteSymbol: 'wNEAR', quoteForBuy: { tokensOut: 1 } }, contract: { matchesTemplate: true }, market: { mcapUsd: 20000, mcapNear: 5400 },
     trading: { uniqueBuyers: 30, creatorSold: false, priceMultipleSinceFirstTrade: 1, buyNear: 100, sellNear: 10, syncBuyClusters: 0 }, launch: { tax: null }, wallets: { linkedBuyerShare: 0, creatorFundedBuyers: [], creator: null }, intel: null };
   assert.equal(applyRules({ ...base, audit: { available: false } }).gates.find((g) => g.id === 'contract_audit_ok').ok, true, 'no audit: not blocked');
   assert.equal(applyRules({ ...base, audit: sum }).gates.find((g) => g.id === 'contract_audit_ok').ok, false, 'a confirmed backdoor fails the gate');
@@ -520,7 +520,7 @@ test('scanner buckets: rug-linked early buyers are "rugger" (a warning), insider
 
 test('scanner rules: rugger early money is a warning with a light cut, never a gate or the heavy "bad" cut', () => {
   const groups = (o) => ({ good: { wallets: 0, near: 0, share: 0 }, bad: { wallets: 0, near: 0, share: 0 }, rugger: { wallets: 0, near: 0, share: 0 }, bots_losers: { wallets: 0, near: 0, share: 0 }, neutral: { wallets: 0, near: 0, share: 0 }, unknown: { wallets: 0, near: 0, share: 0 }, ...o });
-  const f = (eg) => ({ pool: { quoteAccepted: true, route: 'direct', lpLocked: true, nearReserve: 200, quoteSymbol: 'wNEAR', quoteForBuy: { tokensOut: 1 } }, contract: { matchesTemplate: true }, market: { mcapUsd: 20000 },
+  const f = (eg) => ({ pool: { quoteAccepted: true, route: 'direct', lpLocked: true, nearReserve: 200, quoteSymbol: 'wNEAR', quoteForBuy: { tokensOut: 1 } }, contract: { matchesTemplate: true }, market: { mcapUsd: 20000, mcapNear: 5400 },
     trading: { uniqueBuyers: 30, creatorSold: false, priceMultipleSinceFirstTrade: 1, buyNear: 100, sellNear: 10, syncBuyClusters: 0 }, launch: { tax: null }, wallets: { linkedBuyerShare: 0, creatorFundedBuyers: [], creator: null },
     audit: { available: false }, intel: { creator_prior_rugs_or_dumps: 0, creator_prior_launches: 0, early_buyer_groups: groups(eg) } });
   const clean = applyRules(f({}));
@@ -542,7 +542,7 @@ test('scanner rules: rugger early money is a warning with a light cut, never a g
 });
 
 test('scanner rules: min_buyers and not_overextended are soft gates, warnings that never fail the check on their own', () => {
-  const f = (trading, market = { mcapUsd: 50000 }) => ({ pool: { quoteAccepted: true, route: 'direct', lpLocked: true, nearReserve: 200, quoteSymbol: 'wNEAR', quoteForBuy: { tokensOut: 1 } }, contract: { matchesTemplate: true }, market,
+  const f = (trading, market = { mcapUsd: 50000, mcapNear: 13500 }) => ({ pool: { quoteAccepted: true, route: 'direct', lpLocked: true, nearReserve: 200, quoteSymbol: 'wNEAR', quoteForBuy: { tokensOut: 1 } }, contract: { matchesTemplate: true }, market,
     trading: { uniqueBuyers: 30, creatorSold: false, priceMultipleSinceFirstTrade: 1, buyNear: 100, sellNear: 10, syncBuyClusters: 0, ...trading }, launch: { tax: null }, wallets: { linkedBuyerShare: 0, creatorFundedBuyers: [], creator: null },
     audit: { available: false }, intel: null });
   assert.deepEqual([...SOFT_GATES].sort(), ['min_buyers', 'not_overextended']);
@@ -802,4 +802,49 @@ test('entries: with a 3% transfer fee, a wallet that sold everything it held is 
   assert.equal(e.find((x) => x.wallet === 'b.near').sold_share_now, 0);
   const noFee = buildEntries({ ...tok, tax: null }, trades.map((t) => (t.buy ? t : { ...t, tokens: 1000 })), live + 2 * 86400e3, cfg);
   assert.equal(noFee.find((x) => x.wallet === 'a.near').sold_share_now, 1, 'without a fee nothing changes');
+});
+
+// ---- the market-cap floor in NEAR, the odds of a gate pass, and the gate-pass report's watch line (2026-11-11)
+test('min_mcap: the floor is in NEAR (MIN_MCAP_NEAR), with an optional USD floor on top', async () => {
+  const { applyRules } = await import('../src/scanner/rules.js');
+  const { config } = await import('../src/config.js');
+  const base = { pool: { quoteAccepted: true, route: 'direct', lpLocked: true, nearReserve: 200, quoteSymbol: 'wNEAR', quoteForBuy: { tokensOut: 1 } }, contract: { matchesTemplate: true },
+    trading: { uniqueBuyers: 30, creatorSold: false, priceMultipleSinceFirstTrade: 1, buyNear: 100, sellNear: 10, syncBuyClusters: 0 }, launch: { tax: null },
+    wallets: { linkedBuyerShare: 0, creatorFundedBuyers: [], creator: null }, audit: { available: false }, intel: null };
+  const fails = (market) => applyRules({ ...base, market }).failed.some((g) => g.id === 'min_mcap');
+  const saved = { ...config.rules };
+  try {
+    Object.assign(config.rules, { minMcapNear: 1250, minMcapUsd: 0 });
+    assert.equal(fails({ mcapNear: 1300, mcapUsd: 4700 }), false, '1,300 NEAR passes, whatever NEAR is worth');
+    assert.equal(fails({ mcapNear: 1100, mcapUsd: 9000 }), true, 'under 1,250 NEAR fails even when the USD figure is high');
+    assert.equal(fails({ mcapUsd: 9000 }), true, 'no NEAR figure: unknown, fails');
+    Object.assign(config.rules, { minMcapNear: 1250, minMcapUsd: 5000 });
+    assert.equal(fails({ mcapNear: 1300, mcapUsd: 4700 }), true, 'a USD floor set on top also applies');
+    Object.assign(config.rules, { minMcapNear: 0, minMcapUsd: 0 });
+    assert.equal(fails({}), false, 'both off: no floor');
+  } finally { Object.assign(config.rules, saved); }
+});
+
+test('gate-pass odds: rugged, doubled and the rest among replayed passes; minutes to the creator\'s first sale', async () => {
+  const { gatePassOdds } = await import('../src/accuracy/run.js');
+  const rows = [
+    { replay_pass: true, rugged: true, ret: 0.9 }, { replay_pass: true, rugged: true, ret: -0.5 }, { replay_pass: true, rugged: false, ret: 1.5 },
+    { replay_pass: true, rugged: false, ret: 0.1 }, { replay_pass: false, rugged: true, ret: -0.9 },
+  ];
+  const o = gatePassOdds(rows, [12, 40, null]);
+  assert.equal(o.n, 4); assert.equal(o.rugged, 2); assert.equal(o.doubled, 1); assert.equal(o.other, 1);
+  assert.equal(o.rug_rate, 0.5); assert.equal(o.double_rate, 0.25);
+  assert.equal(o.creator_sale_minutes.n, 2); assert.equal(o.creator_sale_minutes.median, 40); assert.equal(o.creator_sale_minutes.within_60, 1);
+  assert.match(o.note, /few passes/);
+});
+
+test('gate-pass report: the measured odds and how to be alerted when the creator sells', async () => {
+  const { gatePassReport } = await import('../src/scanner/gatepass.js');
+  const t = { _id: 'x.v2-launchpad.justhoot.near', symbol: 'X', launchpad: 'justhoot' };
+  const f = { pool: { nearReserve: 120 }, market: { mcapUsd: 5000, mcapNear: 1400 }, trading: { uniqueBuyers: 12, buyNear: 150, sellNear: 3, priceMultipleSinceFirstTrade: 1.2 } };
+  const odds = { n: 51, rug_rate: 0.216, double_rate: 0.216, creator_sale_minutes: { n: 9, median: 18, p75: 44, within_60: 0.89 } };
+  const r = gatePassReport(t, f, { score: 80, pass: true, warnings: [] }, { odds, bot: 'safenear_bot' });
+  assert.match(r.text, /of 51 earlier launches that passed these gates, 22% rugged later \(the creator's first sale came a median 18 min after the check\) and 22% at least doubled/);
+  assert.match(r.text, /\/watch x\.v2-launchpad\.justhoot\.near on @safenear_bot/);
+  assert.doesNotMatch(gatePassReport(t, f, { score: 80, pass: true, warnings: [] }, { odds: { n: 4, rug_rate: 0.5 } }).text, /Odds so far/, 'too few passes: no odds line');
 });
