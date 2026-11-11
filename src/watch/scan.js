@@ -5,7 +5,7 @@
 import { config } from '../config.js';
 import { info } from '../log.js';
 import { flowsOfReceipt } from '../incident/flows.js';
-import { valueOf } from '../incident/prices.js';
+import { usdPrice, tokenMeta, units } from '../incident/prices.js';
 import { PASS_THROUGH } from '../incident/trace.js';
 import { protocols } from '../incident/detect.js';
 import { oneClickSwap } from '../incident/oneclick.js';
@@ -14,12 +14,16 @@ import { viewAccount } from '../audit/rpc.js';
 import { reads, passThrough } from '../ontology/sync.js';
 import { whatIsMany } from '../ontology/index.js';
 import { movementsOf, followStep } from './rules.js';
-import { activeIndex, openWatch, recordMove, roomFor } from './store.js';
+import { activeIndex, openWatch, recordMove, recordInbound, pendingOf, roomFor } from './store.js';
 
 const PSEUDO = /^(mint|burn|intents|chain):/;
 /** Passes money through (never a person's money): the ontology's one rule, or the old list. */
 export const isPass = (id) => PSEUDO.test(id) || (reads('pass_through') ? passThrough(id) : PASS_THROUGH.has(id));
 const NOT_A_PERSON = new Set(['contract', 'service', 'exchange', 'system']);
+/** An exchange the ontology knows only because it is busy (a behaviour fact: no sweep, no hand entry, no name) is not proof (WP-08): it is followed. */
+export const busyOnly = (c) => !!c && c.top === 'exchange' && c.source === 'behaviour' && !c.operator;
+/** Not a person's account: a contract, a service, the system, or a proven exchange. */
+export const notAPerson = (c) => !!c && NOT_A_PERSON.has(c.top) && !busyOnly(c);
 const EMPTY_CODE = '11111111111111111111111111111111';
 
 /** Where does a branch end when it reaches `to`? An exit object, or null when the receiver looks like an ordinary account. */
@@ -33,8 +37,8 @@ export async function exitOf(to, protos, { checkContract = false } = {}) {
   if (lab?.type === 'exchange') return { kind: 'exchange', label: lab.label };
   if (protos.has(to)) return { kind: 'protocol_deposit', label: to };
   const c = (await whatIsMany([to]).catch(() => new Map())).get(to);
-  if (c?.top === 'exchange') return { kind: 'exchange', label: c.label || null };
-  if (c && NOT_A_PERSON.has(c.top)) return { kind: 'protocol_deposit', label: c.class };
+  if (c?.top === 'exchange' && !busyOnly(c)) return { kind: 'exchange', label: c.label || null };
+  if (notAPerson(c)) return { kind: 'protocol_deposit', label: c.class };
   if (checkContract) {
     const st = await viewAccount(to).catch(() => null);
     if (st && (st.code_hash !== EMPTY_CODE || st.global_contract_hash || st.global_contract_account_id)) return { kind: 'protocol_deposit', label: 'a contract' };
@@ -54,7 +58,16 @@ export async function flowsOfBlocks(blocks) {
       }
     }
   }
-  for (const f of flows) { const v = await valueOf(f.token, f.raw).catch(() => ({})); f.usd = v.usd || 0; f.symbol = v.symbol || null; f.amount = v.amount ?? null; }
+  // each token priced once per batch, in parallel; a token with no price today is worth 0 here and its metadata is never fetched
+  // (most flows of a busy block are spam or unpriced tokens: no RPC for them)
+  const px = new Map(await Promise.all([...new Set(flows.map((f) => f.token))].map(async (t) => {
+    const p = await usdPrice(t).catch(() => null);
+    return [t, p ? { p, m: await tokenMeta(t).catch(() => null) } : null];
+  })));
+  for (const f of flows) {
+    const x = px.get(f.token), amount = x?.m ? units(String(f.raw), x.m.decimals) : null;
+    f.usd = amount != null ? amount * x.p : 0; f.symbol = x?.m?.symbol || null; f.amount = amount;
+  }
   return flows;
 }
 
@@ -63,7 +76,7 @@ export async function openingMovements(flows, protos) {
   const W = config.watch, cand = movementsOf(flows, { min: W.minUsd, skipFrom: isPass, skipTo: (a) => isPass(a) || protos.has(a) });
   if (!cand.length) return new Set();
   const cls = await whatIsMany([...new Set(cand.map((f) => f.to))]).catch(() => new Map());
-  return new Set(cand.filter((f) => !NOT_A_PERSON.has(cls.get(f.to)?.top) && builtinLabel(f.to)?.type !== 'exchange'));
+  return new Set(cand.filter((f) => !notAPerson(cls.get(f.to)) && builtinLabel(f.to)?.type !== 'exchange'));
 }
 
 export async function scanWatches(blocks) {
@@ -75,19 +88,30 @@ export async function scanWatches(blocks) {
   for (const f of flows) {
     const entries = idx.map.get(f.from);
     if (entries?.size) {
-      if (!(f.usd >= W.followMinUsd)) continue;
+      // every move worth recordMinUsd counts (followed or not): small transfers still empty the sender, and splits to one receiver are summed
+      if (!(f.usd >= W.recordMinUsd)) continue;
       let exit;
       for (const [wid, ent] of [...entries]) {
-        const step = followStep(ent, f, { triggerUsd: ent.trigger_usd, hasRoom: await roomFor(wid), W });
-        if (step.why === 'below the follow floor') continue;
-        if (exit === undefined) exit = await exitOf(f.to, protos);
-        let st = step;
-        if (step.follow && !exit) { // an unknown receiver: is it a contract (a deposit into something)?
-          exit = await exitOf(f.to, protos, { checkContract: true });
+        const pendingUsd = f.usd < W.followCapUsd ? await pendingOf(wid, f.to) : 0;
+        const step = followStep(ent, f, { triggerUsd: ent.trigger_usd, hasRoom: await roomFor(wid), pendingUsd, W });
+        let st = { ...step, pendingUsd }, ex = null;
+        if (step.why !== 'below the follow floor') {
+          if (exit === undefined) exit = await exitOf(f.to, protos);
+          if (step.follow && !exit) exit = await exitOf(f.to, protos, { checkContract: true }); // an unknown receiver: is it a contract (a deposit into something)?
+          ex = exit || null;
+          if (ex) st = { ...st, follow: false, why: `exit: ${ex.kind}` };
         }
-        if (exit) st = { ...step, follow: false, why: `exit: ${exit.kind}` };
-        if (await recordMove(wid, f, st, exit)) { out.moves++; info(`watch ${wid}: ${f.from.slice(0, 16)} → ${f.to.slice(0, 16)} ~$${Math.round(f.usd)}${exit ? ` (${exit.kind})` : st.follow ? ' (followed)' : ` (${st.why})`}`); }
+        if (await recordMove(wid, f, st, ex)) {
+          out.moves++;
+          if (st.follow || ex || f.usd >= W.followMinUsd) info(`watch ${wid}: ${f.from.slice(0, 16)} → ${f.to.slice(0, 16)} ~$${Math.round(f.usd)}${ex ? ` (${ex.kind})` : st.follow ? ' (followed)' : ` (${st.why})`}`);
+        }
       }
+      continue;
+    }
+    // money into a watched account from outside the watch: evidence for the reviewer (the reverse link), never a new watched account
+    const into = idx.map.get(f.to);
+    if (into?.size && f.usd >= W.followMinUsd && !isPass(f.from)) {
+      for (const wid of into.keys()) if (await recordInbound(wid, f)) out.moves++;
       continue;
     }
     if (opening.has(f)) {

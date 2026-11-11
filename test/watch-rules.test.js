@@ -105,3 +105,62 @@ test('review due: a watch whose AI verdict was missing is retried after the gap'
   assert.equal(reviewDue({ status: 'watching', last_review_ts: now - 120 * 60e3, ai_missing: true }, now, W), true);
   assert.equal(reviewDue({ status: 'watching', last_review_ts: now - 10 * 60e3, ai_missing: true }, now, W), false, 'not before the gap');
 });
+
+// ---- review fixes (2026-11-11)
+const WC = { ...W, followCapUsd: 100000 };
+test('follow floor: a share of what the SENDER received, capped, so the splits of a big drain are followed', () => {
+  // a $45M drain: the attacker sends $430k to a hub. Old rule: 10% of the $45M trigger = $4.5M floor, not followed
+  assert.equal(followStep({ in_usd: 45e6, out_usd: 0, depth: 0 }, { usd: 430000 }, { triggerUsd: 45e6, W: WC }).follow, true, 'over the cap: always followed');
+  // the hub (received $430k) pays $50k: its own 10% is $43k, so it is followed, whatever the trigger was
+  assert.equal(followStep({ in_usd: 430000, out_usd: 0, depth: 1 }, { usd: 50000 }, { triggerUsd: 45e6, W: WC }).follow, true);
+  assert.equal(followStep({ in_usd: 430000, out_usd: 0, depth: 1 }, { usd: 30000 }, { triggerUsd: 45e6, W: WC }).follow, false, 'under its branch floor');
+});
+test('splits to one receiver are summed: the part that reaches the floor is followed', () => {
+  const ent = { in_usd: 200000, out_usd: 0, depth: 0 };
+  assert.equal(followStep(ent, { usd: 6000 }, { triggerUsd: 200000, W: WC }).follow, false);
+  const r = followStep(ent, { usd: 6000 }, { triggerUsd: 200000, pendingUsd: 18000, W: WC });
+  assert.equal(r.follow, true, '6k after 18k already sent to the same receiver: 24k, over the 20k floor');
+});
+test('a sender emptied by small transfers is dropped, not watched forever', () => {
+  const r = followStep({ in_usd: 200000, out_usd: 196000, depth: 0 }, { usd: 3000 }, { triggerUsd: 200000, W: WC });
+  assert.equal(r.follow, false);
+  assert.equal(r.sender, 'drop', 'below the follow floor, but it has sent everything');
+});
+test('swap legs: a different token back is a trade; the same token passed on in one transaction is a movement', () => {
+  const fwd = [f({ tx: 'x', from: 'a.near', to: 'b.near', token: 'near', raw: '1', usd: 2e6 }), f({ tx: 'x', from: 'b.near', to: 'c.near', token: 'near', raw: '2', usd: 1.5e6 })];
+  assert.deepEqual(movementsOf(fwd, { min: 100000 }).map((m) => m.to), ['b.near', 'c.near'], 'receive-and-forward is not a swap');
+  const swap = [f({ tx: 'y', from: 'pool.near', to: 'b.near', token: 'near', raw: '1', usd: 2e6 }), f({ tx: 'y', from: 'b.near', to: 'pool.near', token: 'usdc.near', raw: '2', usd: 2e6 })];
+  assert.equal(movementsOf(swap, { min: 100000 }).filter((m) => m.to === 'b.near').length, 0, 'b traded: it gave usdc back');
+});
+test('the AI alone never closes a watch whose origin the rules found suspicious', async () => {
+  const { decide } = await import('../src/watch/rules.js');
+  const high = { class: 'exchange_to_new_account', lean: 'high', reasons: [] };
+  assert.equal(decide({ status: 'watching' }, high, { verdict: 'normal', confidence: 'high', what_it_is: 'withdrawal' }).action, 'keep');
+  assert.equal(decide({ status: 'watching' }, high, { verdict: 'suspicious', confidence: 'medium' }).action, 'suspicious', 'it can still escalate');
+  assert.equal(decide({ status: 'watching' }, { class: 'no_history', lean: 'low', reasons: [] }, { verdict: 'normal', confidence: 'medium' }).action, 'normal');
+});
+test('money watch accuracy: a watch closed as normal and later shown to be a hack is counted', async () => {
+  const { watchAccuracy } = await import('../src/accuracy/security.js');
+  const rows = [
+    { status: 'normal', closed_ts: 10, status_history: [{ status: 'watching', by: 'rules' }, { status: 'normal', by: 'ai' }], reports: [{ ts: 20 }], accounts: [{ account: 'x.near' }] },
+    { status: 'normal', closed_ts: 10, status_history: [{ status: 'normal', by: 'rules' }], accounts: [{ account: 'bad.near' }] },
+    { status: 'normal', closed_ts: 10, status_history: [{ status: 'normal', by: 'rules' }], reports: [{ ts: 5 }], accounts: [{ account: 'ok.near' }] },
+    { status: 'confirmed', status_history: [{ status: 'suspicious', by: 'ai' }, { status: 'confirmed', by: 'operator' }], accounts: [] },
+    { status: 'suspicious', status_history: [{ status: 'suspicious', by: 'ai' }], accounts: [] },
+    { status: 'watching', status_history: [], accounts: [] },
+  ];
+  const a = watchAccuracy(rows, new Set(['bad.near']));
+  assert.equal(a.closed_normal, 3);
+  assert.equal(a.normal_later_bad, 2, 'a report after the close, and an account of a bad case; a report before the close does not count');
+  assert.equal(a.escalated, 2);
+  assert.equal(a.escalated_confirmed, 1);
+  assert.equal(a.open, 2);
+});
+test('busy-only exchanges are not endpoints for the money watch (WP-08)', async () => {
+  const { busyOnly, notAPerson } = await import('../src/watch/scan.js');
+  assert.equal(busyOnly({ top: 'exchange', source: 'behaviour', operator: null }), true);
+  assert.equal(notAPerson({ top: 'exchange', source: 'behaviour', operator: null }), false, 'followed like a person');
+  assert.equal(notAPerson({ top: 'exchange', source: 'registry', operator: 'org:binance' }), true);
+  assert.equal(notAPerson({ top: 'exchange', source: 'behaviour', operator: 'org:binance' }), true, 'named: proven');
+  assert.equal(notAPerson({ top: 'contract', source: 'audit' }), true);
+});

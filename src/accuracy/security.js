@@ -107,6 +107,23 @@ async function offlineCheck(ids) {
 }
 
 /** The whole security block, stored by evaluateAccuracy under `security`. */
+/**
+ * The money watch (docs/money-watch-design.md section 8). Ground truth is a person's report or a hack case: the number to keep at zero is
+ * the watches the reviewer closed as normal whose money later turned out to be part of a hack (a report after the close, or an account of
+ * the watch in a case labelled bad). Aggregates only: watches are private, so no id leaves this function.
+ * rows: watches ({ status, closed_ts, status_history, reports, accounts }); badAccounts: accounts of cases labelled bad.
+ */
+export function watchAccuracy(rows, badAccounts = new Set()) {
+  const closedBy = (w) => [...(w.status_history || [])].reverse().find((h) => h.status === 'normal')?.by || null;
+  const normal = rows.filter((w) => w.status === 'normal');
+  const laterBad = normal.filter((w) => (w.reports || []).some((r) => r.ts > (w.closed_ts || 0)) || (w.accounts || []).some((a) => badAccounts.has(a.account)));
+  const escalated = rows.filter((w) => (w.status_history || []).some((h) => h.status === 'suspicious'));
+  const confirmed = escalated.filter((w) => w.status === 'confirmed' || (w.accounts || []).some((a) => badAccounts.has(a.account)));
+  const by = {}; for (const w of normal) { const k = closedBy(w) === 'rules' && /idle/.test(JSON.stringify(w.status_history?.at(-1) || '')) ? 'idle' : closedBy(w) || 'unknown'; by[k] = (by[k] || 0) + 1; }
+  return withN({ watches: rows.length, open: rows.filter((w) => ['watching', 'suspicious'].includes(w.status)).length, closed_normal: normal.length, closed_by: by,
+    normal_later_bad: laterBad.length, escalated: escalated.length, escalated_confirmed: confirmed.length, escalated_precision: escalated.length ? r3(confirmed.length / escalated.length) : null }, normal.length + escalated.length);
+}
+
 export async function securityAccuracy({ now = Date.now() } = {}) {
   const cases = await loadCases(now), out = {};
   out.incidents = { ...casesAccuracy(cases, { alertMaxAgeDays: config.incidents.alertMaxAgeDays }), by_kind: byKind(cases) };
@@ -142,5 +159,9 @@ export async function securityAccuracy({ now = Date.now() } = {}) {
   const { GOLDEN: G, checkGolden, goldenReport } = await import('../ontology/golden.js');
   const { whatIsMany: wim } = await import('../ontology/index.js');
   out.ontology = goldenReport(checkGolden(await wim(G.map((g) => g[0]))));
+  // the money watch: closed as normal, then shown to be part of a hack (the number to keep at zero)
+  const badAccounts = new Set([...roleTruth].filter(([a, roles]) => accountTruth(a, roles).label === 'bad').map(([a]) => a));
+  const watches = await col('watches').find({}, { projection: { status: 1, closed_ts: 1, status_history: 1, 'reports.ts': 1, 'accounts.account': 1 } }).toArray().catch(() => []);
+  if (watches.length) out.money_watch = watchAccuracy(watches, badAccounts);
   return out;
 }

@@ -83,7 +83,7 @@ export async function investigate(input, { ai = true, detected = null, review = 
       const doc = { ...r.inc, detected: detected || prior.detected || null, updated_ts: Date.now() };
       await col('incidents').replaceOne({ _id: doc._id }, doc);
       const flagged = await flagAccounts(doc).catch(() => 0); // new cash-out wallets of a proven case are flagged too
-      await (await import('../ontology/writers.js')).syncFacts(['incidents', 'firewall_flags']); // G1: the ontology learns at once
+      await (await import('../ontology/writers.js')).syncCase(doc, (prior.accounts || []).map((a) => a.account)); // G1: the ontology learns at once (this case only)
       const f = r.followup;
       info(`incident ${doc._id}: follow-up, ${f.txs_read} new transactions, ${f.new_moves} new moves ($${f.moved_usd}), still held $${f.held_after}${f.note ? ' · NEAR AI note' : ''} (${flagged} accounts flagged)`);
       return doc;
@@ -127,7 +127,7 @@ export async function investigate(input, { ai = true, detected = null, review = 
       url: `/firewall/${encodeURIComponent(doc._id)}`, related: { wallets: [doc.attacker.account] }, data: { incident: doc._id, target: doc.target?.account, stolen_usd: doc.stolen_usd } });
     await col('incidents').updateOne({ _id: doc._id }, { $set: { alerted: true } });
   }
-  await (await import('../ontology/writers.js')).syncFacts(['incidents', 'firewall_flags']); // G1: roles and flags reach the ontology at once
+  await (await import('../ontology/writers.js')).syncCase(doc, (prev?.accounts || []).map((a) => a.account)); // G1: roles and flags reach the ontology at once (this case only)
   info(`incident ${doc._id}: ${doc.status} ${doc.kind} ${doc.stolen_usd} (${flagged} accounts flagged)`);
   return doc;
 }
@@ -206,7 +206,7 @@ export async function clearIncident(account, { by = 'operator', reason = 'Normal
   await col('alerts').updateMany({ $or: [{ _id: `incident:${id}` }, { 'data.incident': id }, { 'related.wallets': account, type: { $in: ['drain_suspected', 'incident'] } }], title: { $not: /^(Not a hack|Retracted|Safe)/ } }, [{ $set: { title: { $concat: ['Safe after review: ', '$title'] }, severity: 'info' } }]).catch(() => {});
   await retractMoveAlerts([id]);
   await col('deep_reviews').deleteOne({ _id: id }).catch(() => {});
-  await (await import('../ontology/writers.js')).syncFacts(['incidents', 'firewall_flags']); // G1: a cleared case's roles close at once
+  await (await import('../ontology/writers.js')).syncCase(inc); // G1: a cleared case's roles close at once (this case only)
   return col('incidents').findOne({ _id: id });
 }
 

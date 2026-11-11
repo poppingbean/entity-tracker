@@ -45,26 +45,57 @@ export async function openWatch(mv, { kind = 'movement', reason = 'a movement of
 
 /**
  * A move out of an account of a watch. `step` is rules.followStep's answer; `exit` (or null) says where the money ended up when the branch stops here.
- * Adds the receiver when followed, drops the sender when it sent everything, records the move.
+ * Every move counts toward what the sender has sent on (followed or not, so splitting into small transfers still empties the sender); a move
+ * too small to follow adds to what this watch has sent that receiver (`watch_pending`: splits to one receiver are summed and followed once
+ * they reach the floor). Only followed moves, exits and moves of `listMinUsd` or more are listed on the watch. Each move is recorded once
+ * (`watch_moves`, keyed by watch, transaction, sides, token and amount), whatever the watch's own list keeps.
  */
-export async function recordMove(wid, mv, step, exit = null) {
-  const idx = await activeIndex(), now = Date.now();
-  const move = { ts: mv.ts, tx: mv.tx, from: mv.from, to: mv.to, usd: Math.round(mv.usd), token: mv.token, symbol: mv.symbol || null, amount: mv.amount ?? null, exit, followed: !!step.follow, why: step.why };
-  const dup = await col('watches').updateOne({ _id: wid, moves: { $not: { $elemMatch: { tx: mv.tx, from: mv.from, to: mv.to, token: mv.token, usd: move.usd } } } },
-    { $push: { moves: { $each: [move], $slice: -MAX_MOVES } }, $set: { last_move_ts: mv.ts || now }, $inc: { moved_since_review_usd: move.usd }, ...(exit ? { $set: { last_move_ts: mv.ts || now, new_exit: true } } : {}) });
-  if (!dup.modifiedCount) return false; // seen before
+export async function recordMove(wid, mv, step, exit = null, { listMinUsd = config.watch.followMinUsd } = {}) {
+  const idx = await activeIndex(), now = Date.now(), usd = Math.round(mv.usd);
+  const key = [wid, mv.tx, mv.from, mv.to, mv.token, mv.raw ?? usd].join('|');
+  const fresh = await col('watch_moves').insertOne({ _id: key, watch: wid, ts: mv.ts || now, tx: mv.tx, from: mv.from, to: mv.to, usd, token: mv.token, followed: !!step.follow, why: step.why, exit: exit || null })
+    .then(() => true).catch((e) => { if (e.code === 11000) return false; throw e; });
+  if (!fresh) return false; // seen before (a re-read block range)
+  const move = { ts: mv.ts, tx: mv.tx, from: mv.from, to: mv.to, usd, token: mv.token, symbol: mv.symbol || null, amount: mv.amount ?? null, exit, followed: !!step.follow, why: step.why };
+  const listed = step.follow || !!exit || usd >= listMinUsd;
+  await col('watches').updateOne({ _id: wid }, { ...(listed ? { $push: { moves: { $each: [move], $slice: -MAX_MOVES } } } : {}), $set: { last_move_ts: mv.ts || now, ...(exit ? { new_exit: true } : {}) }, $inc: { moved_since_review_usd: usd } });
   const ent = index.map.get(mv.from)?.get(wid);
-  await col('watches').updateOne({ _id: wid, 'accounts.account': mv.from }, { $inc: { 'accounts.$.out_usd': move.usd }, ...(step.sender === 'drop' ? { $set: { 'accounts.$.state': 'dropped' } } : {}) });
-  if (ent) { ent.out_usd += move.usd; if (step.sender === 'drop') { drop(mv.from, wid); idx.size.set(wid, Math.max(0, (idx.size.get(wid) || 1) - 1)); } }
+  await col('watches').updateOne({ _id: wid, 'accounts.account': mv.from }, { $inc: { 'accounts.$.out_usd': usd }, ...(step.sender === 'drop' ? { $set: { 'accounts.$.state': 'dropped' } } : {}) });
+  if (ent) { ent.out_usd += usd; if (step.sender === 'drop') { drop(mv.from, wid); idx.size.set(wid, Math.max(0, (idx.size.get(wid) || 1) - 1)); } }
+  const pk = `${wid}|${mv.to}`;
+  if (!step.follow && step.why === 'below the follow floor' && !exit) { await col('watch_pending').updateOne({ _id: pk }, { $inc: { usd }, $set: { watch: wid, to: mv.to, ts: now } }, { upsert: true }); return true; }
   if (step.follow) {
-    const has = await col('watches').updateOne({ _id: wid, 'accounts.account': mv.to }, { $inc: { 'accounts.$.in_usd': move.usd }, $set: { 'accounts.$.state': 'active' } });
-    if (!has.matchedCount) {
-      await col('watches').updateOne({ _id: wid }, { $push: { accounts: { account: mv.to, depth: step.depth, in_usd: move.usd, out_usd: 0, state: 'active', since: now, reason: `received ${move.usd} USD from ${mv.from}` } } });
-      idx.size.set(wid, (idx.size.get(wid) || 0) + 1);
+    const pend = (await col('watch_pending').findOneAndDelete({ _id: pk }).catch(() => null)) || null;
+    const inUsd = usd + Math.round((pend?.value ?? pend)?.usd || 0);
+    // an account that was dropped (sent everything) and receives again is active again: it counts toward the account limit again
+    const re = await col('watches').updateOne({ _id: wid, accounts: { $elemMatch: { account: mv.to, state: { $ne: 'active' } } } }, { $inc: { 'accounts.$.in_usd': inUsd }, $set: { 'accounts.$.state': 'active' } });
+    if (re.modifiedCount) idx.size.set(wid, (idx.size.get(wid) || 0) + 1);
+    else {
+      const has = await col('watches').updateOne({ _id: wid, 'accounts.account': mv.to }, { $inc: { 'accounts.$.in_usd': inUsd } });
+      if (!has.matchedCount) {
+        await col('watches').updateOne({ _id: wid }, { $push: { accounts: { account: mv.to, depth: step.depth, in_usd: inUsd, out_usd: 0, state: 'active', since: now, reason: `received ${inUsd} USD from ${mv.from}` } } });
+        idx.size.set(wid, (idx.size.get(wid) || 0) + 1);
+      }
     }
     const e2 = index.map.get(mv.to)?.get(wid);
-    if (e2) e2.in_usd += move.usd; else (idx.map.get(mv.to) || idx.map.set(mv.to, new Map()).get(mv.to)).set(wid, { depth: step.depth, in_usd: move.usd, out_usd: 0, trigger_usd: ent?.trigger_usd || 0 });
+    if (e2) e2.in_usd += inUsd; else (idx.map.get(mv.to) || idx.map.set(mv.to, new Map()).get(mv.to)).set(wid, { depth: step.depth, in_usd: inUsd, out_usd: 0, trigger_usd: ent?.trigger_usd || 0 });
   }
+  return true;
+}
+
+/** What this watch already sent `to` in moves too small to follow (summed splits). */
+export const pendingOf = async (wid, to) => (await col('watch_pending').findOne({ _id: `${wid}|${to}` }).catch(() => null))?.usd || 0;
+
+/**
+ * Money coming INTO a watched account from an account the watch does not hold (the design's reverse link): listed on the watch as evidence
+ * and counted for the next review. The sender is not watched: its money is not the case's.
+ */
+export async function recordInbound(wid, mv) {
+  const now = Date.now(), usd = Math.round(mv.usd), key = [wid, 'in', mv.tx, mv.from, mv.to, mv.token, mv.raw ?? usd].join('|');
+  const fresh = await col('watch_moves').insertOne({ _id: key, watch: wid, ts: mv.ts || now, tx: mv.tx, from: mv.from, to: mv.to, usd, token: mv.token, inbound: true })
+    .then(() => true).catch((e) => { if (e.code === 11000) return false; throw e; });
+  if (!fresh) return false;
+  await col('watches').updateOne({ _id: wid }, { $push: { moves: { $each: [{ ts: mv.ts, tx: mv.tx, from: mv.from, to: mv.to, usd, token: mv.token, symbol: mv.symbol || null, amount: mv.amount ?? null, exit: null, followed: false, inbound: true, why: 'money in from an account outside the watch' }], $slice: -MAX_MOVES } }, $inc: { moved_since_review_usd: usd } });
   return true;
 }
 

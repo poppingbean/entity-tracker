@@ -125,8 +125,11 @@ export const config = {
   watch: {
     enabled: process.env.WATCH_ENABLED !== 'false',
     minUsd: num(process.env.WATCH_MIN_USD, 100000),               // one movement worth at least this (USD, whatever the token) opens a watch
-    followMinUsd: num(process.env.WATCH_FOLLOW_MIN_USD, 10000),   // a move out of a watched account worth at least this (and followShare of the trigger) is followed
+    followMinUsd: num(process.env.WATCH_FOLLOW_MIN_USD, 10000),   // a move out of a watched account worth at least this (and followShare of what the sender received) is followed
     followShare: num(process.env.WATCH_FOLLOW_SHARE, 0.1),
+    followCapUsd: num(process.env.WATCH_FOLLOW_CAP_USD, 100000),  // ... but a move this large is always followed, whatever the branch received (splits of a big drain)
+    recordMinUsd: num(process.env.WATCH_RECORD_MIN_USD, 100),     // smaller moves out of a watched account are counted (sent on, splits to one receiver summed) but not listed
+    escalate: process.env.WATCH_ESCALATE === 'true',             // a suspicious verdict opens an incident (public path); off = marked suspicious on the private page only
     dustUsd: num(process.env.WATCH_DUST_USD, 1000),               // an account that sent all but this (or dustShare of what it received) has sent it all: it stops being watched
     dustShare: num(process.env.WATCH_DUST_SHARE, 0.05),
     maxAccounts: num(process.env.WATCH_MAX_ACCOUNTS, 40),         // accounts watched at once in one case

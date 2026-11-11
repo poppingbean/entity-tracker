@@ -17,7 +17,10 @@ import { addToCase } from './caseadd.js';
 
 export const RING = { minNear: 100, minLinked: 2, minShare: 0.8, seedsMax: 40, hops: 3, maxAccounts: 200, perAccount: 200, tokenTxs: 400, tokensMax: 12, tokenMaxTxs: 20000, activeDays: 60 };
 const WATCH = new Set(['attacker', 'accomplice', 'sub_account', 'intents_account', 'cash_out_wallet']);
-const skip = (a) => !a || /^(mint|burn|intents|chain|nft):/.test(a) || classOf(a).cuts_links;
+// a path stops at a hub, except an "exchange" known only by being busy (a behaviour fact, no sweep, no name): busy proves nothing (WP-08),
+// and a laundering hub is often exactly that; the scan's account budget keeps a busy wallet from flooding it
+const busyOnly = (c) => c.top === 'exchange' && c.source === 'behaviour' && !c.operator;
+const skip = (a) => { if (!a || /^(mint|burn|intents|chain|nft):/.test(a)) return true; const c = classOf(a); return c.cuts_links && !busyOnly(c); };
 
 /** Pure: who `seeds` paid in NEAR (decoded txs, `inflows`), summed per receiver, with the first transfer as evidence. */
 export function paidBy(txs, seeds, { min = RING.minNear, exclude = new Set(), since = 0 } = {}) {

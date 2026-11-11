@@ -12,8 +12,10 @@ import { flowsOfTx } from '../incident/flows.js';
 import { valueOf } from '../incident/prices.js';
 import { confirmIncident, investigate } from '../incident/service.js';
 import { scheduleReview } from '../incident/deepreview.js';
-import { isPass } from './scan.js';
-import { openWatch, setStatus, watchesOf, reopen } from './store.js';
+import { isPass, exitOf } from './scan.js';
+import { protocols } from '../incident/detect.js';
+import { followStep } from './rules.js';
+import { openWatch, setStatus, watchesOf, reopen, activeIndex, recordMove, pendingOf, roomFor } from './store.js';
 
 const clean = (a) => String(a || '').trim().toLowerCase();
 
@@ -66,20 +68,53 @@ async function bigPayers(account) {
 const stamp = (r) => ({ ts: Date.now(), by: r.by || 'operator', source: r.source || null, note: r.note ? String(r.note).slice(0, 500) : null });
 const reviewNow = (id) => col('watches').updateOne({ _id: id }, { $set: { last_review_ts: null } });
 
-/** Promote a watch to a confirmed incident (investigate, then the human confirmation). */
+/**
+ * Promote a watch to a confirmed incident (investigate, then the human confirmation). The case is the one the trace saved: it may be
+ * re-rooted to the real attacker (`inc:<attacker>`), so its id comes from the trace, never from the receiver's name.
+ */
 export async function confirmWatch(id, { source = null, by = 'operator', note = null } = {}) {
   const w = await col('watches').findOne({ _id: id });
   if (!w) throw new Error(`no watch ${id}`);
-  await investigate({ account: w.receiver }, { full: false, ai: true });
-  await confirmIncident(w.receiver, { source, reason: note || 'reported by a person', by, accounts: (w.accounts || []).map((a) => a.account) });
-  await setStatus(id, 'confirmed', { by, incident: `inc:${w.receiver}`, why: note || 'reported by a person' });
-  return { id, status: 'confirmed', incident: `inc:${w.receiver}` };
+  const doc = await investigate({ account: w.receiver }, { full: false, ai: true });
+  const root = doc?.attacker?.account || w.receiver;
+  const done = await confirmIncident(root, { source, reason: note || 'reported by a person', by, accounts: (w.accounts || []).map((a) => a.account).filter((a) => a !== root) });
+  const incident = done?._id || doc?._id || `inc:${root}`;
+  await setStatus(id, 'confirmed', { by, incident, why: note || 'reported by a person' });
+  return { id, status: 'confirmed', incident };
+}
+
+/**
+ * Catch up an account that joins a watch late (a reported address, or one found by the look back): its money may have moved before it was
+ * watched, so its recent outgoing transfers are read once and go through the same follow rule as the live scan. Returns the moves recorded.
+ */
+export async function catchUp(wid, account, { limit = 300 } = {}) {
+  const W = config.watch;
+  const idx = await activeIndex(true), ent = idx.map.get(account)?.get(wid);
+  if (!ent) return 0;
+  const hashes = (await accountTxHashes(account, { limit }).catch(() => ({ hashes: [] }))).hashes || [];
+  const flows = (await fetchTxs(hashes).catch(() => [])).flatMap(flowsOfTx).filter((f) => f.from === account && f.to !== account && !/^(nft|mint|burn):/.test(f.token));
+  const protos = await protocols();
+  let n = 0;
+  for (const f of flows.sort((a, b) => a.ts - b.ts)) {
+    const v = await valueOf(f.token, f.raw).catch(() => ({}));
+    f.usd = v.usd || 0; f.symbol = v.symbol || null; f.amount = v.amount ?? null;
+    if (!(f.usd >= W.recordMinUsd)) continue;
+    const cur = (await activeIndex()).map.get(account)?.get(wid) || ent;
+    const pendingUsd = await pendingOf(wid, f.to);
+    let st = { ...followStep(cur, f, { triggerUsd: cur.trigger_usd, hasRoom: await roomFor(wid), pendingUsd, W }), pendingUsd }, ex = null;
+    if (st.why !== 'below the follow floor') { ex = await exitOf(f.to, protos, { checkContract: st.follow }); if (ex) st = { ...st, follow: false, why: `exit: ${ex.kind}` }; }
+    if (await recordMove(wid, f, st, ex)) n++;
+  }
+  return n;
 }
 
 /** Handle a person's report of `address`. Returns what happened: { where: 'watch' | 'incident' | 'linked' | 'new', … }. */
-export async function reportAddress(raw, { source = null, note = null, by = 'operator', lookBackFn = lookBack } = {}) {
+export async function reportAddress(raw, { source = null, note = null, by = 'operator', lookBackFn = lookBack, catchUpFn = catchUp } = {}) {
   const address = clean(raw);
   if (!address) throw new Error('an address is needed');
+  // a NEAR account or implicit address only: the address becomes part of a watch id and is shown on the dashboard
+  const { validNearAddress } = await import('../audit/service.js');
+  if (!validNearAddress(address)) throw new Error('not a NEAR account or implicit address');
   if (source && !/^https?:\/\//.test(String(source))) throw new Error('source: a link to the report (an X post, a news story), or none');
   const rep = stamp({ by, source, note });
   // 1. in a watch
@@ -103,9 +138,13 @@ export async function reportAddress(raw, { source = null, note = null, by = 'ope
   // 3. funds that came from a case: look back
   const link = await lookBackFn(address);
   if (link?.kind === 'watch') {
+    // a watch closed as normal is watched again: a person says money that came from it is part of a hack
+    const lw = await col('watches').findOne({ _id: link.id }, { projection: { status: 1 } });
+    if (lw?.status === 'normal') await reopen(link.id, { by, why: `${address}, reported by ${by}, was funded from it` });
     await col('watches').updateOne({ _id: link.id }, { $push: { reports: { ...rep, note: `${note || ''} (reported address ${address}, funded through ${link.path.join(' ← ')})`.trim() }, accounts: { account: address, depth: link.path.length, in_usd: 0, out_usd: 0, state: 'active', since: Date.now(), reason: `reported by ${by}; its funds came from ${link.account}` } } });
     await reviewNow(link.id);
-    return { where: 'linked', kind: 'watch', id: link.id, path: link.path, next: 'the reviewer will look at the case again with the link and your report' };
+    const caught = await catchUpFn(link.id, address).catch(() => 0);
+    return { where: 'linked', kind: 'watch', id: link.id, path: link.path, caught_up: caught, ...(lw?.status === 'normal' ? { reopened: true } : {}), next: 'the reviewer will look at the case again with the link and your report' };
   }
   if (link?.kind === 'incident') {
     await col('incidents').updateOne({ _id: link.id }, { $push: { tags: { $each: [{ tag: 'review', ts: Date.now(), why: `${address}, reported by ${by}, was funded from this case (${link.path.join(' ← ')})`, by }], $slice: -10 } } });
@@ -116,5 +155,6 @@ export async function reportAddress(raw, { source = null, note = null, by = 'ope
   const now = Date.now(), w = await openWatch({ tx: `reported:${address}:${now}`, from: 'reported', to: address, usd: 0, token: 'near', ts: now }, { kind: 'reported', reason: `reported by ${by}` });
   if (!w) throw new Error('could not open a watch');
   await col('watches').updateOne({ _id: w._id }, { $push: { reports: rep } });
-  return { where: 'new', id: w._id, next: 'the reviewer will look at it' };
+  const caught = await catchUpFn(w._id, address).catch(() => 0);
+  return { where: 'new', id: w._id, caught_up: caught, next: 'the reviewer will look at it' };
 }
