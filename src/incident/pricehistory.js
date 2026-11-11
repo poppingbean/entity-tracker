@@ -14,7 +14,7 @@ import { usdPrice, baseToken, tokenMeta, units } from './prices.js';
 /** Set by traceIncident for the duration of one trace: { implied: Map(token → [{ ts, usd }]) }. valueOf reads it. */
 export const priceCtx = new AsyncLocalStorage();
 
-const STABLE = /^(usdt\.tether-token\.near|17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1|[0-9a-f]{40}\.factory\.bridge\.near|usdc\.[a-z0-9.-]*near|eth-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48\.[a-z0-9.-]*near|a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48\.factory\.bridge\.near|dac17f958d2ee523a2206206994597c13d831ec7\.factory\.bridge\.near)$/;
+const STABLE = /^(usdt\.tether-token\.near|17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1|[0-9a-f]{40}\.factory\.bridge\.near|usdc\.[a-z0-9.-]*near|eth-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48\.[a-z0-9.-]*near|a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48\.factory\.bridge\.near|dac17f958d2ee523a2206206994597c13d831ec7\.factory\.bridge\.near|eth-0xdac17f958d2ee523a2206206994597c13d831ec7\.[a-z0-9.-]*near)$/;
 const HOUR = 3600e3;
 const hourOf = (ts) => Math.floor(ts / HOUR);
 
@@ -77,6 +77,8 @@ export function impliedPrices(flows, amountOf, known) {
   }
   return out;
 }
+/** An implied price is trusted only when it is within 1000x of today's price (when there is one): a wrong decimals value in the token's metadata makes a dollar token "worth" millions. */
+export const plausible = (implied, today) => !(today > 0) || (implied / today < 1000 && implied / today > 1 / 1000);
 /** The implied price nearest to ts within `withinMs` (default 24 h), or null. */
 export function nearestImplied(list, ts, withinMs = 24 * HOUR) {
   let best = null;
@@ -99,7 +101,7 @@ export async function usdAt(token, ts, opts = {}) {
     const t = trades[0];
     if (t && t.tokens > 0 && ts - t.ts <= 6 * HOUR) { const np = await nearUsdAt(ts); if (np) return { usd: (t.near / t.tokens) * np, basis: 'tracker_trades', at_ts: t.ts }; }
     const imp = nearestImplied(opts.implied?.get(token) || opts.implied?.get(id), ts);
-    if (imp) return { usd: imp.usd, basis: 'implied', at_ts: imp.at_ts };
+    if (imp && plausible(imp.usd, await usdPrice(token).catch(() => null))) return { usd: imp.usd, basis: 'implied', at_ts: imp.at_ts };
   } catch { /* fall through to today's price */ }
   return today();
 }
