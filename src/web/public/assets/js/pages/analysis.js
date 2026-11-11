@@ -73,7 +73,7 @@ async function analysisPage(id, refresh) {
   // holders
   const H = a.holders;
   h += `<div class="card"><h2>Largest holders <span class="muted">${H.top10_share != null ? `top 10 hold ${pct(H.top10_share, 1)} of supply · ` : ''}balances read live with ft_balance_of</span></h2><table><tr><th>Account</th><th class="num">Tokens</th><th class="num">Supply</th><th>Checked</th><th class="num">Early #</th><th>Tag</th><th>Group</th></tr>
-    ${H.rows.map((x) => `<tr><td>${anaAcct(x.account, x.known, 22)}${x.is_creator ? ' <span class="v neutral">creator</span>' : ''}</td><td class="num">${n(x.tokens ?? x.est_tokens, 0)}</td><td class="num">${pct(x.supply_share, 2)}</td><td>${x.verified ? '<span class="g">live</span>' : '<span class="muted">from trades</span>'}</td><td class="num">${x.early_rank ?? '–'}</td><td>${x.tag ? tg(x.tag) : '–'}</td><td>${grpChip(x.group)}</td></tr>`).join('') || empty(7, 'no holders found')}</table>
+    ${H.rows.map((x) => `<tr><td>${anaAcct(x.account, x.known, 22)}${x.is_creator ? ' <span class="v neutral">creator</span>' : ''}${x.via === 'transfers' ? ' <span class="muted small" title="never traded: it received its tokens by transfer">received by transfer</span>' : ''}</td><td class="num">${n(x.tokens ?? x.est_tokens, 0)}</td><td class="num">${pct(x.supply_share, 2)}</td><td>${x.verified ? '<span class="g">live</span>' : '<span class="muted">from trades</span>'}</td><td class="num">${x.early_rank ?? '–'}</td><td>${x.tag ? tg(x.tag) : '–'}</td><td>${grpChip(x.group)}</td></tr>`).join('') || empty(7, 'no holders found')}</table>
     <p class="small muted">The liquidity pool is not listed. Tokens moved by plain transfers are only seen in the live balances.</p></div>`;
   return h;
 }

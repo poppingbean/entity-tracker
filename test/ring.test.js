@@ -59,3 +59,13 @@ test('pathTo stops at the case and survives a loop', () => {
   assert.ok(pathTo('a', loop, new Set()).length <= 2);
   assert.deepEqual(pathTo('x', [{ from: 'att', to: 'x' }], new Set(['att'])).map((e) => e.from), ['att']);
 });
+
+// ---- WP-12: one budget of accounts, not 40 per hop
+import { pickFound, RING } from '../src/incident/ring.js';
+test('a buyer that is the 60th largest receiver is reached while the budget allows', () => {
+  const found = Array.from({ length: 100 }, (_, i) => ({ to: `w${i}`, near: 1000 - i }));
+  assert.equal(pickFound(found, 0).length, 100);
+  assert.ok(pickFound(found, 0).some((e) => e.to === 'w59'));
+  assert.equal(pickFound(found, 150).length, RING.maxAccounts - 150, 'the budget is shared by all hops');
+  assert.equal(pickFound(found, 250).length, 0);
+});

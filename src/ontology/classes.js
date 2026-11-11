@@ -41,5 +41,5 @@ export const fromAuditRole = (role) => { const r = String(role || '').toLowerCas
 export const SOURCE_RANK = { manual: 7, public_report: 6, registry: 5, audit: 4, trace: 3, behaviour: 2, name_pattern: 1 };
 export const rankOf = (s) => SOURCE_RANK[s] || 0;
 
-export const PREDICATES = new Set(['is_a', 'operated_by', 'label', 'controls', 'deployed', 'created_by', 'funded', 'swept_to', 'solver_for', 'member_of', 'role_in', 'flagged', 'pass_through', 'trusted']);
+export const PREDICATES = new Set(['sent_to', 'is_a', 'operated_by', 'label', 'controls', 'deployed', 'created_by', 'funded', 'swept_to', 'solver_for', 'member_of', 'role_in', 'flagged', 'pass_through', 'trusted']);
 export const SEVERITY = { critical: 3, high: 2, medium: 1, low: 0 };

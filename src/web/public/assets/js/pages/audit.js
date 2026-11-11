@@ -3,12 +3,12 @@ const LVL = { critical: 'bad', high: 'bad', medium: 'neutral', low: 'good', info
 const ROLE_OPTS = [['', 'every type'], ['token', 'fungible token'], ['nft', 'NFT collection'], ['amm', 'AMM / pool'], ['liquid_staking', 'liquid staking'], ['staking_pool', 'validator pool'], ['lending', 'lending'], ['dao', 'DAO'], ['multisig', 'multisig'], ['bridge', 'bridge'], ['router', 'intents / router'], ['factory', 'launchpad / factory'], ['account', 'smart wallet'], ['unknown', 'unknown']];
 const lvl = (l) => (l ? `<span class="v ${LVL[l] || 'unknown'}">${esc(l)}</span>` : '<span class="muted">not audited</span>');
 /** The automated audit of one contract (type, control, powers, findings, source, change, AI summary). */
-function autoBody(a, job) {
+function autoBody(a, job, id) {
   if (!a) return job?.running ? `<div class="card muted">Running the automated audit: reading the code, its type and powers, who controls it, recent behaviour, the claimed source, then the AI reviews (20-90 s) … started ${since(job.started)}</div>`
     : `<div class="card muted">${job?.error ? `<span class="r">The automated audit failed: ${esc(job.error)}</span>` : 'No automated audit yet.'}</div>`;
   if (a.no_code) return '<div class="card muted">No contract code on this account.</div>';
   const S = a.summary, C = a.control || {};
-  let h = `<div class="card"><div class="bar"><h2 style="margin:0">Automated audit ${lvl(a.level)}</h2><span class="chip">${esc(a.label)}</span>${(a.standards || []).map((s) => `<span class="chip">${esc(s.toUpperCase())}</span>`).join('')}
+  let h = `<div class="card"><div class="bar"><h2 style="margin:0">Automated audit ${lvl(a.level)}</h2>${id ? reportBtn('contract', id) : ''}<span class="chip">${esc(a.label)}</span>${(a.standards || []).map((s) => `<span class="chip">${esc(s.toUpperCase())}</span>`).join('')}
       <span class="muted small">${a.role_source === 'ai' ? 'type from the AI · ' : ''}${esc(a.confidence || '')} confidence · audited ${since(a.ts)} · code shared by ${a.family_n} account${a.family_n > 1 ? 's' : ''}</span>
       <span class="spacer"></span>${job?.running ? '<span class="muted small">re-running …</span>' : `<button onclick="runAutoAudit('${esc(a.code_key ? '' : '')}${esc($('auditInput')?.value || '')}',true)">Re-run</button>`}</div>
     ${S ? `<p><b>${esc(S.headline)}</b></p><p class="small">${esc(S.summary)}</p>${S.risks_for_users?.length ? `<ul class="flags small">${S.risks_for_users.map((r) => `<li>${esc(r)}</li>`).join('')}</ul>` : ''}<p class="muted small" style="margin:0">Written by NEAR AI from the findings below; the level comes from the rules.</p>` : ''}</div>`;
@@ -48,7 +48,7 @@ async function runAutoAudit(address, force) {
     if (!$('autoResult') || ($('auditInput') && $('auditInput').value.trim() !== address)) return;
     const r = await get('/api/audit-auto', { address, run: first ? '1' : '', force: first && force ? '1' : '' }).catch((e) => ({ error: e.message }));
     if (r.error) { $('autoResult').innerHTML = `<div class="card err">${esc(r.error)}</div>`; return; }
-    $('autoResult').innerHTML = autoBody(r.job?.running && force ? null : r.auto, r.job);
+    $('autoResult').innerHTML = autoBody(r.job?.running && force ? null : r.auto, r.job, address);
     if (r.job?.running) autoTimer = setTimeout(() => tick(false), 4000);
   };
   tick(true);

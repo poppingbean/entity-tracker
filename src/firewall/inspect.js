@@ -13,6 +13,7 @@ import { toNear } from './decode.js';
 import { flowsOfTx } from '../incident/flows.js';
 import { valueOf } from '../incident/prices.js';
 import { config } from '../config.js';
+import { detectChainAddress, parseChainId } from '../ontology/chains.js';
 
 const B58 = '[1-9A-HJ-NP-Za-km-z]';
 const TX_HASH = new RegExp(`^${B58}{43,44}$`);
@@ -48,6 +49,7 @@ export function parseInput(raw) {
   if (/^(ed25519|secp256k1):/i.test(s) && s.length > 80) return { kind: 'secret' }; // a private key (64 bytes), not a public one (32)
   if (/^[{[]/.test(s)) return { kind: 'unsigned_tx', value: s };
   if (s.length > 120 && /^[A-Za-z0-9+/=\s]+$/.test(s)) return { kind: 'unsigned_tx', value: s.replace(/\s+/g, '') };
+  { const ca = detectChainAddress(s); if (ca) return { kind: 'chain_address', value: ca }; }
   if (PUBLIC_KEY.test(s)) return { kind: 'public_key', value: s };
   if (TX_HASH.test(s)) return { kind: 'tx', value: s };
   // links: explorers and marketplaces point at the thing; any other site is a website to check
@@ -135,6 +137,7 @@ async function route(p) {
       actions: ['If you typed it into a website or sent it to someone, move your funds to a new wallet now.'] };
     case 'unsigned_tx': return inspectUnsigned(p.value);
     case 'tx': return inspectTx(p.value);
+    case 'chain_address': return inspectChainAddress(p.value);
     case 'public_key': return inspectPublicKey(p.value);
     case 'website': return inspectWebsite(p.value, p.extra);
     case 'nft': return inspectNft(p.value, p.extra);
@@ -413,4 +416,22 @@ async function inspectWebsite(host, extra = {}) {
   const v = s.known && !points.some((x) => x.level === 'bad') ? 'safe' : verdictOf(points, 'unknown');
   return { kind: 'website', verdict: v, headline: v === 'danger' ? `Do not use ${host}: it looks like a phishing site.` : v === 'safe' ? `${host} is a known NEAR site.` : v === 'caution' ? `Be careful with ${host}.` : `${host} is not a site we know.`,
     points, actions: ['Never type your seed phrase or private key into a website.', 'Before you sign, paste what your wallet shows into this box: it checks the transaction itself.'].slice(0, v === 'safe' ? 1 : 2), facts: { host } };
+}
+
+/**
+ * An address on another chain (WP-14): what Safe Near knows from the NEAR cases whose money was sent to it. Never "safe": no case only means nothing is known;
+ * danger only when a confirmed case sent money there. The money is not followed on the other chain.
+ */
+async function inspectChainAddress(id) {
+  const c = parseChainId(id), { relationsOf } = await import('../ontology/index.js');
+  const rel = (await relationsOf(id, { predicate: 'role_in', direction: 'out' })).filter((f) => !f.valid_to || f.valid_to > Date.now());
+  const ids = [...new Set(rel.map((f) => f.object))], cases = ids.length ? await col('incidents').find({ _id: { $in: ids } }, { projection: INC_FIELDS }).toArray() : [];
+  const confirmed = cases.filter((d) => d.status === 'confirmed');
+  const sent = (await relationsOf(id, { predicate: 'sent_to', direction: 'in' })).reduce((s, f) => s + (f.amount_usd || 0), 0);
+  const where = `${c?.name || 'another chain'} address ${short(c?.address || id, 20)}`;
+  if (!cases.length) return { kind: 'chain_address', account: id, verdict: 'unknown', headline: `Nothing known about this ${where}.`, points: [pt('info', 'Safe Near has not seen money from a hack it traced go to it. That does not make it safe: it only follows money on NEAR.')] };
+  return { kind: 'chain_address', account: id, verdict: confirmed.length ? 'danger' : 'caution',
+    headline: `This ${where} received about $${Math.round(sent).toLocaleString('en-US')} from ${confirmed.length ? 'a confirmed hack' : 'a case being watched'} traced on NEAR.`,
+    points: [pt(confirmed.length ? 'bad' : 'warn', `Money from ${cases.length} NEAR case${cases.length === 1 ? '' : 's'} was swapped out to it (see the case${cases.length === 1 ? '' : 's'}). Safe Near does not follow the money on ${c?.name || 'that chain'}.`)],
+    incidents: cases.map((d) => incRow(d, 'cash_out_address')) };
 }

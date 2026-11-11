@@ -1,0 +1,68 @@
+{
+ "name": "nft-transfer",
+ "note": "a NEP-171 transfer",
+ "hash": "S15",
+ "captured_ts": 1794300000000,
+ "synthetic": true,
+ "tx": {
+  "transaction": {
+   "hash": "S15",
+   "signer_id": "bob.near",
+   "receiver_id": "art.near",
+   "actions": [
+    {
+     "FunctionCall": {
+      "method_name": "nft_transfer",
+      "args": "e30=",
+      "gas": 30000000000000,
+      "deposit": "0"
+     }
+    }
+   ]
+  },
+  "execution_outcome": {
+   "block_timestamp": "1794300000000000000",
+   "block_height": 200000000,
+   "outcome": {
+    "logs": [],
+    "status": {
+     "SuccessValue": ""
+    }
+   }
+  },
+  "receipts": [
+   {
+    "receipt": {
+     "receipt_id": "S15-0",
+     "predecessor_id": "bob.near",
+     "receiver_id": "art.near",
+     "receipt": {
+      "Action": {
+       "signer_id": "bob.near",
+       "actions": [
+        {
+         "FunctionCall": {
+          "method_name": "x"
+         }
+        }
+       ]
+      }
+     }
+    },
+    "execution_outcome": {
+     "block_height": 200000000,
+     "block_timestamp": "1794300000000000000",
+     "outcome": {
+      "executor_id": "art.near",
+      "logs": [
+       "EVENT_JSON:{\"standard\":\"nep171\",\"version\":\"1.0.0\",\"event\":\"nft_transfer\",\"data\":[{\"old_owner_id\":\"bob.near\",\"new_owner_id\":\"dave.near\",\"token_ids\":[\"7\"]}]}"
+      ],
+      "status": {
+       "SuccessValue": ""
+      }
+     }
+    }
+   }
+  ]
+ }
+}

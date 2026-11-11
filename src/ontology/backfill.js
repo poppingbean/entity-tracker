@@ -10,6 +10,7 @@ import { assert, retire, invalid, factDoc, factId, clearCache } from './index.js
 import { virtualFacts } from './known.js';
 import { resolve } from './resolve.js';
 import { intentsSolver } from '../incident/origin.js';
+import { chainFacts } from './chains.js';
 import { refreshSnapshot } from './sync.js';
 
 const NO_CODE = '11111111111111111111111111111111';
@@ -83,7 +84,7 @@ export const WRITERS = {
 
   async incidents() {
     const out = [];
-    for (const inc of await col('incidents').find({ status: { $in: ['confirmed', 'suspected', 'cleared'] } }, { projection: { status: 1, kind: 1, accounts: 1, target: 1, victims: 1, confirmed_by: 1, updated_ts: 1, cleared: 1 } }).toArray()) {
+    for (const inc of await col('incidents').find({ status: { $in: ['confirmed', 'suspected', 'cleared'] } }, { projection: { status: 1, kind: 1, accounts: 1, target: 1, victims: 1, confirmed_by: 1, updated_ts: 1, cleared: 1, 'trail.exits': 1 } }).toArray()) {
       const source = inc.confirmed_by?.source ? 'public_report' : 'trace';
       const valid_to = inc.status === 'cleared' ? (inc.cleared?.ts || inc.updated_ts || Date.now()) : null;
       const base = { predicate: 'role_in', object: inc._id, source, confidence: inc.status === 'confirmed' ? 0.9 : 0.5, status: inc.status, kind: inc.kind, valid_to };
@@ -91,6 +92,7 @@ export const WRITERS = {
       for (const a of inc.accounts || []) if (a.account && a.role) out.push({ ...base, subject: a.account, role: a.role, evidence: ev(a.role) });
       if (inc.target?.account) out.push({ ...base, subject: inc.target.account, role: 'target', evidence: ev('target') });
       for (const v of inc.victims || []) if (v.account && v.account !== inc.target?.account) out.push({ ...base, subject: v.account, role: 'victim', evidence: ev('victim') });
+      out.push(...chainFacts(inc)); // WP-14: the addresses on other chains the case's money went to
     }
     return out;
   },

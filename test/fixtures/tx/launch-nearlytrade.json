@@ -1,0 +1,68 @@
+{
+ "name": "launch-nearlytrade",
+ "note": "a nearly.trade launch event",
+ "hash": "S6",
+ "captured_ts": 1794300000000,
+ "synthetic": true,
+ "tx": {
+  "transaction": {
+   "hash": "S6",
+   "signer_id": "dev.near",
+   "receiver_id": "nearlytrade.near",
+   "actions": [
+    {
+     "FunctionCall": {
+      "method_name": "launch",
+      "args": "e30=",
+      "gas": 30000000000000,
+      "deposit": "0"
+     }
+    }
+   ]
+  },
+  "execution_outcome": {
+   "block_timestamp": "1794300000000000000",
+   "block_height": 200000000,
+   "outcome": {
+    "logs": [],
+    "status": {
+     "SuccessValue": ""
+    }
+   }
+  },
+  "receipts": [
+   {
+    "receipt": {
+     "receipt_id": "S6-0",
+     "predecessor_id": "dev.near",
+     "receiver_id": "nearlytrade.near",
+     "receipt": {
+      "Action": {
+       "signer_id": "dev.near",
+       "actions": [
+        {
+         "FunctionCall": {
+          "method_name": "x"
+         }
+        }
+       ]
+      }
+     }
+    },
+    "execution_outcome": {
+     "block_height": 200000000,
+     "block_timestamp": "1794300000000000000",
+     "outcome": {
+      "executor_id": "nearlytrade.near",
+      "logs": [
+       "EVENT_JSON:{\"standard\":\"nearpad\",\"version\":\"1.0.0\",\"event\":\"launch\",\"data\":[{\"id\":\"1\",\"token\":\"moon-1.nearlytrade.near\",\"pool_id\":\"moon-1.nearlytrade.near|wrap.near|10000\",\"creator\":\"dev.near\",\"name\":\"Moon\",\"symbol\":\"MOON\"}]}"
+      ],
+      "status": {
+       "SuccessValue": ""
+      }
+     }
+    }
+   }
+  ]
+ }
+}

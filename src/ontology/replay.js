@@ -59,3 +59,27 @@ export function replayText(r) {
   for (const x of r.rows) L.push(`| \`${x.id.slice(0, 28)}…\` | ${x.stored} | ${x.old ?? x.skipped ?? '–'} | ${x.new ?? '–'} | ${x.changes?.length ? x.changes.join('<br>') : 'same'} |`);
   return L.join('\n');
 }
+
+/**
+ * Re-trace every stored case with the CURRENT code (traceIncident: no AI, nothing saved) and diff it against the stored document: status, kind,
+ * attacker, target, accounts, sources, exits, the loss figure, the number of accounts and the exit USD per kind. The before / after check of
+ * WP-08, WP-10 and WP-11 (a switch is flipped between two runs of this command).
+ */
+export async function traceReplay({ limit = 0, only = null, skip = [], log = () => {} } = {}) {
+  const q = only ? { _id: new RegExp('^' + only) } : {};
+  const cases = await col('incidents').find(q).sort({ first_seen_ts: 1 }).limit(limit || 0).toArray(), rows = [];
+  const exitUsd = (inc) => Object.fromEntries(Object.entries(inc.trail?.exit_usd || {}).map(([k, v]) => [k, Math.round(v)]));
+  for (const c of cases) {
+    if (skip.some((p) => String(c._id).startsWith(p))) { rows.push({ id: c._id, skipped: 'already replayed' }); continue; }
+    if (!c.input) { rows.push({ id: c._id, skipped: 'no input' }); continue; }
+    const t0 = Date.now(), stored = { ...brief(c), exit_usd: exitUsd(c), accounts_n: (c.accounts || []).length };
+    let now;
+    try { const inc = await traceIncident(c.input); now = { ...brief(inc), exit_usd: exitUsd(inc), accounts_n: (inc.accounts || []).length }; } catch (e) { rows.push({ id: c._id, error: e.message }); continue; }
+    const changes = diff(stored, now);
+    if (stored.accounts_n !== now.accounts_n) changes.push(`accounts: ${stored.accounts_n} → ${now.accounts_n}`);
+    for (const k of new Set([...Object.keys(stored.exit_usd), ...Object.keys(now.exit_usd)])) { const a = stored.exit_usd[k] || 0, b = now.exit_usd[k] || 0; if (Math.max(a, b) > 0 && Math.abs(a - b) / Math.max(a, b) > 0.02) changes.push(`exit ${k}: $${a} → $${b}`); }
+    rows.push({ id: c._id, stored: `${c.status} ${c.kind || ''}`.trim(), now: `${now.status} ${now.kind || ''}`.trim(), changes, s: Math.round((Date.now() - t0) / 1000) });
+    log(`${c._id.slice(0, 26)} ${changes.length ? 'CHANGED ' + changes.join('; ') : 'same'}`);
+  }
+  return { cases: rows.length, changed: rows.filter((r) => r.changes?.length).length, rows };
+}

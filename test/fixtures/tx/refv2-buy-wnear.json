@@ -1,0 +1,68 @@
+{
+ "name": "refv2-buy-wnear",
+ "note": "Ref v2 buy",
+ "hash": "S2",
+ "captured_ts": 1794300000000,
+ "synthetic": true,
+ "tx": {
+  "transaction": {
+   "hash": "S2",
+   "signer_id": "trader.near",
+   "receiver_id": "v2.ref-finance.near",
+   "actions": [
+    {
+     "FunctionCall": {
+      "method_name": "ft_transfer_call",
+      "args": "e30=",
+      "gas": 30000000000000,
+      "deposit": "0"
+     }
+    }
+   ]
+  },
+  "execution_outcome": {
+   "block_timestamp": "1794300000000000000",
+   "block_height": 200000000,
+   "outcome": {
+    "logs": [],
+    "status": {
+     "SuccessValue": ""
+    }
+   }
+  },
+  "receipts": [
+   {
+    "receipt": {
+     "receipt_id": "S2-0",
+     "predecessor_id": "trader.near",
+     "receiver_id": "v2.ref-finance.near",
+     "receipt": {
+      "Action": {
+       "signer_id": "trader.near",
+       "actions": [
+        {
+         "FunctionCall": {
+          "method_name": "x"
+         }
+        }
+       ]
+      }
+     }
+    },
+    "execution_outcome": {
+     "block_height": 200000000,
+     "block_timestamp": "1794300000000000000",
+     "outcome": {
+      "executor_id": "v2.ref-finance.near",
+      "logs": [
+       "Swapped 1000000000000000000000000 wrap.near for 1000000000 blackdragon.tkn.near, total fee 3, admin fee 1"
+      ],
+      "status": {
+       "SuccessValue": ""
+      }
+     }
+    }
+   }
+  ]
+ }
+}

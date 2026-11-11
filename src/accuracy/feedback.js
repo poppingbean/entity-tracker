@@ -2,7 +2,7 @@
 // overrides the price-based label in every accuracy number.
 import { col } from '../db.js';
 
-export const FEEDBACK_KINDS = ['token', 'group', 'wallet', 'collection'];
+export const FEEDBACK_KINDS = ['token', 'group', 'wallet', 'collection', 'incident', 'detection', 'account', 'contract']; // incident / detection / account / contract: security verdicts (accuracy/truth.js)
 const clip = (s, n) => String(s ?? '').replace(/[\u0000-\u001f\u007f]/g, ' ').trim().slice(0, n);
 
 /** Store one report. verdict = what the reporter thinks the truth is: 'bad' (it was a scam / loss) or 'good'. */

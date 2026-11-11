@@ -1,0 +1,68 @@
+{
+ "name": "intents-native-withdraw",
+ "note": "a NEAR Intents withdrawal to another chain",
+ "hash": "S11",
+ "captured_ts": 1794300000000,
+ "synthetic": true,
+ "tx": {
+  "transaction": {
+   "hash": "S11",
+   "signer_id": "solver.near",
+   "receiver_id": "intents.near",
+   "actions": [
+    {
+     "FunctionCall": {
+      "method_name": "execute_intents",
+      "args": "e30=",
+      "gas": 30000000000000,
+      "deposit": "0"
+     }
+    }
+   ]
+  },
+  "execution_outcome": {
+   "block_timestamp": "1794300000000000000",
+   "block_height": 200000000,
+   "outcome": {
+    "logs": [],
+    "status": {
+     "SuccessValue": ""
+    }
+   }
+  },
+  "receipts": [
+   {
+    "receipt": {
+     "receipt_id": "S11-0",
+     "predecessor_id": "solver.near",
+     "receiver_id": "intents.near",
+     "receipt": {
+      "Action": {
+       "signer_id": "solver.near",
+       "actions": [
+        {
+         "FunctionCall": {
+          "method_name": "x"
+         }
+        }
+       ]
+      }
+     }
+    },
+    "execution_outcome": {
+     "block_height": 200000000,
+     "block_timestamp": "1794300000000000000",
+     "outcome": {
+      "executor_id": "intents.near",
+      "logs": [
+       "EVENT_JSON:{\"standard\":\"dip4\",\"version\":\"1.0.0\",\"event\":\"ft_withdraw\",\"data\":[{\"account_id\":\"acct1\",\"token\":\"eth.omft.near\",\"receiver_id\":\"bridge.near\",\"amount\":\"1000\",\"memo\":\"WITHDRAW_TO:0xabc\"}]}"
+      ],
+      "status": {
+       "SuccessValue": ""
+      }
+     }
+    }
+   }
+  ]
+ }
+}

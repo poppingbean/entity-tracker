@@ -170,3 +170,53 @@ test('direct writers are named for the writer, and a legacy fact maps onto the s
   assert.equal(factId({ ...f, by: writerBy('audits') }), factId({ ...f, by: 'writer/audits' }));
   assert.notEqual(factId({ ...f, by: 'backfill/audits' }), factId({ ...f, by: 'writer/audits' }));
 });
+
+// ---- WP-07: the golden set as data
+import { validateGolden, goldenReport, GOLDEN_ENTRIES } from '../src/ontology/golden.js';
+test('golden.json is valid: classes exist, no duplicates, every entry has a source and a note', async () => {
+  assert.deepEqual(await validateGolden(), []);
+  assert.deepEqual(await validateGolden([{ account: 'a', expect: 'exchange/hot', source: 'operator', note: 'x' }, { account: 'a', expect: 'system', source: 'guess', note: '' }]).then((x) => x.length), 4);
+  assert.ok(GOLDEN_ENTRIES.length >= 15);
+});
+test('goldenReport counts per top class and lists failures', () => {
+  const r = goldenReport([{ account: 'a', expect: 'exchange/hot_wallet', got: 'exchange/hot_wallet', ok: true }, { account: 'b', expect: 'exchange/cold_wallet', got: 'unknown', ok: false, why: 'x' }, { account: 'c', expect: 'system', got: 'system', ok: true }]);
+  assert.deepEqual([r.n, r.ok], [3, 2]); assert.deepEqual(r.by_class.find((x) => x.class === 'exchange'), { class: 'exchange', n: 2, ok: 1 }); assert.equal(r.failures[0].account, 'b');
+});
+
+// ---- WP-13 part A: link-eval's pure scoring
+import { samePairs, differentPairs, pairScore, unlinkedByFunder } from '../src/graph/linkeval.js';
+test('pair scoring: precision over linked pairs with a known answer, recall over same-owner pairs', () => {
+  const same = samePairs([['a', 'b', 'c']]), diff = differentPairs([['a'], ['x'], ['y']]);
+  const groups = new Map([['a', 1], ['b', 1], ['c', 9], ['x', 1], ['y', 2]]);
+  const s = pairScore(groups, same, diff);
+  assert.deepEqual([s.same_pairs, s.tp, s.fn], [3, 1, 2]);           // a-b linked; a-c, b-c not
+  assert.deepEqual([s.diff_pairs, s.fp], [3, 1]);                    // a-x wrongly linked
+  assert.equal(s.precision, 0.5); assert.equal(s.recall, 0.333);
+  assert.equal(pairScore(new Map(), same, diff).recall, null, 'wallets the grouping never saw do not count');
+});
+test('unlinked share by funder kind', () => {
+  const r = unlinkedByFunder([{ funder_kind: 'hub', grouped: false }, { funder_kind: 'hub', grouped: true }, { funder_kind: 'wallet', grouped: true }]);
+  assert.equal(r.hub.unlinked_share, 0.5); assert.equal(r.wallet.unlinked_share, 0);
+});
+
+// ---- WP-14: accounts on other chains
+import { chainId, parseChainId, detectChainAddress, chainFacts } from '../src/ontology/chains.js';
+import { parseInput } from '../src/firewall/inspect.js';
+test('chain ids: parse, lower-case EVM, detect pasted addresses; a NEAR account is never one', () => {
+  assert.equal(chainId('Ethereum', '0xABCDEFabcdef0123456789abcdef0123456789AB'), 'eth:0xabcdefabcdef0123456789abcdef0123456789ab');
+  assert.equal(chainId('Bitcoin', 'bc1QAbc'), 'btc:bc1QAbc'); assert.equal(chainId('Nowhere', 'x'), null);
+  assert.deepEqual(parseChainId('eth:0xabc123'), { chain: 'eth', name: 'Ethereum', address: '0xabc123' });
+  assert.equal(parseChainId('bob.near'), null); assert.equal(parseChainId('wrap.near'), null);
+  assert.equal(detectChainAddress('0x' + 'A'.repeat(40)), 'eth:0x' + 'a'.repeat(40));
+  assert.equal(detectChainAddress('bob.near'), null);
+  assert.equal(parseInput('0x' + 'b'.repeat(40)).kind, 'chain_address');
+});
+test('a case with exits to other chains yields sent_to and cash_out_address facts the ontology accepts', () => {
+  const inc = { _id: 'inc:atk', status: 'confirmed', kind: 'exchange_drain', confirmed_by: { source: 'https://x' }, trail: { exits: [
+    { chain: 'Ethereum', recipient: '0x' + 'C'.repeat(40), asset: 'ETH', amount: 1.5, symbol: 'ETH', usd: 5000, tx: 'T1' }, { chain: 'NEAR', recipient: 'a.near', tx: 'T2' }, { kind: 'an exchange', tx: 'T3' }] } };
+  const f = chainFacts(inc);
+  assert.equal(f.length, 2);
+  assert.deepEqual([f[0].subject, f[0].predicate, f[0].object, f[0].amount_usd], ['inc:atk', 'sent_to', 'eth:0x' + 'c'.repeat(40), 5000]);
+  assert.deepEqual([f[1].subject, f[1].predicate, f[1].role, f[1].source], ['eth:0x' + 'c'.repeat(40), 'role_in', 'cash_out_address', 'public_report']);
+  for (const x of f) assert.equal(invalid({ ...x, by: 'backfill/incidents' }), null);
+});

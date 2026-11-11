@@ -1,0 +1,68 @@
+{
+ "name": "launch-memecooking",
+ "note": "a meme.cooking create_token event with a pool id",
+ "hash": "S8",
+ "captured_ts": 1794300000000,
+ "synthetic": true,
+ "tx": {
+  "transaction": {
+   "hash": "S8",
+   "signer_id": "dev.near",
+   "receiver_id": "meme-cooking.near",
+   "actions": [
+    {
+     "FunctionCall": {
+      "method_name": "create_token",
+      "args": "e30=",
+      "gas": 30000000000000,
+      "deposit": "0"
+     }
+    }
+   ]
+  },
+  "execution_outcome": {
+   "block_timestamp": "1794300000000000000",
+   "block_height": 200000000,
+   "outcome": {
+    "logs": [],
+    "status": {
+     "SuccessValue": ""
+    }
+   }
+  },
+  "receipts": [
+   {
+    "receipt": {
+     "receipt_id": "S8-0",
+     "predecessor_id": "dev.near",
+     "receiver_id": "meme-cooking.near",
+     "receipt": {
+      "Action": {
+       "signer_id": "dev.near",
+       "actions": [
+        {
+         "FunctionCall": {
+          "method_name": "x"
+         }
+        }
+       ]
+      }
+     }
+    },
+    "execution_outcome": {
+     "block_height": 200000000,
+     "block_timestamp": "1794300000000000000",
+     "outcome": {
+      "executor_id": "meme-cooking.near",
+      "logs": [
+       "EVENT_JSON:{\"standard\":\"meme-cooking\",\"version\":\"1.0.0\",\"event\":\"create_token\",\"data\":{\"token_id\":\"cook-1.meme-cooking.near\",\"meme_id\":7,\"pool_id\":99}}"
+      ],
+      "status": {
+       "SuccessValue": ""
+      }
+     }
+    }
+   }
+  ]
+ }
+}

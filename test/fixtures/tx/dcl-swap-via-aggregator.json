@@ -1,0 +1,68 @@
+{
+ "name": "dcl-swap-via-aggregator",
+ "note": "a DCL swap whose swapper is the aggregator: the trader is the signer",
+ "hash": "S5",
+ "captured_ts": 1794300000000,
+ "synthetic": true,
+ "tx": {
+  "transaction": {
+   "hash": "S5",
+   "signer_id": "carol.near",
+   "receiver_id": "aggregatedex.near",
+   "actions": [
+    {
+     "FunctionCall": {
+      "method_name": "ft_transfer_call",
+      "args": "e30=",
+      "gas": 30000000000000,
+      "deposit": "0"
+     }
+    }
+   ]
+  },
+  "execution_outcome": {
+   "block_timestamp": "1794300000000000000",
+   "block_height": 200000000,
+   "outcome": {
+    "logs": [],
+    "status": {
+     "SuccessValue": ""
+    }
+   }
+  },
+  "receipts": [
+   {
+    "receipt": {
+     "receipt_id": "S5-0",
+     "predecessor_id": "aggregatedex.near",
+     "receiver_id": "dclv2.ref-labs.near",
+     "receipt": {
+      "Action": {
+       "signer_id": "carol.near",
+       "actions": [
+        {
+         "FunctionCall": {
+          "method_name": "x"
+         }
+        }
+       ]
+      }
+     }
+    },
+    "execution_outcome": {
+     "block_height": 200000000,
+     "block_timestamp": "1794300000000000000",
+     "outcome": {
+      "executor_id": "dclv2.ref-labs.near",
+      "logs": [
+       "EVENT_JSON:{\"standard\":\"dcl.ref\",\"version\":\"1.0.0\",\"event\":\"swap\",\"data\":[{\"pool_id\":\"blackdragon.tkn.near|wrap.near|10000\",\"token_in\":\"wrap.near\",\"amount_in\":\"1000000000000000000000000\",\"token_out\":\"blackdragon.tkn.near\",\"amount_out\":\"1000000000\",\"swapper\":\"aggregatedex.near\"}]}"
+      ],
+      "status": {
+       "SuccessValue": ""
+      }
+     }
+    }
+   }
+  ]
+ }
+}

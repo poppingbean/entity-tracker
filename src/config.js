@@ -90,6 +90,20 @@ export const config = {
   },
   incidents: {
     enabled: process.env.INCIDENTS_ENABLED !== 'false',
+    // an account that is only busy (20,000+ transactions) is never called an exchange hot wallet: it needs a sweep to an exchange's cold wallet, a hand entry or a name. false = the old fallback
+    // case valuation: USD at the time the money moved (NEAR/USD history, the tracker's own trades, the case's own swaps), today's price as the last resort; false = today's prices only
+    priceAtIncident: process.env.PRICE_AT_INCIDENT !== 'false',
+    priceHistoryUrl: process.env.PRICE_HISTORY_URL ?? 'https://api.binance.com/api/v3/klines', // hourly NEARUSDT klines ('' = no history: tier skipped)
+    // the money trail (WP-11): best-first by the USD that reached each wallet, stopped by value, not by fixed hop caps. search: best_first | bfs (the old hop-by-hop search)
+    trail: {
+      search: process.env.TRAIL_SEARCH === 'bfs' ? 'bfs' : 'best_first',
+      floorUsd: num(process.env.TRAIL_FLOOR_USD, 200),        // never expand a wallet that received less
+      shareFloor: num(process.env.TRAIL_SHARE_FLOOR, 0.005),  // ... or less than this share of the case's loss
+      maxWallets: num(process.env.TRAIL_MAX_WALLETS, 40),
+      maxDepth: num(process.env.TRAIL_MAX_DEPTH, 6),
+      maxMs: num(process.env.TRAIL_MAX_MINUTES, 5) * 60e3,    // stay under INCIDENT_INVESTIGATE_TIMEOUT_MINUTES
+    },
+    identifyBusyNeutral: process.env.IDENTIFY_BUSY_NEUTRAL !== 'false',
     minUsd: num(process.env.INCIDENT_MIN_USD, 100000),          // a receiver must take at least this from one protocol within 30 min (only >= $100k)
     alwaysUsd: num(process.env.INCIDENT_ALWAYS_USD, 250000),   // ... and is traced whatever it looks like above this
     freshHours: num(process.env.INCIDENT_FRESH_HOURS, 72),      // an account younger than this is a suspect
@@ -186,8 +200,17 @@ export const config = {
   // ground truth for the accuracy numbers: a launch is "bad" when a buyer at the check held less than this share of the price 24 h later
   accuracy: { badBelow: num(process.env.ACCURACY_BAD_BELOW, 0.85), everyMs: num(process.env.ACCURACY_EVERY_MS, 3600e3) },
   // the token analysis page's AI review: it reads the latest trades first, then follows tokens moved out by transfer
+  // data health (WP-16): block gaps and a sampled cross-check of the indexer against RPC on another host; nothing here changes a verdict
+  data: {
+    gapBlocks: num(process.env.DATA_GAP_BLOCKS, 5),                 // more empty heights in a row than this are checked against RPC
+    checkEveryMinutes: num(process.env.DATA_CHECK_EVERY_MINUTES, 60), // 0 = off
+    checkSample: num(process.env.DATA_CHECK_SAMPLE, 10),
+    checkReceipts: process.env.DATA_CHECK_RECEIPTS === 'true',      // also compare the receipt count (calibrate on real captures first)
+    rpcUrls: list(process.env.DATA_CHECK_RPC_URLS, ['https://near.lava.build']), // NOT FastNEAR: a second source
+  },
   analysis: {
     syncMinutes: num(process.env.ANALYSIS_SYNC_MINUTES, 5),  // how long an AI review reads new trades before writing (the worker reads the rest)
+    holdersVerified: num(process.env.ANALYSIS_HOLDERS_VERIFIED, 60), // the largest estimated holders checked live (ft_balance_of), ten at a time
     flowHops: num(process.env.ANALYSIS_FLOW_HOPS, 5),        // how many transfer hops to follow tokens that left the creator / early buyers
   },
   analyst: {

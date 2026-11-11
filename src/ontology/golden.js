@@ -1,26 +1,34 @@
-// The golden set: accounts whose class is known for certain. Every migration step must keep them right (docs/ontology-design.md, 6).
+// The golden set: accounts whose class is known for certain (src/ontology/golden.json). Every migration step must keep them right
+// (docs/ontology-design.md, 6), and the accuracy pass reports how many the ontology gets right (WP-07).
+// golden.json entries: { account, expect (a class of the tree), note, source: operator | public (link in note) | self_evident }.
+import fs from 'node:fs';
 import { isA } from './classes.js';
 
-export const GOLDEN = [
-  ['9c484fa5d2d069569ba063fc555c34e621ccd88fdbb0295fc79bad232621c5c1', 'exchange/hot_wallet', 'Binance hot wallet (sweeps to binancecold3.near)'],
-  ['451913e633c72fb951effe076d3bd2977e3f08083dcf6c87fa89992b0d437c5c', 'exchange/hot_wallet', 'Binance hot wallet'],
-  ['5c33c6218d47e00ef229f60da78d0897e1ee9665312550b8afd5f9c7bc6957d2', 'exchange/hot_wallet', 'Binance hot wallet'],
-  ['d04204b6591fefb973a8ed60929f8211af89ee38020da9faf905acdc7a320063', 'exchange/hot_wallet', 'Binance hot wallet'],
-  ['binancecold3.near', 'exchange/cold_wallet', 'Binance cold wallet'],
-  ['solver-priv-liq.near', 'service/intents_solver', 'the NEAR Intents solver behind the false drain of 2026-11-04'],
-  ['intents.near', 'service/router', 'NEAR Intents'],
-  ['wrap.near', 'service/router', 'wrapped NEAR'],
-  ['nearlytrade.near', 'service/launchpad', 'launchpad'],
-  ['launchpad.justhoot.near', 'service/launchpad', 'launchpad'],
-  ['meme-cooking.near', 'service/launchpad', 'launchpad'],
-  ['meteor-relayer.near', 'service/relayer', 'relayer'],
-  ['5115501476.tg', 'person/app_user', 'a Telegram-wallet user'],
-  ['contract.main.burrow.near', 'contract/lending', 'Rhea (Burrow) lending, the 2026-04 exploit target'],
-  ['near', 'system', 'the system account'],
-];
+export const GOLDEN_ENTRIES = JSON.parse(fs.readFileSync(new URL('./golden.json', import.meta.url), 'utf8'));
+/** Today's tuple shape: [account, expect, note]. */
+export const GOLDEN = GOLDEN_ENTRIES.map((e) => [e.account, e.expect, e.note]);
 
 /** Check resolved entities (Map account → entity) against the golden set: [{ account, expect, got, ok, why }]. */
 export const checkGolden = (ents) => GOLDEN.map(([account, expect, note]) => {
   const e = ents.get(account);
   return { account, expect, got: e?.class || 'unknown', ok: !!e && isA(e.class, expect), note, why: e?.why || null };
 });
+
+/** `{ n, ok, by_class: [{ class, n, ok }], failures }`, from checkGolden's rows; stored by the accuracy pass as security.ontology. */
+export function goldenReport(rows) {
+  const per = new Map();
+  for (const r of rows) { const k = r.expect.split('/')[0], p = per.get(k) || { class: k, n: 0, ok: 0 }; p.n++; if (r.ok) p.ok++; per.set(k, p); }
+  return { n: rows.length, ok: rows.filter((r) => r.ok).length, by_class: [...per.values()], failures: rows.filter((r) => !r.ok).slice(0, 30).map((r) => ({ account: r.account, expect: r.expect, got: r.got, why: r.why })) };
+}
+
+/** Validation of the data file: every class exists, no duplicates, every entry has a source and a note. Returns the problems. */
+export async function validateGolden(entries = GOLDEN_ENTRIES) {
+  const { isClass } = await import('./classes.js'), seen = new Set(), bad = [];
+  for (const e of entries) {
+    if (!isClass(e.expect)) bad.push(`${e.account}: unknown class ${e.expect}`);
+    if (seen.has(e.account)) bad.push(`${e.account}: duplicate`); seen.add(e.account);
+    if (!['operator', 'public', 'self_evident'].includes(e.source)) bad.push(`${e.account}: source must be operator, public or self_evident`);
+    if (!e.note) bad.push(`${e.account}: note missing`);
+  }
+  return bad;
+}

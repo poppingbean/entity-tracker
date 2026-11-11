@@ -326,3 +326,9 @@ A sync never throws into the caller (it is logged, and the daily backfill repair
 - RDF / OWL / a graph database: MongoDB documents and one resolver give the benefit without a new system.
 - Accounts on other chains: the fact shape allows chain-qualified ids later (the 1Click recipients, the attacker's ETH wallet in the Rhea case).
 - Automatic discovery of new classes: the tree changes by hand, in this file and `src/ontology/classes.js`.
+
+## 8. Later additions (accuracy and depth plan)
+
+- **Accounts on other chains.** Ids `<chain>:<address>` (`eth:0x…`, `btc:…`, `sol:…`; `src/ontology/chains.js`). For every exit of a case to another chain the backfill asserts `case sent_to <chain address>` and `<chain address> role_in case` (role `cash_out_address`), source `public_report` or `trace`, with the amount and the transaction as evidence. `GET /api/v1/entity`, the `what_is` tool and the Safety Check answer for a pasted `0x…` address: *danger* only when a confirmed case sent money there, otherwise "nothing known", never "safe". The money is not followed on the other chain. `node src/cli.js chain-links` lists addresses that received from two or more cases (leads; flags nothing).
+- **Busy is not an exchange.** A `behaviour` exchange fact (busy, no sweep) no longer makes the tracer say "exchange": it answers "Busy account (unidentified)" (`IDENTIFY_BUSY_NEUTRAL`). This closes the gap listed in 6.5.
+- **The golden set is data:** `src/ontology/golden.json` (`{ account, expect, note, source }`), reported as `security.ontology` by the accuracy pass; `golden-candidates` lists resolved accounts not in it.

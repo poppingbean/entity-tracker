@@ -66,6 +66,7 @@ export async function refreshExchangeRegistry({ log = info } = {}) {
     if (!p) continue;
     const manual = prev?.source === 'manual';
     if (!manual && (p.total ?? 0) < BUSY && !p.sweep) continue; // neither busy nor sweeping to an exchange: not a hot wallet
+    if (!manual && !p.sweep && config.incidents.identifyBusyNeutral) continue; // busy alone proves nothing: it needs a sweep to an exchange's cold wallet or a hand entry
     const exchange = manual ? prev.exchange : p.sweep?.exchange || prev?.exchange || null;
     rows.push({ _id: id, exchange, kind: 'hot', how: manual ? prev.how : p.sweep ? `sends its reserves to ${p.sweep.to}` : `${(p.total || 0).toLocaleString('en-US')} transactions`, cold: p.sweep?.to || prev?.cold || null,
       tx_count: p.total, balance_near: p.balance_near, baseline: p.baseline, source: manual ? 'manual' : prev?.source || 'discovered', updated_ts: Date.now() });
@@ -91,10 +92,14 @@ export async function addExchangeWallet(id, exchange, kind = 'hot') {
 
 const cache = { ts: 0, map: new Map() };
 /** The registry (hot and cold wallets), cached 10 minutes; falls back to the tracker's hub wallets before the first refresh. */
+/** A registry entry that is proven an exchange wallet: added by hand, or sweeping to an exchange's cold wallet (busy alone proves nothing). */
+export const provenWallet = (r) => r.source === 'manual' || !!r.cold || r.kind === 'cold';
+
 export async function exchangeWalletMap() {
   if (Date.now() - cache.ts < 600e3 && cache.map.size) return cache.map;
   let rows = await col('exchange_wallets').find({}).toArray().catch(() => []);
   if (!rows.length) rows = (await col('entities').find({ kind: 'hub' }, { projection: { _id: 1, tx_count: 1 } }).toArray().catch(() => [])).map((h) => ({ _id: h._id, kind: 'hot', exchange: null, how: 'hub wallet', tx_count: h.tx_count }));
+  if (config.incidents.identifyBusyNeutral) rows = rows.filter(provenWallet);
   cache.map = new Map(rows.map((r) => [r._id, r])); cache.ts = Date.now();
   return cache.map;
 }

@@ -7,7 +7,7 @@ const cache = new Map();
 const breaker = { fails: 0, until: 0 };
 export const oneClickDown = () => Date.now() < breaker.until;
 
-const CHAIN = { eth: 'Ethereum', btc: 'Bitcoin', sol: 'Solana', base: 'Base', arb: 'Arbitrum', bsc: 'BNB Chain', pol: 'Polygon', tron: 'Tron', ton: 'TON', doge: 'Dogecoin', xrp: 'XRP Ledger', zec: 'Zcash', sui: 'Sui',
+export const CHAIN = { eth: 'Ethereum', btc: 'Bitcoin', sol: 'Solana', base: 'Base', arb: 'Arbitrum', bsc: 'BNB Chain', pol: 'Polygon', tron: 'Tron', ton: 'TON', doge: 'Dogecoin', xrp: 'XRP Ledger', zec: 'Zcash', sui: 'Sui',
   gnosis: 'Gnosis', bera: 'Berachain', avax: 'Avalanche', op: 'Optimism', stellar: 'Stellar', ltc: 'Litecoin', bch: 'Bitcoin Cash', ada: 'Cardano', aptos: 'Aptos', monad: 'Monad' };
 /** "nep141:eth.omft.near" -> { chain: 'Ethereum', asset: 'ETH' }; a plain NEAR token stays on NEAR. */
 export function assetChain(asset) {

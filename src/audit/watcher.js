@@ -9,6 +9,7 @@ import { autoAudit } from './auto.js';
 import { raise } from '../alerts/store.js';
 import { STRONG_FINDINGS } from './service.js';
 import { scanBlocks } from '../incident/detect.js';
+import { gapRuns, confirmGap, recordGap } from '../near/health.js';
 
 const AUTH = () => (config.fastnearApiKey ? { authorization: `Bearer ${config.fastnearApiKey}` } : {});
 const NEARDATA = () => config.autoAudit.neardataUrl;
@@ -44,6 +45,9 @@ export function deploysInBlock(b) {
 }
 
 /** Read the next blocks from the cursor and queue what was deployed. Returns { blocks, deploys, behind }. */
+const gapTries = new Map();
+const rpcBlockAt = (h) => import('../near/rpc.js').then((m) => m.rpc('block', { block_id: h }));
+
 export async function watchDeploys() {
   const A = config.autoAudit, top = await tipHeight();
   let cursor = await metaGet('audit:deploy_cursor');
@@ -56,6 +60,15 @@ export async function watchDeploys() {
   await Promise.all(Array.from({ length: A.fetchConcurrency }, async () => {
     while (i < heights.length) { const k = i++; try { results[k] = { b: await block(heights[k]) }; } catch (e) { results[k] = { err: e.message }; } }
   }));
+  // a long run of empty heights is checked against RPC: a height the chain skipped is normal, a block the feed missed is re-read (retried a few ticks, then recorded and passed)
+  const runs = gapRuns(heights.filter((_, k) => results[k].b), heights[0] ?? 0, heights[heights.length - 1] ?? -1);
+  for (const run of runs) {
+    const key = `${run.from}`; gapTries.set(key, (gapTries.get(key) || 0) + 1);
+    if (await confirmGap(run, rpcBlockAt).catch(() => false)) {
+      if (gapTries.get(key) <= 3) { for (let k = 0; k < heights.length; k++) if (heights[k] >= run.from && heights[k] <= run.to) results[k] = { err: 'gap: blocks missing from the feed, will be read again' }; if (gapTries.get(key) === 1) await recordGap(run).catch(() => {}); }
+      else await recordGap({ ...run, gave_up: true }).catch(() => {});
+    }
+  }
   let last = cursor, found = [], blocks = [];
   for (let k = 0; k < heights.length; k++) {
     if (results[k].err) break;

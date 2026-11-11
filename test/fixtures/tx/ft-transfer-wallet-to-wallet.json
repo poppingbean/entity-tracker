@@ -1,0 +1,68 @@
+{
+ "name": "ft-transfer-wallet-to-wallet",
+ "note": "a plain token transfer between two wallets",
+ "hash": "S10",
+ "captured_ts": 1794300000000,
+ "synthetic": true,
+ "tx": {
+  "transaction": {
+   "hash": "S10",
+   "signer_id": "bob.near",
+   "receiver_id": "blackdragon.tkn.near",
+   "actions": [
+    {
+     "FunctionCall": {
+      "method_name": "ft_transfer",
+      "args": "e30=",
+      "gas": 30000000000000,
+      "deposit": "0"
+     }
+    }
+   ]
+  },
+  "execution_outcome": {
+   "block_timestamp": "1794300000000000000",
+   "block_height": 200000000,
+   "outcome": {
+    "logs": [],
+    "status": {
+     "SuccessValue": ""
+    }
+   }
+  },
+  "receipts": [
+   {
+    "receipt": {
+     "receipt_id": "S10-0",
+     "predecessor_id": "bob.near",
+     "receiver_id": "blackdragon.tkn.near",
+     "receipt": {
+      "Action": {
+       "signer_id": "bob.near",
+       "actions": [
+        {
+         "FunctionCall": {
+          "method_name": "x"
+         }
+        }
+       ]
+      }
+     }
+    },
+    "execution_outcome": {
+     "block_height": 200000000,
+     "block_timestamp": "1794300000000000000",
+     "outcome": {
+      "executor_id": "blackdragon.tkn.near",
+      "logs": [
+       "EVENT_JSON:{\"standard\":\"nep141\",\"version\":\"1.0.0\",\"event\":\"ft_transfer\",\"data\":[{\"old_owner_id\":\"bob.near\",\"new_owner_id\":\"dave.near\",\"amount\":\"500000000\"}]}"
+      ],
+      "status": {
+       "SuccessValue": ""
+      }
+     }
+    }
+   }
+  ]
+ }
+}

@@ -1,0 +1,68 @@
+{
+ "name": "launch-justhoot",
+ "note": "a justhoot meme_launched event",
+ "hash": "S7",
+ "captured_ts": 1794300000000,
+ "synthetic": true,
+ "tx": {
+  "transaction": {
+   "hash": "S7",
+   "signer_id": "dev.near",
+   "receiver_id": "launchpad.justhoot.near",
+   "actions": [
+    {
+     "FunctionCall": {
+      "method_name": "launch_meme",
+      "args": "eyJhcmdzIjp7Im5hbWUiOiJIb290Iiwic3ltYm9sIjoiSE9PVCJ9fQ==",
+      "gas": 30000000000000,
+      "deposit": "0"
+     }
+    }
+   ]
+  },
+  "execution_outcome": {
+   "block_timestamp": "1794300000000000000",
+   "block_height": 200000000,
+   "outcome": {
+    "logs": [],
+    "status": {
+     "SuccessValue": ""
+    }
+   }
+  },
+  "receipts": [
+   {
+    "receipt": {
+     "receipt_id": "S7-0",
+     "predecessor_id": "dev.near",
+     "receiver_id": "launchpad.justhoot.near",
+     "receipt": {
+      "Action": {
+       "signer_id": "dev.near",
+       "actions": [
+        {
+         "FunctionCall": {
+          "method_name": "x"
+         }
+        }
+       ]
+      }
+     }
+    },
+    "execution_outcome": {
+     "block_height": 200000000,
+     "block_timestamp": "1794300000000000000",
+     "outcome": {
+      "executor_id": "launchpad.justhoot.near",
+      "logs": [
+       "EVENT_JSON:{\"standard\":\"hoot_launcher\",\"version\":\"1.0.0\",\"event\":\"meme_launched\",\"data\":{\"token_id\":\"hoot.launchpad.justhoot.near\",\"creator_id\":\"dev.near\",\"quote_token_id\":\"wrap.near\",\"dev_buy_quote\":\"1000000000000000000000000\"}}"
+      ],
+      "status": {
+       "SuccessValue": ""
+      }
+     }
+    }
+   }
+  ]
+ }
+}

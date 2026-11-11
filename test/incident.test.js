@@ -186,3 +186,23 @@ test('a full re-trace keeps the accounts an analyst added by hand', () => {
   assert.deepEqual(inc.accounts.map((a) => `${a.account}:${a.role}:${a.added_by || ''}`).sort(),
     ['att.near:attacker:', 'both.near:sub_account:trace/ring', 'hub.near:cash_out_wallet:trace/ring']);
 });
+
+// ---- WP-08: a busy account is never called an exchange on busyness alone
+import { fromOntology } from '../src/incident/origin.js';
+import { provenWallet } from '../src/incident/exchanges.js';
+import { config } from '../src/config.js';
+test('busy-only exchange facts are neutral; proven ones stay exchanges; the switch restores the old answer', () => {
+  const busy = { top: 'exchange', class: 'exchange', source: 'behaviour', why: 'busy: 40,000 transactions', operator: null };
+  const swept = { top: 'exchange', class: 'exchange/hot_wallet', source: 'registry', why: 'sends its reserves to binancecold3.near', operator: 'org:binance' };
+  const was = config.incidents.identifyBusyNeutral;
+  config.incidents.identifyBusyNeutral = true;
+  assert.deepEqual([fromOntology(busy).kind, fromOntology(busy).busy], ['wallet', true]);
+  assert.equal(fromOntology(swept).kind, 'exchange'); assert.equal(fromOntology(swept).name, 'Binance hot wallet');
+  config.incidents.identifyBusyNeutral = false;
+  assert.equal(fromOntology(busy).kind, 'exchange');
+  config.incidents.identifyBusyNeutral = was;
+});
+test('registry entries: proven by hand or by a sweep, never by busyness', () => {
+  assert.equal(provenWallet({ source: 'manual' }), true); assert.equal(provenWallet({ cold: 'binancecold3.near' }), true);
+  assert.equal(provenWallet({ source: 'discovered', cold: null, kind: 'hot' }), false); assert.equal(provenWallet({ kind: 'cold' }), true);
+});

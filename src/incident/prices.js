@@ -39,10 +39,16 @@ export function units(raw, decimals) {
   const d = BigInt(Math.max(0, decimals - 6));
   return Number(BigInt(raw) / 10n ** d) / 10 ** Math.min(6, decimals);
 }
-/** { amount, usd, symbol } of a raw amount. */
-export async function valueOf(token, raw) {
+/**
+ * { amount, usd, symbol, basis } of a raw amount. With `ts` the price is the one at that time (pricehistory.js: stable, NEAR history, the tracker's
+ * trades, the case's own swaps, else today's), and `today_usd` carries the same amount at today's price; without `ts` it is today's price, as before.
+ */
+export async function valueOf(token, raw, { ts = null } = {}) {
   if (/^nft:/.test(token)) return { amount: Number(raw), usd: null, symbol: token.slice(4) };
-  const [m, p] = await Promise.all([tokenMeta(token), usdPrice(token)]);
+  const [m, today] = await Promise.all([tokenMeta(token), usdPrice(token)]);
   const amount = units(raw, m.decimals);
-  return { amount, usd: p != null ? amount * p : null, symbol: m.symbol };
+  if (!ts) return { amount, usd: today != null ? amount * today : null, symbol: m.symbol };
+  const { usdAt, priceCtx } = await import('./pricehistory.js');
+  const at = await usdAt(token, ts, { implied: priceCtx.getStore()?.implied });
+  return { amount, usd: at.usd != null ? amount * at.usd : null, symbol: m.symbol, basis: at.basis, today_usd: today != null ? amount * today : null };
 }
