@@ -115,7 +115,7 @@ npm run agent-example      # or: SAFE_NEAR_MCP=http://127.0.0.1:8790/mcp npm run
 The core of it:
 
 ```js
-const r = await client.callTool({ name: 'guard_transaction', arguments: { transaction, policy, spent_near_today } });
+const r = await client.callTool({ name: 'guard_transaction', arguments: { transaction, policy, spent_near_today, spent_usd_today } });
 const { decision, reasons } = JSON.parse(r.content[1].text);   // content[0] is the same answer in words
 if (decision === 'allow') await account.signAndSendTransaction(transaction);
 else if (decision === 'ask_human') await askOwner(reasons);

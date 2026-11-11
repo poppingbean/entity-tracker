@@ -153,7 +153,7 @@ The parties who can still stop stolen money are the services that convert it: NE
 
 ### 4. Off-chain signals (`src/incident/signals.js`)
 
-- **On the bot.** `/hack <wallet | tx | link>` on @safenear_bot answers in the chat with what Safe Near knows about the case:
+- **On the bot.** `/safe <anything>` gives the Safety Check answer, which names any hack the input is linked to (for a token: when its creator or the wallets that bought it are accounts of a confirmed case). `/hack <wallet | tx | link>` on @safenear_bot answers in the chat with what Safe Near knows about the case:
   - the summary, and the part the pasted wallet plays in it;
   - where the money came from and where it left NEAR (chains and addresses);
   - what is still on NEAR, wallet by wallet;
@@ -213,7 +213,7 @@ Replaying the drain's blocks, the exchange-drain detector flags the first transf
 
   The answer offers "Investigate as a hack" on a transaction with a large payout, and "Look for hacks on this contract" on every contract.
 - **CLI:** `node src/cli.js incident <account | tx hash | target:<contract>> [--no-ai]`.
-- **API:** `GET /api/v1/incidents`, `GET /api/v1/incident?id=`. `GET /api/v1/inspect?q=` carries the `incidents` an input is linked to (see [tx-firewall.md](tx-firewall.md)).
+- **API:** `GET /api/v1/incidents`, `GET /api/v1/incident?id=` (a case), `GET /api/v1/incident?q=` (the confirmed case an account, transaction or link belongs to, with its role). The Agent Guard's `recent_hacks` and `get_incident` tools answer the same for AI agents. `GET /api/v1/inspect?q=` carries the `incidents` an input is linked to (see [tx-firewall.md](tx-firewall.md)).
 - **Settings:** `INCIDENTS_ENABLED`, `INCIDENT_MIN_USD`, `INCIDENT_ALWAYS_USD`, `INCIDENT_FRESH_HOURS`.
 
 ## Limits
