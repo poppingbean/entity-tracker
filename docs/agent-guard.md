@@ -52,6 +52,8 @@ Transactions are accepted in every shape the firewall reads:
 
 ## Connect your agent
 
+Remote: `https://app.safe-near.org/mcp` (Streamable HTTP). Local: `npm run mcp` (stdio; it asks the hosted API, no database needed).
+
 ### Claude Code
 
 ```bash
