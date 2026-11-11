@@ -140,12 +140,25 @@ export async function openToken(t, a, { now = Date.now() } = {}) {
   return true;
 }
 
+/**
+ * Who created a token found from its deploy. Pure. The deploy's signer, except when the token deployed its own contract (signer = the
+ * token): then the account that owns the sub-account (`real.realsies.near` → `realsies.near`), or failing that the liquidity provider.
+ * A top-level account (`x.near`, `x.tg`) has no owner to name: its liquidity provider, else null.
+ */
+export function creatorOf(id, dep = {}, a = {}) {
+  const signer = dep.signer || dep.by || null;
+  if (signer && signer !== id) return signer;
+  const parent = id.split('.').slice(1).join('.');
+  if (parent.includes('.')) return parent; // a sub-account of a named account (not of the `near` / `tg` top level)
+  return a.provider && a.provider !== id ? a.provider : null;
+}
+
 /** The tokens document for a token found from its deploy (same shape as a launchpad launch, collect/launches.js). Pure. */
 export function tokenDoc(id, dep, md, live, a = {}) {
   // a factory deploys the token into its own sub-account on behalf of the signer (smithii.near, tkn.near …); a self-deployed token is 'direct'
   const factory = dep.by && dep.by !== id && id.endsWith(`.${dep.by}`) ? dep.by : null;
   return {
-    launchpad: factory || 'direct', source: 'deploy', factory, creator: dep.signer || dep.by || a.provider || null, symbol: md?.symbol || null, name: md?.name || null, meme_id: null,
+    launchpad: factory || 'direct', source: 'deploy', factory, creator: creatorOf(id, dep, a), symbol: md?.symbol || null, name: md?.name || null, meme_id: null,
     dev_buy_near: null, dev_buy_quote_raw: null, lp: { owner: a.provider || null, locked: null }, tax: null, created_ts: Date.now(),
     deploy: { ts: dep.ts, height: dep.height, kind: dep.kind, by: dep.by, signer: dep.signer },
     sync_height: null, sync_ts: null, trades_n: 0, live_on_first_trade: false,

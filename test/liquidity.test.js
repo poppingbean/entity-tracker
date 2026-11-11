@@ -81,3 +81,11 @@ test('only a plain NEP-141 token is opened: not an NFT, a multi-token or a look-
   assert.equal(fungibleFrom({ ft, supply: null }).ok, false, 'no ft_total_supply');
   assert.equal(fungibleFrom({ ft: null, supply: null }).ok, false, 'a wallet or a DAO');
 });
+
+test('creator of a self-deployed token: the account that owns the sub-account, never the token itself', async () => {
+  const { creatorOf } = await import('../src/collect/liquidity.js');
+  assert.equal(creatorOf('fuk-3.smithii.near', { by: 'smithii.near', signer: 'smoothward1740.near' }), 'smoothward1740.near', 'a factory: the signer');
+  assert.equal(creatorOf('real.realsies.near', { by: 'real.realsies.near', signer: 'real.realsies.near' }), 'realsies.near');
+  assert.equal(creatorOf('mytoken.near', { by: 'mytoken.near', signer: 'mytoken.near' }, { provider: 'lp.near' }), 'lp.near', 'top level: who added liquidity');
+  assert.equal(creatorOf('mytoken.near', { by: 'mytoken.near', signer: 'mytoken.near' }, { provider: 'mytoken.near' }), null);
+});
