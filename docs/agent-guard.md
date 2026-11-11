@@ -93,7 +93,7 @@ npm run agent-example      # or: SAFE_NEAR_MCP=http://127.0.0.1:8790/mcp npm run
 ```
 > Pay 0.5 NEAR to an account someone asked us to pay
   BLOCK: Blocked: do not sign this transaction.
-    - critical: efd2242…: received the money drained from Binance's hot wallets on 2026-10-29 (~$51,129,478 taken)
+    - critical: efd2242…: received the money drained from Binance's hot wallets on 2026-10-29 (~$45,669,049 taken)
 
 > Wrap 0.5 NEAR to trade it
   ALLOW: Allowed: nothing in the check or the policy stops this transaction.

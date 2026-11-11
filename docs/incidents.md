@@ -192,7 +192,7 @@ The NEAR AI analyst pointed at the target's own events. The wNEAR/fake pool held
 
 ## Worked example: Binance hot wallets, 2026-10-29
 
-The investigation started from `3f61f7…a2540f5`, a wallet reported as the hacker's. Its money came in three transfers (41,363 NEAR) from `efd224…ae5af`. That account was **created by** a transfer of 8.09M NEAR from a Binance hot wallet at 20:15 UTC on 2026-10-29. Within 7 minutes two more Binance hot wallets sent 2.20M and 2.12M NEAR: **12.41M NEAR in total, about $51M at today's prices**. All three are recognised as Binance's because they sweep their reserves to `binancecold3.near`, which they did two hours later.
+The investigation started from `3f61f7…a2540f5`, a wallet reported as the hacker's. Its money came in three transfers (41,363 NEAR) from `efd224…ae5af`. That account was **created by** a transfer of 8.09M NEAR from a Binance hot wallet at 20:15 UTC on 2026-10-29. Within 7 minutes two more Binance hot wallets sent 2.20M and 2.12M NEAR: **12.41M NEAR in total, about $46M at the NEAR price of 2026-11-11** (the case values it at today's price, so the figure moves). All three are recognised as Binance's because they sweep their reserves to `binancecold3.near`, which they did two hours later.
 
 The investigation is re-rooted at `efd224…`. From 2026-11-01 it paid out to five wallets (`3f61f7…`, `d06a8a…`, `2c9f5e…`, `6490b3…`, `b2e145…`). Through 1Click:
 - about $120k was swapped to Bitcoin (`bc1qwwnfu5vvrw8p82q9qsydnk5jrsgmjarkqpxwzt`, `bc1qagexex37cu0mgc46wn8fj597rlmhsxue5vmll6`);
