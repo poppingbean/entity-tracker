@@ -10,8 +10,8 @@ const n0 = (x) => (x == null || !Number.isFinite(+x) ? '–' : Math.round(+x).to
 const pct = (x) => (x == null || !Number.isFinite(+x) ? '–' : `${Math.round(+x * 100)}%`);
 const PADS = { nearlytrade: 'nearly.trade', justhoot: 'justhoot', memecooking: 'meme.cooking', tkn: 'tkn.near' };
 
-/** The report for one passed check: { title, text }. Pure (tests). */
-export function gatePassReport(t, f, rules, { kind = 'first', minutes = null } = {}) {
+/** The report for one passed check: { title, text }. `odds`: meta.accuracy.gate_pass (what happened to earlier passes). Pure (tests). */
+export function gatePassReport(t, f, rules, { kind = 'first', minutes = null, odds = null, bot = config.alerts.telegramBot } = {}) {
   const tr = f?.trading || {}, au = f?.audit, eg = f?.intel?.early_buyer_groups;
   const name = t.symbol ? `$${t.symbol}` : t._id;
   const lines = [
@@ -23,6 +23,12 @@ export function gatePassReport(t, f, rules, { kind = 'first', minutes = null } =
   if (eg) lines.push(`Early buying: known good ${pct(eg.good?.share)} · dangerous ${pct(eg.bad?.share)}${eg.rugger?.wallets ? ` · rug-linked ${pct(eg.rugger.share)}` : ''}`);
   for (const w of rules.warnings || []) lines.push(`⚠️ ${w.why || w.id}`);
   lines.push(`Contract: ${t._id}`);
+  // the measured odds of a pass (the gates as they are now, replayed on every judged launch), so nobody reads a pass as "safe"
+  if (odds?.n >= 10 && odds.rug_rate != null) {
+    const sale = odds.creator_sale_minutes;
+    lines.push(`Odds so far: of ${n0(odds.n)} earlier launches that passed these gates, ${pct(odds.rug_rate)} rugged later${sale?.median != null ? ` (the creator's first sale came a median ${n0(sale.median)} min after the check)` : ''} and ${pct(odds.double_rate)} at least doubled within a day.`);
+  }
+  lines.push(`Most rugs show up as the creator selling, usually within the first hour. Get an alert the moment it does: /watch ${t._id}${bot ? ` on @${bot}` : ''}, or Watch on the token page.`);
   lines.push('Passing the gates is not a buy signal or financial advice: the AI review and the risk notes follow on the page.');
   return { title: `Gate pass: ${name}`, text: lines.join('\n') };
 }
@@ -31,7 +37,8 @@ export function gatePassReport(t, f, rules, { kind = 'first', minutes = null } =
 export async function raiseGatePass(t, f, rules, { kind = 'first', minutes = null, scanId = null, ts = Date.now() } = {}) {
   if (!config.alerts.enabled || !config.alerts.gatePass || !rules?.pass) return false;
   try {
-    const { title, text } = gatePassReport(t, f, rules, { kind, minutes });
+    const odds = (await (await import('../db.js')).metaGet('accuracy', null).catch(() => null))?.gate_pass || null;
+    const { title, text } = gatePassReport(t, f, rules, { kind, minutes, odds });
     return await raise(`gate_pass|${t._id}`, { type: 'gate_pass', severity: 'info', title, text, url: `/tokens/${encodeURIComponent(t._id)}`,
       related: { tokens: [t._id], creators: [t.creator] }, data: { event_ts: ts, score: rules.score, kind, scan: scanId, warnings: (rules.warnings || []).map((w) => w.id) }, ts });
   } catch (e) { warn(`gate-pass alert for ${t._id} failed: ${e.message}`); return false; }

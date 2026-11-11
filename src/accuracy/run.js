@@ -88,6 +88,7 @@ export async function evaluateAccuracy() {
     ai: { checks: ai.length, warn_vs_outcome: confusion(ai.map((x) => ({ flagged: AI_WARNS.has(x.ai.action), bad: x.bad }))), returns: returnSplit(ai.map((x) => ({ flagged: AI_WARNS.has(x.ai.action), ret: x.ret }))),
       actions: ai.reduce((m, x) => ({ ...m, [x.ai.action]: (m[x.ai.action] || 0) + 1 }), {}), risk_auc: auc(ai.map((x) => ({ risk: RISK_ORDER[x.ai.risk_level] ?? null, bad: x.bad }))),
       note: 'Few verdicts, mostly from the old scanner: read as a first sign, not a measurement' },
+    gate_pass: await gatePassOddsLive(all).catch((e) => ({ error: e.message })),
     replay_current_gates: (() => { const xs = replayGates(all); return { ...confusion(xs.map((x) => ({ flagged: !x.replay_pass, bad: x.bad }))), returns: returnSplit(xs.map((x) => ({ flagged: !x.replay_pass, ret: x.ret }))), note: 'the current gates replayed on every stored check, imported ones included' }; })(),
     groups: await groupVerdicts(),
     feedback_pending: await col('feedback').countDocuments({ status: 'pending' }),
@@ -98,6 +99,34 @@ export async function evaluateAccuracy() {
   await metaSet('accuracy', out);
   info(`ACCURACY ${out.checks} checks · gates precision ${out.gates.precision} recall ${out.gates.recall} · rule score AUC ${out.rule_score.auc} · group bad-verdict precision ${out.groups.bad_verdict.precision}`);
   return out;
+}
+
+/**
+ * What happened to launches that pass the gates as they are now (replayed on every judged check): the share that rugged later, the share
+ * that at least doubled within a day, the rest. Pure: `rows` from replayGates; `creatorSaleMinutes` the minutes from each rugged pass's
+ * check to its creator's first sale (null when the creator never sold).
+ */
+export function gatePassOdds(rows, creatorSaleMinutes = []) {
+  const pass = rows.filter((x) => x.replay_pass), n = pass.length;
+  const rugged = pass.filter((x) => x.rugged).length, real = pass.filter((x) => !x.rugged && x.ret != null && x.ret >= 1).length;
+  const m = creatorSaleMinutes.filter((x) => x != null && Number.isFinite(x) && x >= 0).sort((a, b) => a - b);
+  const q = (p) => (m.length ? Math.round(m[Math.min(m.length - 1, Math.floor(p * m.length))]) : null);
+  return { n, rugged, doubled: real, other: n - rugged - real, rug_rate: n ? +(rugged / n).toFixed(3) : null, double_rate: n ? +(real / n).toFixed(3) : null,
+    creator_sale_minutes: { n: m.length, median: q(0.5), p75: q(0.75), within_60: m.length ? +(m.filter((x) => x <= 60).length / m.length).toFixed(3) : null },
+    ...(n < 20 ? { note: 'few passes: read as a first sign, not a measurement' } : {}) };
+}
+
+/** gatePassOdds on the stored checks, with each rugged pass's time to its creator's first sale after the check. */
+async function gatePassOddsLive(all) {
+  const pass = replayGates(all).filter((x) => x.replay_pass);
+  const rugged = pass.filter((x) => x.rugged);
+  const creators = new Map((await col('tokens').find({ _id: { $in: rugged.map((x) => x.token) } }, { projection: { creator: 1 } }).toArray()).map((t) => [t._id, t.creator]));
+  const mins = await Promise.all(rugged.map(async (x) => {
+    const c = creators.get(x.token); if (!c) return null;
+    const s = await col('trades').find({ token: x.token, trader: c, buy: false, ts: { $gte: x.ts } }, { projection: { ts: 1 } }).sort({ ts: 1 }).limit(1).next().catch(() => null);
+    return s ? (s.ts - x.ts) / 60e3 : null;
+  }));
+  return gatePassOdds(replayGates(all), mins);
 }
 
 /** Backtest: the gates as they are vs with `overrides`, on the same stored checks. */

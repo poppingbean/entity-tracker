@@ -32,7 +32,10 @@ export function applyRules(f) {
   gate(f.contract.matchesTemplate === true, 'standard_contract', 'token code differs from the launchpad template (custom contract = honeypot risk)');
   gate(f.pool.lpLocked !== false, 'lp_locked', 'liquidity is not locked by the launchpad');
   gate(f.pool.nearReserve >= R.minPoolNear, 'min_pool_near', `pool has ${f.pool.nearReserve} NEAR (< ${R.minPoolNear})`);
-  gate(f.market.mcapUsd != null && f.market.mcapUsd >= R.minMcapUsd, 'min_mcap', `market cap ${f.market.mcapUsd == null ? 'unknown' : '$' + f.market.mcapUsd.toLocaleString('en-US')} (< $${R.minMcapUsd.toLocaleString('en-US')})`);
+  // the market cap in NEAR (does not move with NEAR's price); an optional USD floor on top (MIN_MCAP_USD, 0 = off)
+  const mcN = f.market.mcapNear, mcU = f.market.mcapUsd;
+  const mcapOk = (!(R.minMcapNear > 0) || (mcN != null && mcN >= R.minMcapNear)) && (!(R.minMcapUsd > 0) || (mcU != null && mcU >= R.minMcapUsd));
+  gate(mcapOk, 'min_mcap', `market cap ${mcN == null ? 'unknown' : Math.round(mcN).toLocaleString('en-US') + ' NEAR'}${mcU != null ? ` ($${Math.round(mcU).toLocaleString('en-US')})` : ''} (< ${R.minMcapNear > 0 ? `${R.minMcapNear.toLocaleString('en-US')} NEAR` : ''}${R.minMcapNear > 0 && R.minMcapUsd > 0 ? ' / ' : ''}${R.minMcapUsd > 0 ? `$${R.minMcapUsd.toLocaleString('en-US')}` : ''})`);
   gate(f.trading.uniqueBuyers >= R.minUniqueBuyers, 'min_buyers', `${f.trading.uniqueBuyers} distinct external buyers (< ${R.minUniqueBuyers})`);
   gate(!f.trading.creatorSold, 'creator_not_selling', 'creator already sold');
   // a name / symbol that addresses an AI is an attempt to manipulate automated reviewers (this one included)
