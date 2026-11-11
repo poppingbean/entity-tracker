@@ -66,3 +66,18 @@ test('poolHit: a Ref v2 "Liquidity added" log is the first pool event of a token
   assert.deepEqual(hit.pool, { dex: 'refv2', poolId: 9005, quote: 'wrap.near' });
   assert.equal(poolHit('other.near', [tx]), null);
 });
+
+test('only a plain NEP-141 token is opened: not an NFT, a multi-token or a look-alike', async () => {
+  const { fungibleFrom } = await import('../src/collect/liquidity.js');
+  const ft = { spec: 'ft-1.0.0', name: 'FUK', symbol: 'FUK', decimals: 18 };
+  assert.equal(fungibleFrom({ ft, supply: '1000000000000000000000000000' }).ok, true);
+  assert.equal(fungibleFrom({ ft, supply: '1', role: 'token' }).ok, true, 'audited as a token');
+  assert.equal(fungibleFrom({ ft, supply: '1', nft: { spec: 'nft-2.0.0', name: 'X', symbol: 'X' } }).ok, false, 'also answers nft_metadata: an NFT contract');
+  assert.equal(fungibleFrom({ ft, supply: '1', role: 'nft' }).ok, false, 'the audit says NFT');
+  assert.equal(fungibleFrom({ ft, supply: '1', role: 'multi_token' }).ok, false, 'NEP-245 is not NEP-141');
+  assert.equal(fungibleFrom({ ft: { ...ft, spec: 'nft-1.0.0' }, supply: '1' }).ok, false, 'wrong spec');
+  assert.equal(fungibleFrom({ ft: { ...ft, decimals: '18' }, supply: '1' }).ok, false, 'decimals must be an integer');
+  assert.equal(fungibleFrom({ ft: { ...ft, symbol: '' }, supply: '1' }).ok, false, 'no symbol');
+  assert.equal(fungibleFrom({ ft, supply: null }).ok, false, 'no ft_total_supply');
+  assert.equal(fungibleFrom({ ft: null, supply: null }).ok, false, 'a wallet or a DAO');
+});

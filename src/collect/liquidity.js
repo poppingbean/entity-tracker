@@ -7,7 +7,8 @@
 // What has to hold before a liquidity add opens a token (so a pool for wNEAR / USDC or an old token is not "launched" again):
 //   - the token is not a quote itself and is not already tracked (a tracked token waiting for its pool, `awaiting_pool`, goes live instead);
 //   - the tracker saw the token's contract deployed (`contract_deploys`, the deploy watcher) within TOKENS_FROM_DEPLOYS_MAX_AGE_DAYS;
-//   - it answers ft_metadata (it is a fungible token).
+//   - it is a fungible token (NEP-141), not an NFT or a multi-token: an `ft-…` ft_metadata spec with integer decimals and a symbol, a
+//     numeric ft_total_supply, no `nft-…` nft_metadata, and not classed nft / multi_token by the contract audit (isFungible).
 // The token's live time is the liquidity block, its creator the account that signed the deploy (the factory's caller), and its
 // `launchpad` the factory that deployed it (smithii.near …) or 'direct'. From there the usual pipeline runs: trades, early wallets, groups,
 // the scanner's first check. The ontology learns its `created_by` edge at once (writer `tokens`).
@@ -66,6 +67,35 @@ export function tokenOfAdd(a, isQuote = isKnownQuote) {
   return { token: tok.token, quote: q.token, quoteRaw: q.raw, pool: { dex: a.dex, poolId: a.poolId, quote: q.token } };
 }
 
+/**
+ * Is it a fungible token (NEP-141)? Pure, from what the contract answered (null = no answer). An NFT contract (NEP-171) or a multi-token
+ * contract (NEP-245) can carry a symbol too, and some answer more than one standard: only a contract that is plainly NEP-141 and plainly
+ * not an NFT counts. `role`: the contract audit's class when it has one (token, nft, multi_token …).
+ * Returns { ok, why } (why: the reason it is not one).
+ */
+export function fungibleFrom({ ft = null, supply = null, nft = null, role = null } = {}) {
+  if (role && role !== 'token') return { ok: false, why: `the audit classes it as ${role}` };
+  if (nft && /^nft-/i.test(String(nft.spec || ''))) return { ok: false, why: `it answers nft_metadata (${nft.spec}): an NFT contract` };
+  if (!ft || typeof ft !== 'object') return { ok: false, why: 'no ft_metadata' };
+  if (!/^ft-/i.test(String(ft.spec || ''))) return { ok: false, why: `ft_metadata spec is ${JSON.stringify(ft.spec ?? null)}, not ft-…` };
+  if (!Number.isInteger(ft.decimals) || ft.decimals < 0 || ft.decimals > 40) return { ok: false, why: `decimals ${JSON.stringify(ft.decimals ?? null)}` };
+  if (!ft.symbol || typeof ft.symbol !== 'string') return { ok: false, why: 'no symbol' };
+  if (!/^\d+$/.test(String(supply ?? ''))) return { ok: false, why: 'no numeric ft_total_supply' };
+  return { ok: true, why: null };
+}
+
+/**
+ * The contract's answers, then fungibleFrom. `read(method)` calls a view method (default: the RPC, with `retry` for network errors);
+ * a method the contract does not have answers null. Network errors are thrown (the caller counts them), never taken as "not a token".
+ */
+export async function isFungible(id, { read = null, transientErr = () => false } = {}) {
+  const call = read || ((m) => view(id, m));
+  const ask = (m) => call(m).catch((e) => (transientErr(e) ? Promise.reject(e) : null));
+  const role = (await col('audits').findOne({ _id: id }, { projection: { 'auto.role': 1 } }).catch(() => null))?.auto?.role || null;
+  const [ft, supply, nft] = await Promise.all([ask('ft_metadata'), ask('ft_total_supply'), ask('nft_metadata')]);
+  return { ...fungibleFrom({ ft, supply, nft, role }), md: ft };
+}
+
 /** Whole NEAR in a raw wNEAR amount (24 decimals), else null. */
 const nearOf = (quote, raw) => (quote === WNEAR && raw ? Number(BigInt(raw) / 10n ** 18n) / 1e6 : null);
 
@@ -99,8 +129,9 @@ export async function openToken(t, a, { now = Date.now() } = {}) {
   }
   const dep = await col('contract_deploys').find({ account: t.token }).sort({ ts: 1 }).limit(1).next();
   if (!dep || now - dep.ts > C.maxAgeDays * 86400e3) return false; // not a fresh deploy the watcher saw: an old token getting a new pool
-  const md = await view(t.token, 'ft_metadata').catch(() => null);
-  if (!md?.symbol) return false; // not a fungible token
+  const f = await isFungible(t.token);
+  if (!f.ok) { info(`not opened ${t.token}: liquidity added, but not a fungible token (${f.why})`); return false; }
+  const md = f.md;
   const doc = tokenDoc(t.token, dep, md, live, a);
   const r = await col('tokens').updateOne({ _id: t.token }, { $setOnInsert: doc }, { upsert: true });
   if (!r.upsertedCount) return false;
@@ -134,7 +165,7 @@ async function syncToken(id) {
 
 /** Retry a chain read a few times (a long backfill makes thousands of calls and the public endpoints rate-limit). */
 // only a network-type error is worth another try; a contract that answers with an error (no such method, no code) answers the same again
-const transient = (e) => /timeout|timed out|abort|429|too many|50[0-4]|ECONN|ENOTFOUND|EAI_AGAIN|socket|fetch failed|network/i.test(String(e?.message || e));
+const transient = (e) => { const m = String(e?.message || e); return !/HANDLER_ERROR|MethodNotFound|CodeDoesNotExist|MethodResolveError|FunctionCallError/.test(m) && /timeout|timed out|abort|429|too many|50[0-4]|ECONN|ENOTFOUND|EAI_AGAIN|socket|fetch failed|network/i.test(m); };
 async function retry(fn, tries = 3) {
   let last;
   for (let i = 0; i < tries; i++) { try { return await fn(); } catch (e) { last = e; if (!transient(e)) break; await new Promise((r) => setTimeout(r, 1500 * (i + 1) ** 2)); } }
@@ -170,7 +201,7 @@ export async function backfillFromDeploys(days = 7, { dry = false, log = () => {
   const deps = await col('contract_deploys').aggregate([{ $match: { ts: { $gte: since } } }, { $sort: { ts: 1 } }, { $group: { _id: '$account', dep: { $first: '$$ROOT' } } }]).toArray();
   const tracked = new Set((await col('tokens').find({ _id: { $in: deps.map((d) => d._id) } }, { projection: { _id: 1 } }).toArray()).map((t) => t._id));
   // skip contracts the audit already knows are not tokens (one ft_metadata call each for the rest)
-  const notToken = new Set((await col('audits').find({ _id: { $in: deps.map((d) => d._id) }, 'auto.role': { $exists: true, $nin: ['token', 'multi_token'] } }, { projection: { _id: 1 } }).toArray()).map((a) => a._id));
+  const notToken = new Set((await col('audits').find({ _id: { $in: deps.map((d) => d._id) }, 'auto.role': { $exists: true, $ne: 'token' } }, { projection: { _id: 1 } }).toArray()).map((a) => a._id));
   const out = [], failed = [];
   const todo = deps.filter(({ _id: id }) => !tracked.has(id) && !notToken.has(id) && !isKnownQuote(id));
   // eight accounts at a time: one ft_metadata call each, and a history walk for the tokens
@@ -181,9 +212,11 @@ export async function backfillFromDeploys(days = 7, { dry = false, log = () => {
 
   async function one({ _id: id, dep }) {
     try {
-      // not a token: the contract has no ft_metadata (a wallet, a DAO …) and answers with an error; only a network error is a failure
-      const md = await retry(() => view(id, 'ft_metadata')).catch((e) => (transient(e) ? Promise.reject(e) : null));
-      if (!md?.symbol) return;
+      // not a fungible token: a wallet, a DAO, an NFT or multi-token contract (it answers with an error, or another standard); only a network
+      // error is a failure (thrown, counted)
+      const f = await isFungible(id, { read: (m) => retry(() => view(id, m)), transientErr: transient });
+      if (!f.ok) return;
+      const md = f.md;
       const hit = await findFirstPool(id, dep.signer);
       if (!hit?.tx || !isKnownQuote(hit.pool.quote)) return;
       const live = { pool: hit.pool, live_ts: hit.tx.ts, live_height: hit.tx.height, live_tx: hit.tx.hash, liquidity_near: null, status: 'new', next_process_ts: 0 };
