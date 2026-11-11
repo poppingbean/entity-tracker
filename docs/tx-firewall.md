@@ -216,3 +216,7 @@ node src/cli.js flag <account> critical "<reason>" "<detail>"
 ```
 
 Every later check that touches that account carries the flag. Remove it with `node src/cli.js unflag <account>`.
+
+## Limits and operator commands
+
+Lookups run in parallel under a 2.5 s budget (`context.complete: false` when some didn't answer). Open to any origin, no password; 300 checks per 10 minutes per IP (`FIREWALL_PER_IP_10MIN`), unlimited with a key from `FIREWALL_API_KEYS` (`x-api-key`); bodies up to 2 MB (`FIREWALL_MAX_BODY_BYTES`). Nothing about a transaction is stored, only counters per verdict. `GET /api/v1/account?id=` gives one account's reputation for "send to" screens. Operators report accounts with `node src/cli.js flag <account> critical|high|medium "<reason>"` (`firewall_flags`; `unflag` undoes it), and `node src/cli.js check-tx '<json>'` runs a check from the command line.
