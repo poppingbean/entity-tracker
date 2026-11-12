@@ -84,6 +84,8 @@ export async function watchDeploys() {
         priority: /^DeployContract|^DeployGlobal/.test(d.kind) ? 2 : 1 } }, upsert: true } })), { ordered: false });
   }
   await metaSet('audit:deploy_cursor', last);
+  // NFT Collectibles: a collection HOT Craft or near.cooking deploys is listed in the block it appears (others when their audit says NFT)
+  if (found.length) await (await import('../nft/sync.js')).registerPlatformDeploys(found).catch((e) => warn(`NFT deploys: ${e.message}`));
   // the same blocks feed the live hack detector (protocol drains)
   const drains = await scanBlocks(blocks).catch((e) => { warn(`incident detector: ${e.message}`); return []; });
   // money watch: every movement of $100k or more opens a watch case; moves out of watched accounts are followed (src/watch)

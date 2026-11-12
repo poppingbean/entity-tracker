@@ -22,7 +22,7 @@
     "sim-reset": "node src/cli.js sim-reset",
     "mcp": "node src/agent/mcp-stdio.js",
     "agent-example": "node examples/agent-guard.mjs",
-    "test": "node --test test/logic.test.js test/firewall.test.js test/audit.test.js test/incident.test.js test/destination.test.js test/prompts.test.js test/agent.test.js test/nearai.test.js test/ontology.test.js test/ring.test.js test/watch-rules.test.js test/liquidity.test.js test/telegram.test.js test/grounding.test.js test/fixtures.test.js test/truth.test.js test/security-accuracy.test.js test/pricehistory.test.js test/trail.test.js test/holders.test.js test/health.test.js"
+    "test": "node --test test/logic.test.js test/firewall.test.js test/audit.test.js test/incident.test.js test/destination.test.js test/prompts.test.js test/agent.test.js test/nearai.test.js test/ontology.test.js test/ring.test.js test/watch-rules.test.js test/liquidity.test.js test/telegram.test.js test/nft-sources.test.js test/grounding.test.js test/fixtures.test.js test/truth.test.js test/security-accuracy.test.js test/pricehistory.test.js test/trail.test.js test/holders.test.js test/health.test.js"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.2",

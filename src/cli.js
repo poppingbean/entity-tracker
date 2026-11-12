@@ -33,6 +33,7 @@
 //   node src/cli.js ring-scan [case id]                look for laundering rings (memecoins bought by wallets a confirmed case paid); stores proposals
 //   node src/cli.js ring-approve <id> [--dry] | ring-reject <id> ["reason"]   an operator applies a proposal with case-add, or drops it
 //   node src/cli.js chain-links                        addresses on other chains that received money from 2+ NEAR cases (leads; flags nothing)
+//   node src/cli.js nft-from-deploys [days] [--dry]    list NFT collections deployed in the last N days (default 30): HOT Craft, near.cooking, any contract the audit calls NFT
 //   node src/cli.js tokens-from-deploys [days] [--dry]   open tokens deployed in the last N days (default 7) that already have a pool (any factory, no launchpad)
 //   node src/cli.js watch-list [--status s] [--limit N]   money watch cases (docs/money-watch-design.md); watch-show <id>; watch-scan [N] (read-only: what would open in the latest N blocks)
 //   node src/cli.js watch-report <address> [--source <link>] [--note "<text>"]   a person reports an address; watch-confirm <id> [--source]; watch-close <id> <reason>; watch-review <id>
@@ -270,6 +271,13 @@ try {
     const { addExchangeWallet } = await import('./incident/exchanges.js');
     if (!args[0] || !args[1]) throw new Error('usage: exchange-wallet <account> <exchange> [hot|cold]');
     await addExchangeWallet(args[0], args[1], args[2] === 'cold' ? 'cold' : 'hot'); info(`exchange wallet ${args[0]}: ${args[1]}`);
+  } else if (cmd === 'nft-from-deploys') {
+    // node src/cli.js nft-from-deploys [days] [--dry]: NFT collections the deploy watcher saw that NFT Collectibles does not list yet
+    const { backfillNftDeploys } = await import('./nft/sync.js');
+    const r = await backfillNftDeploys(Number(args.find((a) => /^\d+$/.test(a))) || 30, { dry: args.includes('--dry') });
+    const by = r.filter((x) => x.new).reduce((m, x) => ((m[x.source] = (m[x.source] || 0) + 1), m), {});
+    for (const x of r.filter((y) => y.new).slice(0, 50)) info(`${args.includes('--dry') ? 'would list' : 'listed'}: ${x.account} (${x.source})`);
+    console.log(`${r.length} NFT deploys seen, ${r.filter((x) => x.new).length} ${args.includes('--dry') ? 'would be' : 'were'} newly listed ${JSON.stringify(by)}`);
   } else if (cmd === 'tokens-from-deploys') {
     // node src/cli.js tokens-from-deploys [days] [--dry]: tokens deployed while the liquidity watch was not running, opened from their first pool
     const { backfillFromDeploys } = await import('./collect/liquidity.js');

@@ -1,5 +1,5 @@
 // ================================================================== NFT COLLECTIBLES
-const NFTSRC = { hotcraft: 'HOT Craft', cookon: 'near.cooking', market: 'traded on near.cooking', nearblocks: 'discovered', manual: 'added' };
+const NFTSRC = { hotcraft: 'HOT Craft', cookon: 'near.cooking', deploy: 'new contract', market: 'traded on near.cooking', nearblocks: 'discovered', manual: 'added' };
 const nftSrc = (s) => (s ? `<span class="chip">${esc(NFTSRC[s] || s)}</span>` : '');
 const nftName = (c) => `<span class="ent">${avatar(c.id, c.symbol || c.name || c.id, 28)}<span><b>${ilink(P.nft(c.id), esc(short(c.name || c.id, 30)))}</b><small class="acct">${esc(short(c.id, 34))}</small></span></span>`;
 async function nftAdd(id) {
@@ -13,8 +13,8 @@ views.nfts = async () => {
   const cnt = (k) => (j.sources[k] ? ` (${n(j.sources[k], 0)})` : '');
   return `<div class="card"><div class="bar"><input id="nftAddInput" type="search" style="flex:1;max-width:460px" placeholder="any NFT contract, e.g. nft.sickyak1747.near" onkeydown="if(event.key==='Enter')nftAdd(this.value)">
       <button onclick="nftAdd($('nftAddInput').value)">Add &amp; analyse</button></div>
-    <p class="muted small" style="margin:0">HOT Craft launches (nfts.tg) and near.cooking collections are followed automatically; every NFT contract NearBlocks lists is discovered (airdrop spam set apart); any collection can be added by its contract id.</p></div>
-  <div class="card"><div class="bar">${seg('nfts', 'tab', [['', 'All'], ['active', 'Active (24 h)'], ['hotcraft', 'HOT Craft' + cnt('hotcraft')], ['cookon', 'near.cooking' + cnt('cookon')], ['market', 'Traded on cookon' + cnt('market')], ['nearblocks', 'Discovered' + cnt('nearblocks')], ['manual', 'Added' + cnt('manual')], ['spam', 'Spam' + cnt('spam')]])}
+    <p class="muted small" style="margin:0">HOT Craft and near.cooking collections are listed the moment they are deployed (the chain watch reads every block), and so is any other contract the automated audit finds to be an NFT collection; every NFT contract NearBlocks lists is discovered too (airdrop spam set apart); any collection can be added by its contract id.</p></div>
+  <div class="card"><div class="bar">${seg('nfts', 'tab', [['', 'All'], ['active', 'Active (24 h)'], ['hotcraft', 'HOT Craft' + cnt('hotcraft')], ['cookon', 'near.cooking' + cnt('cookon')], ['deploy', 'New contracts' + cnt('deploy')], ['market', 'Traded on cookon' + cnt('market')], ['nearblocks', 'Discovered' + cnt('nearblocks')], ['manual', 'Added' + cnt('manual')], ['spam', 'Spam' + cnt('spam')]])}
     ${qbox('nfts', 'name / contract')}${sel('nfts', 'sort', [['', 'latest activity'], ['launched', 'newest launch'], ['events', 'most events'], ['holders', 'most holders']])}<span class="spacer"></span>${pager('nfts', j.total)}</div>
     <table><tr><th>Collection</th><th>Source</th><th>Launched</th><th class="num">Supply</th><th class="num">Minted</th><th class="num">Raised</th><th class="num">Sales</th><th class="num">Volume</th><th class="num">Holders</th><th>Last activity</th><th></th></tr>
     ${j.rows.map((c) => `<tr ${row(P.nft(c.id))}><td>${nftName(c)}</td><td>${nftSrc(c.source)}</td><td>${c.launched_ts ? since(c.launched_ts) : '–'}</td>
