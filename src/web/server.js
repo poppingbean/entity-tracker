@@ -65,8 +65,6 @@ const watchHits = new Map(), keyHits = new Map(), feedbackHits = new Map();
 /** Watchlist changes over POST (JSON body): create a key, add / remove an item, set an API key's webhook. */
 const reportHits = new Map();
 // these change what the Safety Check warns about: never open on a public deployment without DASHBOARD_PASSWORD
-/** The money watch is not public: on a public deployment it needs the dashboard password (like confirming a hack). */
-const mwPrivate = () => (exposed() && !config.web.password ? { error: 'the money watch is private: it needs DASHBOARD_PASSWORD on a public deployment' } : null);
 const OPERATOR_POSTS = new Set(['/api/incident/confirm', '/api/incident/clear', '/api/money-watch/report']);
 const POSTS = {
   /** Report a hack, a drainer or stolen funds: it is investigated from the chain (never flagged on the report alone). */
@@ -664,9 +662,8 @@ const routes = {
     }
     return doc ? { incident: doc, live_moves: await col('incident_moves').find({ incident: doc._id }).sort({ ts: -1 }).limit(100).toArray() } : { error: 'no such incident' };
   },
-  /** Money watch (docs/money-watch-design.md): every movement of $100k or more, followed until the reviewer calls it normal. Private: only on the dashboard. */
+  /** Money watch (docs/money-watch-design.md): every movement of $100k or more, followed until the reviewer calls it normal. Public and read-only; reporting an address stays an operator action (OPERATOR_POSTS). */
   '/api/money-watch': async (u) => {
-    if (mwPrivate()) return mwPrivate();
     const status = u.searchParams.get('status'), f = status ? { status } : {}, offset = Math.max(0, Number(u.searchParams.get('offset')) || 0);
     const day = new Date().toISOString().slice(0, 10), now = Date.now();
     const [rows, total, by, ai, opened24] = await Promise.all([
@@ -679,7 +676,7 @@ const routes = {
       review: w.reviews?.[0] ? { verdict: w.reviews[0].verdict, by: w.reviews[0].by, what_it_is: w.reviews[0].what_it_is, ts: w.reviews[0].ts } : null, reports: (w.reports || []).length, incident: w.incident || null })),
       total, by: Object.fromEntries(by.map((x) => [x._id, { n: x.n, usd: Math.round(x.usd || 0) }])), opened_24h: opened24, ai_calls_today: ai?.value?.calls || 0, ai_budget: config.watch.aiPerDay, enabled: config.watch.enabled, min_usd: config.watch.minUsd };
   },
-  '/api/money-watch/case': async (u) => { if (mwPrivate()) return mwPrivate(); const w = await col('watches').findOne({ _id: String(u.searchParams.get('id') || '') }); return w ? { watch: w } : { error: 'no such watch' }; },
+  '/api/money-watch/case': async (u) => { const w = await col('watches').findOne({ _id: String(u.searchParams.get('id') || '') }); return w ? { watch: w } : { error: 'no such watch' }; },
   /** Investigate an account, a tx hash or target:<contract>: the saved incident if there is one, else (run=1) start a trace here. */
   '/api/incident/investigate': async (u, req) => {
     let input; try { input = parseInvestigation(u.searchParams.get('q')); } catch (e) { return { error: e.message }; }

@@ -13,8 +13,6 @@ const TAGS = ['win80', 'win50', 'win30', 'sniper', 'loss', 'unrated'];
 const tagOk = (t) => (TAGS.includes(t) ? t : 'unrated');
 // the simulated wallet (paper trading) is hidden while it does not buy anything; set to true to show its page, tabs and labels again
 const SHOW_SIM = false;
-// the money watch is private (its API answers only with DASHBOARD_PASSWORD), so the public site does not list a page it cannot show; true shows it again
-const SHOW_MONEY_WATCH = false;
 const TAGHELP = 'loss = lost money overall · net profit: win80 / win50 / win30 = ended in profit in 80 / 50 / 30 %+ of the tokens bought early, sniper = under 30 % (a few big wins pay for many small losses) · unrated = too few judged tokens';
 /** Win-rate tag of a wallet or group (share of its early tokens that ended in profit). */
 const tg = (t) => `<span class="v ${tagOk(t)}" title="${esc(TAGHELP)}">${tagOk(t)}</span>`;
