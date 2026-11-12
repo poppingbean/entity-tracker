@@ -1,5 +1,5 @@
 // The background loop: find launches, read their trades, profile early wallets, regroup, ask NEAR AI.
-import { col, metaSet } from './db.js';
+import { col, metaGet, metaSet } from './db.js';
 import { config } from './config.js';
 import { info, warn, error } from './log.js';
 import { discover, requeueSkippedQuotes } from './collect/launches.js';
@@ -28,7 +28,7 @@ import { scanTick, followUpTick, blacklistCreator } from './scanner/pipeline.js'
 import { managePositions } from './sim/portfolio.js';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-export const runtime = { startedTs: Date.now(), cycles: 0, lastCycleTs: null, stopping: false, lastEvalTs: 0, lastPositionCheck: 0, lastRugCheck: 0, lastCreatorCheck: 0, reviewing: null, reviewed: 0, nft: null, nftLast: null, alerts: null, lastAlerts: 0, telegram: null, accuracy: null, lastAccuracy: 0, autoAudit: null, lastAutoAudit: 0, incident: null, lastIncident: 0, deepReview: null, lastDeepReview: 0, registry: null, lastRegistry: 0, dataCheck: null, lastDataCheck: 0, news: null, lastNews: 0, ring: null, lastRing: 0 };
+export const runtime = { startedTs: Date.now(), cycles: 0, lastCycleTs: null, stopping: false, lastEvalTs: 0, lastPositionCheck: 0, lastRugCheck: 0, lastCreatorCheck: 0, reviewing: null, reviewed: 0, nft: null, nftLast: null, alerts: null, lastAlerts: 0, telegram: null, accuracy: null, lastAccuracy: 0, autoAudit: null, lastAutoAudit: 0, incident: null, lastIncident: 0, deepReview: null, lastDeepReview: 0, registry: null, lastRegistry: 0, dataCheck: null, lastDataCheck: 0, news: null, lastNews: 0, ring: null, lastRing: 0, academy: null };
 
 /** One pass of the pipeline. Returns what it did, so callers (the CLI) can loop until idle. */
 export async function cycle({ evaluate = true } = {}) {
@@ -107,6 +107,16 @@ export async function cycle({ evaluate = true } = {}) {
   if (!runtime.accuracy && Date.now() - runtime.lastAccuracy > config.accuracy.everyMs) {
     runtime.lastAccuracy = Date.now();
     runtime.accuracy = evaluateAccuracy().catch((e) => warn(`accuracy pass failed: ${e.message}`)).finally(() => { runtime.accuracy = null; });
+  }
+  // Safe Near Academy: the graded tasks rebuilt once a day (the last build time is kept in meta, so a restart does not rebuild)
+  if (config.academy.rebuildHours > 0 && !runtime.academy) {
+    runtime.academy = (async () => {
+      const last = await metaGet('academy_build', null);
+      if (last?.ts && Date.now() - last.ts < config.academy.rebuildHours * 3600e3) return;
+      const r = await (await import('./academy/service.js')).buildAcademy();
+      await metaSet('academy_build', { ts: Date.now(), tasks: r.tasks, counts: r.counts });
+      info(`academy: ${r.tasks} tasks rebuilt`);
+    })().catch((e) => warn(`academy rebuild: ${e.message}`)).finally(() => { runtime.academy = null; });
   }
   if (config.alerts.telegramToken && !runtime.telegram) runtime.telegram = pollTelegram().catch((e) => warn(`Telegram poll failed: ${e.message}`)).finally(() => { runtime.telegram = null; });
   // NFT collections (discovery + history sync) beside the loop too, one pass at a time

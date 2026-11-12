@@ -37,6 +37,7 @@
 //   node src/cli.js tokens-from-deploys [days] [--dry]   open tokens deployed in the last N days (default 7) that already have a pool (any factory, no launchpad)
 //   node src/cli.js watch-list [--status s] [--limit N]   money watch cases (docs/money-watch-design.md); watch-show <id>; watch-scan [N] (read-only: what would open in the latest N blocks)
 //   node src/cli.js watch-report <address> [--source <link>] [--note "<text>"]   a person reports an address; watch-confirm <id> [--source]; watch-close <id> <reason>; watch-review <id>
+//   node src/cli.js academy-build [--dry]              rebuild the Safe Near Academy's graded tasks (docs/academy-design.md); --dry counts them per track and level
 //   node src/cli.js link-eval                         pairwise precision / recall of the wallet grouping against pairs of known owners (changes nothing)
 //   node src/cli.js exchanges-prune [--apply]          list (or remove) registry entries that rest only on being busy (IDENTIFY_BUSY_NEUTRAL)
 //   node src/cli.js golden-candidates [--class <class>] [--limit N]   resolved accounts not in the golden set, strongest evidence first (JSON lines; writes nothing)
@@ -50,7 +51,7 @@
 //   node src/cli.js ontology-parity                  what the writers would write now vs what is stored (missing / stale per writer; writes nothing)
 //   node src/cli.js ontology-gate [--json]             is the next ontology migration PR ready? (heartbeat, shadow log, golden set)
 import { config, validateConfig } from './config.js';
-import { connectDb, closeDb, col, metaGet } from './db.js';
+import { connectDb, closeDb, col, metaGet, metaSet } from './db.js';
 import { enableDbLog, flushLogs, info } from './log.js';
 import { backfill } from './collect/launches.js';
 import { processToken } from './collect/process.js';
@@ -271,6 +272,13 @@ try {
     const { addExchangeWallet } = await import('./incident/exchanges.js');
     if (!args[0] || !args[1]) throw new Error('usage: exchange-wallet <account> <exchange> [hot|cold]');
     await addExchangeWallet(args[0], args[1], args[2] === 'cold' ? 'cold' : 'hot'); info(`exchange wallet ${args[0]}: ${args[1]}`);
+  } else if (cmd === 'academy-build') {
+    // node src/cli.js academy-build [--dry]: the graded tasks for training agents, from the code audits and the launch checks
+    const { buildAcademy } = await import('./academy/service.js');
+    const r = await buildAcademy({ dry: args.includes('--dry'), log: (m) => info(m) });
+    if (!r.dry) await metaSet('academy_build', { ts: Date.now(), tasks: r.tasks, counts: r.counts });
+    for (const k of Object.keys(r.counts).sort()) console.log(`${k.padEnd(24)} ${r.counts[k]}`);
+    console.log(`${r.tasks} tasks ${r.dry ? 'would be built' : 'built'}`);
   } else if (cmd === 'nft-from-deploys') {
     // node src/cli.js nft-from-deploys [days] [--dry]: NFT collections the deploy watcher saw that NFT Collectibles does not list yet
     const { backfillNftDeploys } = await import('./nft/sync.js');

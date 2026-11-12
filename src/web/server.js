@@ -246,11 +246,12 @@ async function firewallApi(req, res, u) {
 // shares the firewall API's rate limit and API keys.
 const MCP_CORS = { ...CORS, 'access-control-allow-headers': 'content-type, x-api-key, mcp-session-id, mcp-protocol-version, last-event-id', 'access-control-expose-headers': 'mcp-session-id' };
 let agentApi = null;
-async function mcpEndpoint(req, res) {
+async function mcpEndpoint(req, res, which = 'guard') {
+  const academy = which === 'academy';
   const json = (code, body) => res.writeHead(code, { 'content-type': 'application/json', 'cache-control': 'no-store', ...MCP_CORS }).end(JSON.stringify(body));
   if (req.method === 'OPTIONS') { res.writeHead(204, MCP_CORS).end(); return; }
   if (req.method !== 'POST') {
-    json(405, { jsonrpc: '2.0', error: { code: -32000, message: 'Safe Near Agent Guard: MCP over Streamable HTTP, POST only (stateless). Add it to your agent: https://github.com/poppingbean/entity-tracker/blob/main/docs/agent-guard.md' }, id: null });
+    json(405, { jsonrpc: '2.0', error: { code: -32000, message: academy ? 'Safe Near Academy: MCP over Streamable HTTP, POST only (stateless). How to use it: https://github.com/poppingbean/entity-tracker/blob/main/docs/academy-design.md' : 'Safe Near Agent Guard: MCP over Streamable HTTP, POST only (stateless). Add it to your agent: https://github.com/poppingbean/entity-tracker/blob/main/docs/agent-guard.md' }, id: null });
     return;
   }
   const keyed = config.firewall.apiKeys.includes(String(req.headers['x-api-key'] || ''));
@@ -258,10 +259,14 @@ async function mcpEndpoint(req, res) {
   const chunks = []; let size = 0;
   for await (const d of req) { size += d.length; if (size > config.firewall.maxBodyBytes) { json(413, { jsonrpc: '2.0', error: { code: -32000, message: 'body too large' }, id: null }); return; } chunks.push(d); }
   let body; try { body = JSON.parse(Buffer.concat(chunks).toString('utf8') || 'null'); } catch { json(400, { jsonrpc: '2.0', error: { code: -32700, message: 'parse error' }, id: null }); return; }
-  const [{ createAgentGuard }, { localApi }, { StreamableHTTPServerTransport }] = await Promise.all([
-    import('../agent/mcp.js'), import('../agent/api.js'), import('@modelcontextprotocol/sdk/server/streamableHttp.js')]);
-  agentApi ||= await localApi();
-  const server = createAgentGuard(agentApi);
+  const { StreamableHTTPServerTransport } = await import('@modelcontextprotocol/sdk/server/streamableHttp.js');
+  let server;
+  if (academy) server = (await import('../academy/mcp.js')).createAcademy();
+  else {
+    const [{ createAgentGuard }, { localApi }] = await Promise.all([import('../agent/mcp.js'), import('../agent/api.js')]);
+    agentApi ||= await localApi();
+    server = createAgentGuard(agentApi);
+  }
   const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
   res.on('close', () => { transport.close().catch(() => {}); server.close().catch(() => {}); });
   for (const [k, v] of Object.entries(MCP_CORS)) res.setHeader(k, v);
@@ -1017,6 +1022,7 @@ export function startWeb() {
       if (verify) { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end(verify); return; }
       if (req.url.startsWith('/api/v1')) { await firewallApi(req, res, new URL(req.url, 'http://localhost')); return; } // public: no password, any origin
       if (req.url === '/mcp' || req.url.startsWith('/mcp?')) { await mcpEndpoint(req, res); return; } // the Agent Guard for AI agents: public too
+      if (req.url === '/academy/mcp' || req.url.startsWith('/academy/mcp?')) { await mcpEndpoint(req, res, 'academy'); return; } // the Academy: graded tasks for training agents, public and free
       if (exposed() && config.web.password && !authorized(req)) { res.writeHead(401, { 'www-authenticate': 'Basic realm="entity tracker"' }).end('authentication required'); return; }
       const u = new URL(req.url, 'http://localhost');
       if (req.method === 'POST' && u.pathname === '/api/sim/sell') {
