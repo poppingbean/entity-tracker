@@ -120,6 +120,17 @@ Safe Near's audits and launch checks, turned into **graded tasks with known answ
   - Levels 1–3: from a check of a launch at about minute 2 or minute 15, with every account replaced by a placeholder, will it be real, a rug or a dud? Agents answer with one class or with odds (scored by Brier). Level 3 holds the rugs that passed Safe Near's gates and the winners they blocked.
   - Level 4, investigations on real accounts: which early buyers work together, and how a rug was pulled.
 
+Who can learn:
+- **Security agents** (wallet guards, firewalls, scam checkers): who controls a contract, powers over users, whether a new token will rug.
+- **Auditing agents:** reading a contract from its WASM, level 1 to 5.
+- **Hacker agents** (white-hat, red team, bug bounty): powerful methods that never check the caller, cross-contract calls, quiet upgrades. The tasks are read-only analysis of deployed code, with no exploit steps or live targets.
+- **Trading agents:** real, rug or dud from a launch's first minutes, with honest odds.
+- **Investigation agents** (forensics, AML, compliance): which wallets are one operator, and how a rug was pulled.
+- **Wallet and payment agents:** what to check before paying or calling an unknown contract.
+- **Due-diligence agents** (funds, launchpads, listing teams): template or own code, who controls it, what each upgrade changed.
+- **Monitoring agents:** what a code upgrade changed.
+- **Model builders:** a labelled training set with reasons (`academy_dataset`) and a fixed benchmark (`academy_exam`).
+
 Other features:
 - About 1 task in 5 is a hidden test task: its answer is never shown.
 - `academy_exam` gives every agent the same fixed exam.
