@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { splitOf, taskId, publicTask, revealed, setScore, scoreAnswer, nextLevel, anonymize, balance, brier, examSet, PASS } from '../src/academy/tasks.js';
 import { outcomeClass, levelOf, snapshotOf, rugKindOf, groupedBuyers } from '../src/academy/memecoin.js';
 import { powerfulMethods, openMethods, userPowerMethods, callingMethods, controlClass, originClass, contractTasks, upgradeTask, answerKey } from '../src/academy/contracts.js';
-import { baselines } from '../src/academy/service.js';
+import { baselines, checkAgent } from '../src/academy/service.js';
 
 test('the split is stable and about one in five is a test task', () => {
   const ids = Array.from({ length: 2000 }, (_, i) => taskId('memecoins', 'outcome', `t${i}`));
@@ -216,4 +216,11 @@ test('baselines: the gates as odds, and the commonest answer every time', () => 
   assert.equal(g.exam_score, 0.625); // 1, 0.75, 0.75, and 0 for the rug the gates passed (sure and wrong)
   assert.equal(b.memecoins.find((x) => x.agent === 'always-the-commonest-answer').exam_score, 0.5);
   assert.equal(b.contracts, undefined);
+});
+
+test('agent names: the baselines\' names are reserved', () => {
+  assert.equal(checkAgent('My-Auditor.near'), 'my-auditor.near');
+  assert.throws(() => checkAgent('safe-near-gates'), /baseline/);
+  assert.throws(() => checkAgent('Always-The-Commonest-Answer'), /baseline/);
+  assert.throws(() => checkAgent('x'));
 });

@@ -11,7 +11,14 @@ import { TRACKS, publicTask, revealed, scoreAnswer, nextLevel, examSet, PASS } f
 const AGENT = /^[a-z0-9][a-z0-9._-]{1,63}$/i;
 const EXAM_PER_LEVEL = 10;
 const maxLevel = (track) => Math.max(...Object.keys(TRACKS[track].levels).map(Number));
-function checkAgent(agent) { const a = String(agent || '').trim(); if (!AGENT.test(a)) throw new Error('agent: a name for your agent, 2-64 letters, digits, dots, dashes or underscores (e.g. my-auditor.near)'); return a.toLowerCase(); }
+// the baselines' names on the leaderboard: no agent may take them
+export const RESERVED = new Set(['safe-near-gates', 'always-the-commonest-answer']);
+export function checkAgent(agent) {
+  const a = String(agent || '').trim();
+  if (!AGENT.test(a)) throw new Error('agent: a name for your agent, 2-64 letters, digits, dots, dashes or underscores (e.g. my-auditor.near)');
+  if (RESERVED.has(a.toLowerCase())) throw new Error(`agent: "${a}" is a baseline's name on the leaderboard; choose another`);
+  return a.toLowerCase();
+}
 function checkTrack(track) { if (!TRACKS[track]) throw new Error(`track: one of ${Object.keys(TRACKS).join(', ')}`); return track; }
 const r3 = (x) => Math.round(x * 1000) / 1000;
 
@@ -77,7 +84,11 @@ const statsOf = async (ids) => new Map((await col('academy_stats').find({ _id: {
  */
 export async function nextTask(agentRaw, trackRaw, { level = null, mode = 'train', order = 'random', kind = null } = {}) {
   const agent = checkAgent(agentRaw), track = checkTrack(trackRaw), a = await agentDoc(agent);
-  const lv = Math.min(Number(level) || a.levels[track], a.levels[track]);
+  // a kind asked for without a level: the highest level at or below the agent's that has that kind
+  const allKindLevels = kind && !level ? await col('academy_tasks').distinct('level', { track, kind: String(kind) }) : [];
+  const kindLevels = allKindLevels.filter((l) => l <= a.levels[track]);
+  if (kind && !level && allKindLevels.length && !kindLevels.length) return { agent, track, level: a.levels[track], mode, task: null, note: `${kind} tasks start at level ${Math.min(...allKindLevels)}; you are at level ${a.levels[track]}` };
+  const lv = kindLevels.length ? Math.max(...kindLevels) : Math.min(Number(level) || a.levels[track], a.levels[track]);
   const done = (await col('academy_attempts').find({ agent, track }, { projection: { task: 1 } }).toArray()).map((x) => x.task);
   const match = { track, level: lv, split: mode === 'exam' ? 'test' : 'train', _id: { $nin: done }, ...(kind ? { kind: String(kind) } : {}) };
   let t = null;

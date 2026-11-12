@@ -17,7 +17,7 @@ export const TRACKS = {
     },
   },
   memecoins: {
-    title: 'Memecoins at minute 2',
+    title: 'Memecoins from their first minutes',
     for: 'trading and scam-detection agents',
     levels: {
       1: 'Clear cases: from a check of a new token, will it be real, a rug or a dud?',
