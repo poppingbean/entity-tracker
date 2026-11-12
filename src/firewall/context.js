@@ -2,6 +2,7 @@
 // budget (a wallet waits on this before showing the signing screen). Whatever does not answer in time is left unknown and the response
 // says so (complete: false); a missing fact never becomes a flag.
 import { col } from '../db.js';
+import { config } from '../config.js';
 import { viewAccount, viewAccessKeyList, viewFunction, EMPTY_CODE_HASH } from '../audit/rpc.js';
 import { getCachedAudit, summarizeAudit, validNearAddress } from '../audit/service.js';
 import { builtinLabel } from '../labels.js';
@@ -78,6 +79,8 @@ export async function buildContext(txs) {
   let complete = true;
   const miss = (v) => { if (v === UNKNOWN) { complete = false; return null; } return v; };
 
+  // the ontology's graph in memory (never waited for here: a first load starts in the background and this check is skipped until it is ready)
+  const gp = config.firewall.neighbourHops > 0 ? import('../ontology/graph.js').then(async (m) => ({ m, g: await m.graph({ wait: false }) })).catch(() => null) : null;
   const [facts, tracker, audits, usd] = await Promise.all([
     Promise.all(ids.map((id) => within(deadline, () => chainFacts(id), UNKNOWN))),
     within(deadline, () => trackerFacts(ids), UNKNOWN),
@@ -112,6 +115,17 @@ export async function buildContext(txs) {
     if (reads('firewall')) acct = withOntology(id, acct, au);
     accounts.set(id, acct);
   });
+
+  // close to a bad account: an account clean itself, within FIREWALL_NEIGHBOUR_HOPS of one the ontology's graph marks bad (a medium flag:
+  // at most a "caution"). Trusted dapps and accounts already flagged high are skipped; exchanges and services cut the path (graph.js)
+  if (gp) {
+    const G = await within(deadline, () => gp, null);
+    if (G?.m.graphReady()) for (const [id, a] of accounts) {
+      if ((a.flags || []).some((f) => ['critical', 'high'].includes(f.severity)) || TRUSTED.has(id) || a.known_dapp) continue;
+      const near = G.m.nearBad(G.g, id, { maxHops: config.firewall.neighbourHops });
+      if (near) a.flags.push({ severity: 'medium', reason: `${near.hop} hop${near.hop > 1 ? 's' : ''} from a flagged account`, detail: `${id} is linked to ${near.account} (${near.why}): ${G.m.pathText(near.path)}.`, near });
+    }
+  }
 
   // ontology shadow mode: what the firewall believes about each other account vs the ontology (compare only, never awaited)
   for (const [id, a] of accounts) if (!signers.includes(id)) shadow('firewall.context', id, { severity: T.flags.get(id)?.severity || null, exchange: a.label_type === 'exchange' }, compareFirewall({ severity: T.flags.get(id)?.severity || null, exchange: a.label_type === 'exchange' }));
