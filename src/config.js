@@ -31,7 +31,9 @@ export const config = {
   mongo: { uri: process.env.MONGODB_URI || '', dbName: process.env.MONGODB_DB || 'near_entity_tracker' },
 
   ai: {
-    key: process.env.NEAR_AI_API_KEY || '',
+    // one key, or several separated by ';' or ',': a key out of credits or refused is set aside and the next one is used (ai/tools/nearai.js)
+    keys: String(process.env.NEAR_AI_API_KEY || '').split(/[;,]/).map((k) => k.trim()).filter(Boolean),
+    get key() { return this.keys[0] || ''; },
     baseUrl: (process.env.NEAR_AI_BASE_URL || 'https://cloud-api.near.ai/v1').replace(/\/+$/, ''),
     // scanner analyst and group reviews: Claude Haiku 5.5 served by NEAR AI (fast, many calls); the token analysis write-up uses analysisModel
     model: process.env.NEAR_AI_MODEL || 'anthropic/claude-haiku-5-5',
