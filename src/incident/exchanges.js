@@ -7,6 +7,7 @@
 //              its balance. A transfer far above that, or most of the balance, is not a customer withdrawal.
 // Refreshed by the worker once a day (`exchange_wallets`); `node src/cli.js exchanges` does it by hand.
 import { col } from '../db.js';
+import { config } from '../config.js';
 import { info } from '../log.js';
 import { txIndexer } from '../near/rpc.js';
 import { viewAccount } from '../audit/rpc.js';
