@@ -2,7 +2,7 @@
 // ================================================================== shell + router (History API: /tokens/<id>, /groups/<id>, no #)
 const SECTIONS = [
   { label: 'Explore', views: [['explore', 'Explore']] },
-  { label: 'Safety Check', views: [['firewall', 'Is it safe?'], ['moneywatch', 'Money watch']] },
+  { label: 'Safety Check', views: [['firewall', 'Is it safe?'], ...(SHOW_MONEY_WATCH ? [['moneywatch', 'Money watch']] : [])] },
   { label: 'Monitoring', views: [['alerts', 'Monitoring']] },
   { label: 'Tokens & Scanner', views: [['tokens', 'Launches'], ['signals', 'Smart-money signals'], ...(SHOW_SIM ? [['sim', 'Simulated wallet']] : []), ['analysis', 'On-chain analysis'], ['scans', 'Evaluations'], ['audit', 'Contract audit']] },
   { label: 'NFT Collectibles', views: [['nfts', 'Collections']] },
@@ -47,6 +47,7 @@ let seq = 0;
 async function render() {
   closeSearch();
   const seg = location.pathname.split('/').filter(Boolean).map(decodeURIComponent);
+  if (seg[0] === 'moneywatch' && !SHOW_MONEY_WATCH) { history.replaceState(null, '', '/firewall'); return render(); }
   if (seg[0] === 'incidents') { history.replaceState(null, '', '/firewall' + (seg[1] ? '/' + encodeURIComponent(seg.slice(1).join('/')) : location.search)); return render(); } // Hacks is part of Safety Check
   let view = seg[0] === 'overview' ? 'explore' : seg[0] === 'monitor' ? 'tokens' : seg[0]; // the old Monitor page is part of /tokens now
   if (!views[view] || (view === 'sim' && !SHOW_SIM)) view = 'explore';
