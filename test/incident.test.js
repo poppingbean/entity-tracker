@@ -169,7 +169,8 @@ test('the operator endpoints are closed on a public deployment without a passwor
   const { readFileSync } = await import('node:fs');
   const srv = readFileSync(new URL('../src/web/server.js', import.meta.url), 'utf8');
   assert.match(srv, /OPERATOR_POSTS = new Set\(\['\/api\/incident\/confirm', '\/api\/incident\/clear', '\/api\/money-watch\/report'\]\)/);
-  assert.match(srv, /const mwPrivate = \(\) => \(exposed\(\) && !config\.web\.password/, 'the money watch API is private on a public deployment');
+  // the money watch is public and read-only (decided 2026-11-12); reporting an address stays an operator post (above)
+  assert.ok(!/mwPrivate/.test(srv), 'the money watch read API needs no password');
   assert.match(srv, /OPERATOR_POSTS\.has\(u\.pathname\) && exposed\(\) && !config\.web\.password/);
   assert.ok(!/by: b\.by/.test(srv), 'by comes from the server');
 });

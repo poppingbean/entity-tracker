@@ -1,5 +1,5 @@
 // ================================================================== MONEY WATCH (every movement of $100k or more, followed until the reviewer calls it normal)
-// Private: the dashboard only. A watch is not an accusation: nothing here is called a hack unless a person or a public report says so.
+// Public and read-only (reporting an address is for the operator). A watch is not an accusation: nothing here is called a hack unless a person or a public report says so.
 const MW_STATUS = { watching: ['neutral', 'Watching'], suspicious: ['bad', 'Looks suspicious'], normal: ['good', 'Normal'], confirmed: ['bad', 'Confirmed hack'] };
 const MW_ORIGIN = { own_funds_withdrawal: 'withdrawal of its own deposit', routine_relationship: 'routine: paid by the same account before', exchange_withdrawal: 'exchange paying a customer', unusual_exchange_outflow: 'exchange paying an unusual amount', exchange_to_new_account: 'exchange paying a new account',
   fresh_receiver: 'brand-new receiver', protocol_payout: 'paid out by a protocol', established_accounts: 'old accounts, no earlier payments between them', no_history: 'no earlier history between them', reported_by_person: 'reported by a person' };
