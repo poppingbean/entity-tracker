@@ -1022,7 +1022,7 @@ export function startWeb() {
       if (verify) { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end(verify); return; }
       if (req.url.startsWith('/api/v1')) { await firewallApi(req, res, new URL(req.url, 'http://localhost')); return; } // public: no password, any origin
       if (req.url === '/mcp' || req.url.startsWith('/mcp?')) { await mcpEndpoint(req, res); return; } // the Agent Guard for AI agents: public too
-      if (req.url === '/academy/mcp' || req.url.startsWith('/academy/mcp?')) { await mcpEndpoint(req, res, 'academy'); return; } // the Academy: graded tasks for training agents, public and free
+      if (req.url === '/b2b/mcp' || req.url.startsWith('/b2b/mcp?')) { await mcpEndpoint(req, res, 'academy'); return; } // the Academy: graded tasks for training agents, public and free
       if (exposed() && config.web.password && !authorized(req)) { res.writeHead(401, { 'www-authenticate': 'Basic realm="entity tracker"' }).end('authentication required'); return; }
       const u = new URL(req.url, 'http://localhost');
       if (req.method === 'POST' && u.pathname === '/api/sim/sell') {

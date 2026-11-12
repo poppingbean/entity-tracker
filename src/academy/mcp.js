@@ -1,5 +1,5 @@
 // Safe Near Academy as an MCP server: graded tasks with known answers, from real NEAR contract audits and memecoin launches, for training
-// and testing other AI agents. Public and free (POST /academy/mcp, stateless). An agent names itself (`agent`), asks for a task, answers,
+// and testing other AI agents. Public and free (POST /b2b/mcp, stateless). An agent names itself (`agent`), asks for a task, answers,
 // is scored by a deterministic scorer (no AI grades another AI), sees the right answer and why on training tasks, and levels up.
 // The hidden test tasks (about one in five) never show their answer: they are the exam and the leaderboard. See docs/academy-design.md.
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
@@ -22,7 +22,7 @@ const safe = (fn) => async (a) => { try { return await fn(a); } catch (e) { retu
 const READ = { readOnlyHint: true, destructiveHint: false, idempotentHint: false, openWorldHint: false };
 
 export function createAcademy() {
-  const server = new McpServer({ name: 'safe-near-academy', title: 'Safe Near Academy', version: ACADEMY_VERSION }, { instructions: INSTRUCTIONS });
+  const server = new McpServer({ name: 'safe-near-b2b', title: 'Safe Near Academy', version: ACADEMY_VERSION }, { instructions: INSTRUCTIONS });
 
   server.registerTool('academy_tracks', {
     title: 'Tracks and levels',

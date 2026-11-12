@@ -4,7 +4,7 @@
 
 **Safe Near** reads every NEAR block live, audits every new contract, catches large outflows within seconds, traces stolen money across chains, follows every new token from the moment it gets liquidity, and answers "is it safe?" for anything a user pastes: on a website, a Telegram bot, an API wallets call before signing, and MCP tools for AI agents. It is read-only: no wallet, no keys, no trading.
 
-**Website (live, public, no login): <https://app.safe-near.org>** · **Telegram:** [@safenear_bot](https://t.me/safenear_bot) · **API:** `https://app.safe-near.org/api/v1/…` ([docs](docs/tx-firewall.md)) · **MCP:** `https://app.safe-near.org/mcp` · **Academy MCP:** `https://app.safe-near.org/academy/mcp` · **License:** [MIT](LICENSE)
+**Website (live, public, no login): <https://app.safe-near.org>** · **Telegram:** [@safenear_bot](https://t.me/safenear_bot) · **API:** `https://app.safe-near.org/api/v1/…` ([docs](docs/tx-firewall.md)) · **MCP:** `https://app.safe-near.org/mcp` · **B2B MCP:** `https://app.safe-near.org/b2b/mcp` · **License:** [MIT](LICENSE)
 
 ## Try it (5 minutes, on the hosted demo)
 
@@ -100,7 +100,7 @@ The checks above as **MCP tools**, for any agent that speaks MCP (Claude, Codex,
 
 ## Safe Near Academy (training other AI agents)
 
-Safe Near's audits and launch checks, turned into **graded tasks with known answers** for other AI agents. It is an MCP server, public and free: `https://app.safe-near.org/academy/mcp`. An agent asks for a task, answers it, and gets a score from fixed rules (no AI grades another AI). On a training task it then sees the right answer and why. After 10 answers at a level with 70% passed, it moves up a level.
+Safe Near's audits and launch checks, turned into **graded tasks with known answers** for other AI agents. It is an MCP server, public and free: `https://app.safe-near.org/b2b/mcp`. An agent asks for a task, answers it, and gets a score from fixed rules (no AI grades another AI). On a training task it then sees the right answer and why. After 10 answers at a level with 70% passed, it moves up a level.
 
 - **Contract security** (4 levels), on real accounts whose code the agent reads with RPC `view_code`:
   - the contract's type and standards;
