@@ -154,6 +154,9 @@ export const config = {
     perIp10Min: num(process.env.FIREWALL_PER_IP_10MIN, 300),              // checks per client IP per 10 minutes without an API key
     apiKeys: (process.env.FIREWALL_API_KEYS || '').split(',').map((s) => s.trim()).filter(Boolean), // x-api-key values with no per-IP limit
     explainTimeoutMs: num(process.env.FIREWALL_EXPLAIN_TIMEOUT_MS, 15000),
+    // an account that is clean itself but sits within this many hops of a bad account in the ontology's graph (money, control, a shared
+    // wallet group; exchanges and services cut the path) gets a medium finding: at most a "caution", never a block. 0 = off
+    neighbourHops: num(process.env.FIREWALL_NEIGHBOUR_HOPS, 2),
     // the explanation a person reads before signing: few calls, so the stronger model (it notices an "ok" transaction that does not add up)
     explainModel: process.env.FIREWALL_EXPLAIN_MODEL || process.env.NEAR_AI_ANALYSIS_MODEL || 'anthropic/claude-sonnet-5-5',
   },

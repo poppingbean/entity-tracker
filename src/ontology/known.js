@@ -39,7 +39,9 @@ const matches = (id, account) => id === account || (id.length === 8 && IMPLICIT.
 /** Every virtual fact about one account. */
 export function virtualFacts(account) {
   const a = String(account || ''), out = [];
-  if (!a) return out;
+  // a wallet group (grp:…), a case (inc:…) or an address on another chain (eth:0x…) is not a NEAR account: no account-name pattern applies
+  // (a group named "binance-hack-…" would otherwise be classed an exchange because its name says Binance)
+  if (!a || /^[a-z]+:/.test(a)) return out;
   const k = KNOWN[a];
   if (k) {
     out.push(v(a, 'is_a', k[0], 'manual', 0.95, 'named in Safe Near\'s code', 'ontology/known'));

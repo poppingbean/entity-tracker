@@ -85,6 +85,7 @@ A public service any wallet or dApp can call **right before the user signs**: `P
 - **Drainers:** a full-access key added to your account, your keys swapped for someone else's or your last one removed, account deletion, code deployed on your wallet.
 - **Phishing:** look-alike contracts (`wrap.nera`, `v2.ref-flnance.near`, `v2.ref-finance.near.claim.near`) and reported accounts.
 - **Approvals:** NFT approvals and rights granted to unknown contracts.
+- **Close to a bad account:** a receiver that is clean itself but within `FIREWALL_NEIGHBOUR_HOPS` (2) of an account flagged critical / high or on the attacker's side of a confirmed hack, through money, control or a shared wallet group in the ontology's graph (exchanges and services cut the path), gets a medium finding with the path: at most *caution*, never a block. The graph is held in memory (`src/ontology/graph.js`), so the check costs well under a millisecond.
 - **Rugs, from the tracker's own data:** sending to dev-rug creators, buying tokens that rugged (tokens inside Ref swap messages included), high-risk contract audits.
 - **Mistakes:** sending almost everything you hold, a receiver that doesn't exist, call data aimed at AI reviewers.
 
@@ -411,6 +412,7 @@ See `.env.example`; every threshold (early window, win ROI, rug drawdown, co-buy
 | `ONTOLOGY_SHADOW` | `true` | Compare each module's old rule with the ontology and record it (`ontology_shadow`) |
 | `ONTOLOGY_BACKFILL_EVERY_HOURS` | `24` | Re-derive the ontology's facts from the other collections (`0` = never) |
 | `ONTOLOGY_HEARTBEAT` | `true` | Report this process's commit and ontology steps; `false` on a local copy that uses the production database |
+| `FIREWALL_NEIGHBOUR_HOPS` | `2` | A receiver within this many hops of a bad account in the ontology's graph gets a medium finding (at most *caution*); `0` = off |
 | `FIREWALL_EXPLAIN_MODEL` | the analysis model | The NEAR AI model that explains a transaction check in words (the fast model missed too often in tests) |
 | `INCIDENT_ALERT_MAX_AGE_DAYS` | `7` | A hack older than this when found is recorded as a past case, with no alert |
 | `PRICE_AT_INCIDENT` / `PRICE_HISTORY_URL` | `true` / Binance klines | Value a case at the prices when the money moved (history of NEAR/USD); `false` = today's prices |

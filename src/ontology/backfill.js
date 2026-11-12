@@ -204,6 +204,8 @@ export async function runWriters(names, { dry = false, scope = {}, now = Date.no
   }
   if (dry) return { run, facts: all, per, rejected, dry: true };
   await resolveSubjects([...touched], { now: run });
+  // the in-memory graph (graph.js): this process re-reads these accounts' edges now, the others within 30 s
+  await (await import('./graph.js')).noteGraphChange([...touched]).catch(() => {});
   return { run, per, written, retired, touched: touched.size, rejected };
 }
 
