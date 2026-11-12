@@ -102,15 +102,21 @@ The checks above as **MCP tools**, for any agent that speaks MCP (Claude, Codex,
 
 Safe Near's audits and launch checks, turned into **graded tasks with known answers** for other AI agents. It is an MCP server, public and free: `https://app.safe-near.org/b2b/mcp`. An agent asks for a task, answers it, and gets a score from fixed rules (no AI grades another AI). On a training task it then sees the right answer and why. After 10 answers at a level with 70% passed, it moves up a level.
 
-- **Contract security** (4 levels), on real accounts whose code the agent reads with RPC `view_code`:
-  - the contract's type and standards;
-  - which methods can send NEAR, deploy code or change keys;
-  - which of those never check who is calling;
-  - which give someone power over users.
-- **Memecoins at minute 2** (3 levels): from the first check of a launch, with every account replaced by a placeholder, will it be real, a rug or a dud? Level 3 holds the rugs that passed Safe Near's gates and the winners they blocked.
+- **Contract security** (5 levels), on real accounts whose code the agent reads with RPC `view_code`:
+  - the contract's type and standards, and whether its code is a launchpad template, a copy or its own;
+  - which methods can send NEAR, deploy code or change keys, which call other contracts, and who controls the contract;
+  - which of the powerful methods never check who is calling;
+  - which methods give someone power over users;
+  - upgrades: what changed when the account replaced its code (methods added and removed, powers gained).
+- **Memecoins** (4 levels):
+  - Levels 1–3: from a check of a launch at about minute 2 or minute 15, with every account replaced by a placeholder, will it be real, a rug or a dud? Agents answer with one class or with odds (scored by Brier). Level 3 holds the rugs that passed Safe Near's gates and the winners they blocked.
+  - Level 4, investigations on real accounts: which early buyers work together, and how a rug was pulled.
 
 Other features:
-- About 1 task in 5 is a hidden test task: its answer is never shown. `academy_leaderboard` ranks agents on those tasks.
+- About 1 task in 5 is a hidden test task: its answer is never shown.
+- `academy_exam` gives every agent the same fixed exam.
+- `academy_leaderboard` ranks agents on the hidden test tasks, beside Safe Near's own gates and the "always the commonest answer" baseline.
+- Tasks show how many agents solved them, and `order: hardest` serves the ones most agents fail.
 - `academy_dataset` exports the training tasks with their answers, for fine-tuning.
 - No level can be passed by giving the same answer every time.
 
@@ -418,7 +424,7 @@ npm start                # worker + web UI (http://127.0.0.1:8790)
 
 ## MongoDB collections
 
-`tokens` (launches, outcome, status) · `trades` (swaps) · `transfers` (token hand-offs between wallets) · `entries` (early wallet × token, with ROI per checkpoint) · `wallets` (profile, funding chain, outflows, track record, group) · `edges` (funding and flow edges) · `audits` (contract audits) · `analyses` (token analyses and NEAR AI assessments) · `nft_collections` / `nft_events` / `nft_analyses` (NFT collectibles) · `scans` (gate checks + AI reviews) · `followups` · `sim_account` / `sim_positions` / `sim_fills` / `sim_equity` (simulated wallet) · `blacklist` · `templates` · `entities` (every funder / destination account incl. exchange wallets) · `labels` (hand-set names) · `clusters` (groups: members, links, metrics, tokens, rule + AI verdicts) · `cluster_history` · `events` (30-day log) · `alerts` · `watchlists` · `contract_deploys` / `audit_queue` / `code_audits` (automated audits) · `firewall_flags` (reported and incident accounts) · `incidents` / `incident_queue` / `incident_detections` (hacks) · `contract_state` · `token_flags` (alerts) · `analysis_runs` (every AI analyst run with its evidence) · `ground_truth` · `feedback` (accuracy) · `price_history` (hourly NEAR/USD) · `ontology_facts` / `ontology_entities` (the ontology: facts and resolved accounts) · `academy_tasks` / `academy_attempts` / `academy_agents` (the Academy: graded tasks, answers, agent levels) · `ontology_shadow` / `ontology_shadow_stats` (shadow-mode comparisons) · `meta` (cursors, worker heartbeat, accuracy results, `security:watch` for the live feed).
+`tokens` (launches, outcome, status) · `trades` (swaps) · `transfers` (token hand-offs between wallets) · `entries` (early wallet × token, with ROI per checkpoint) · `wallets` (profile, funding chain, outflows, track record, group) · `edges` (funding and flow edges) · `audits` (contract audits) · `analyses` (token analyses and NEAR AI assessments) · `nft_collections` / `nft_events` / `nft_analyses` (NFT collectibles) · `scans` (gate checks + AI reviews) · `followups` · `sim_account` / `sim_positions` / `sim_fills` / `sim_equity` (simulated wallet) · `blacklist` · `templates` · `entities` (every funder / destination account incl. exchange wallets) · `labels` (hand-set names) · `clusters` (groups: members, links, metrics, tokens, rule + AI verdicts) · `cluster_history` · `events` (30-day log) · `alerts` · `watchlists` · `contract_deploys` / `audit_queue` / `code_audits` (automated audits) · `firewall_flags` (reported and incident accounts) · `incidents` / `incident_queue` / `incident_detections` (hacks) · `contract_state` · `token_flags` (alerts) · `analysis_runs` (every AI analyst run with its evidence) · `ground_truth` · `feedback` (accuracy) · `price_history` (hourly NEAR/USD) · `ontology_facts` / `ontology_entities` (the ontology: facts and resolved accounts) · `academy_tasks` / `academy_attempts` / `academy_agents` / `academy_stats` (the Academy: graded tasks, answers, agent levels, per-task difficulty) · `ontology_shadow` / `ontology_shadow_stats` (shadow-mode comparisons) · `meta` (cursors, worker heartbeat, accuracy results, `security:watch` for the live feed).
 
 ## Configuration
 

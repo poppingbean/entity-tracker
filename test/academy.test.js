@@ -1,9 +1,10 @@
 // Safe Near Academy (src/academy): the task format, the scorers, the split, anonymising, balancing, and the two generators' pure parts.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { splitOf, taskId, publicTask, revealed, setScore, scoreAnswer, nextLevel, anonymize, balance, PASS } from '../src/academy/tasks.js';
-import { outcomeClass, levelOf, snapshotOf } from '../src/academy/memecoin.js';
-import { powerfulMethods, openMethods, userPowerMethods, contractTasks } from '../src/academy/contracts.js';
+import { splitOf, taskId, publicTask, revealed, setScore, scoreAnswer, nextLevel, anonymize, balance, brier, examSet, PASS } from '../src/academy/tasks.js';
+import { outcomeClass, levelOf, snapshotOf, rugKindOf, groupedBuyers } from '../src/academy/memecoin.js';
+import { powerfulMethods, openMethods, userPowerMethods, callingMethods, controlClass, originClass, contractTasks, upgradeTask, answerKey } from '../src/academy/contracts.js';
+import { baselines } from '../src/academy/service.js';
 
 test('the split is stable and about one in five is a test task', () => {
   const ids = Array.from({ length: 2000 }, (_, i) => taskId('memecoins', 'outcome', `t${i}`));
@@ -111,19 +112,108 @@ test('contract facts: powerful methods, the open ones, and powers over users', (
   assert.deepEqual(userPowerMethods(CODE), ['set_blacklisted', 'upgrade']); // the low-severity fee power is left out
 });
 
-test('contract tasks: four levels from one code, ids stable, the account named, no answer in the input', () => {
+test('contract tasks: the levels from one code, ids stable, the account named, no answer in the input', () => {
   const ts = contractTasks(CODE, 'tok.near');
-  assert.deepEqual(ts.map((t) => [t.level, t.kind]), [[1, 'type'], [2, 'powers'], [3, 'open_doors'], [4, 'user_powers']]);
+  assert.deepEqual(ts.map((t) => [t.level, t.kind]), [[1, 'type'], [2, 'powers'], [2, 'calls'], [3, 'open_doors'], [4, 'user_powers']]);
   assert.deepEqual(ts[0].gold, { class: 'token', set: ['nep141', 'nep145'] });
-  assert.deepEqual(ts[2].gold, { set: ['sweep'] });
-  assert.deepEqual(ts[2].input.powerful_methods, ['sweep', 'upgrade', 'withdraw']);
+  assert.deepEqual(ts[3].gold, { set: ['sweep'] });
+  assert.deepEqual(ts[3].input.powerful_methods, ['sweep', 'upgrade', 'withdraw']);
   assert.ok(ts.every((t) => t.input.account === 'tok.near' && !JSON.stringify(publicTask(t)).includes('reads_caller')));
   assert.deepEqual(contractTasks(CODE, 'tok.near').map((t) => t._id), ts.map((t) => t._id));
   // an AI-typed or unknown contract gets no type task; one with no powerful method gets no open-doors task
   const plain = { ...CODE, role_source: 'ai', capabilities: { ft_transfer: { caps: ['reads_caller'] } }, powers: [] };
-  assert.deepEqual(contractTasks(plain, 'p.near').map((t) => t.kind), ['powers', 'user_powers']);
+  assert.deepEqual(contractTasks(plain, 'p.near').map((t) => t.kind), ['powers', 'calls', 'user_powers']);
 });
 
 test('all the tasks of one contract share a split (a level-3 task carries the level-2 answer)', () => {
   for (let i = 0; i < 40; i++) assert.equal(new Set(contractTasks({ ...CODE, _id: `code:${i}` }, 'tok.near').map((t) => t.split)).size, 1);
+});
+
+test('odds are scored by Brier: sure and right is 1, a uniform guess does not pass, sure and wrong is 0', () => {
+  const L = ['real', 'rug', 'dud'];
+  assert.equal(brier({ rug: 1 }, 'rug', L).score, 1);
+  assert.equal(brier({ real: 1 }, 'rug', L).score, 0);
+  const u = brier({ real: 1, rug: 1, dud: 1 }, 'rug', L).score; // weights are normalised
+  assert.ok(u > 0.66 && u < PASS, `uniform ${u}`);
+  assert.throws(() => brier({ rug: -1 }, 'rug', L));
+  const t = { answer_format: { type: 'class' }, options: { real: '', rug: '', dud: '' }, gold: { class: 'dud' } };
+  assert.equal(scoreAnswer(t, { probs: { dud: 0.8, rug: 0.2 } }).score, 0.96);
+});
+
+test('a "sets" answer is the mean F1 of its parts; an empty list is right where nothing changed', () => {
+  const t = { answer_format: { type: 'sets', parts: ['added_methods', 'removed_methods', 'added_powers'] }, gold: { added_methods: ['set_fee'], removed_methods: [], added_powers: ['set_fees'] } };
+  assert.equal(scoreAnswer(t, { added_methods: ['set_fee'], removed_methods: [], added_powers: ['set_fees'] }).score, 1);
+  assert.equal(scoreAnswer(t, { added_methods: ['set_fee'], removed_methods: [], added_powers: [] }).score, 0.667);
+  assert.equal(scoreAnswer(t, {}).score, 0.333);
+});
+
+test('the exam is the same set for everyone, at most N per level', () => {
+  const ts = Array.from({ length: 40 }, (_, i) => ({ _id: `t${i}`, level: 1 + (i % 3) }));
+  const e = examSet(ts, 5);
+  assert.equal(e.length, 15);
+  assert.deepEqual(examSet([...ts].reverse(), 5).map((t) => t._id), e.map((t) => t._id));
+  assert.deepEqual([...new Set(e.map((t) => t.level))], [1, 2, 3]);
+});
+
+test('a task shows how many agents answered it once someone has', () => {
+  const t = { _id: 'x', track: 'memecoins', level: 1, kind: 'outcome', question: 'q', input: {}, answer_format: { type: 'class' }, split: 'train' };
+  assert.equal(publicTask(t).solved_by, undefined);
+  assert.deepEqual(publicTask(t, { answered: 4, passed: 1 }).solved_by, { agents: 4, pass_rate: 0.25 });
+});
+
+test('contract facts: calls to other contracts, who controls it, where its code comes from', () => {
+  const code = { exports: ['swap', 'view'], capabilities: { swap: { caps: ['call_contracts'] }, internal: { caps: ['call_contracts'] }, view: { caps: [] } } };
+  assert.deepEqual(callingMethods(code), ['swap']); // only exported methods
+  assert.equal(controlClass({ summary: 'locked (no keys, no owner found)' }), 'locked');
+  assert.equal(controlClass({ summary: 'owner: dao' }), 'dao');
+  assert.equal(controlClass({ summary: 'owner: locked' }), 'locked_contract');
+  assert.equal(controlClass({ summary: 'owner: contract / locked' }), 'contract');
+  assert.equal(controlClass({ summary: '1 full-access key' }), 'full_access_key');
+  assert.equal(controlClass({ summary: 'something else' }), null);
+  assert.equal(originClass('meme-cooking', 400), 'meme-cooking');
+  assert.equal(originClass(null, 5), 'copy');
+  assert.equal(originClass(null, 1), 'own');
+  assert.equal(originClass(null, 2), null);
+});
+
+test('contract tasks: origin and control come with the audit; a launchpad template is named', () => {
+  const ts = contractTasks(CODE, 'tok.near', { audit: { auto: { family_n: 300, control: { summary: 'owner: wallet', full_keys: 0, keys_total: 0, controllers: [{ account: 'boss.near', kind: 'wallet', via: 'STATE' }] } } }, launchpad: 'justhoot', launchpads: ['justhoot', 'meme-cooking'] });
+  const o = ts.find((t) => t.kind === 'origin'), c = ts.find((t) => t.kind === 'control');
+  assert.equal(o.gold.class, 'justhoot'); assert.ok(o.options.justhoot && o.options.copy && o.options.own);
+  assert.equal(c.gold.class, 'wallet'); assert.match(c.rationale, /boss\.near/);
+  assert.ok(!JSON.stringify(publicTask(c)).includes('boss.near'), 'the controller is the answer, never in the task');
+});
+
+test('an upgrade task: added and removed methods, the powers gained, the block to read the old code at', () => {
+  const t = upgradeTask('x.near', { from: 'code:a', to: 'code:b', ts: 1e12, added_powers: ['set_fees'], removed_powers: [] }, { exports: ['a', 'b'] }, { exports: ['b', 'c'] }, { height: 100 });
+  assert.deepEqual(t.gold, { added_methods: ['c'], removed_methods: ['a'], added_powers: ['set_fees'] });
+  assert.equal(t.level, 5); assert.equal(t.input.new_code_deployed_at_block, 100); assert.match(t.input.how_to_read_the_code, /block_id 99/);
+  assert.equal(answerKey(t), t._id);
+  const same = upgradeTask('x.near', { from: 'code:a', to: 'code:b', ts: 1e12 }, { exports: ['a'] }, { exports: ['a'] });
+  assert.equal(answerKey(same), 'none');
+});
+
+test('memecoin investigations: the rug kind taught, and which buyers are grouped', () => {
+  assert.equal(rugKindOf(['flagged', 'creator_exit']), 'creator_exit');
+  assert.equal(rugKindOf(['creator_sold']), null);
+  const clusterOf = new Map([['a', 'g1'], ['b', 'g1'], ['c', 'g2'], ['dev', 'g3'], ['d', 'g3']]);
+  // a and b share a group; d shares the creator's; c is alone; e was funded by the creator
+  assert.deepEqual(groupedBuyers(['a', 'b', 'c', 'd', 'e'], 'dev', clusterOf, ['e']), ['a', 'b', 'd', 'e']);
+  assert.deepEqual(groupedBuyers(['c', 'x'], null, clusterOf), []);
+});
+
+test('the snapshot never shows the symbols of the creator\'s earlier rugs, or a dropped field', () => {
+  const s = snapshotOf({ intel: { creator_prior_launches: 4, creator_prior_rug_symbols: ['OLD'] }, wallets: { topBuyers: [{ account: 'a.near', linked: true }] } }, { drop: /^linked$/ });
+  assert.deepEqual(s, { intel: { creator_prior_launches: 4 }, wallets: { topBuyers: [{ account: 'W1' }] } });
+});
+
+test('baselines: the gates as odds, and the commonest answer every time', () => {
+  const L = { real: '', rug: '', dud: '' };
+  const mk = (cls, pass, i) => ({ _id: `m${i}`, track: 'memecoins', kind: 'outcome', split: 'test', answer_format: { type: 'class' }, options: L, gold: { class: cls }, meta: { gate_pass: pass } });
+  const b = baselines([mk('real', true, 1), mk('rug', false, 2), mk('dud', false, 3), mk('rug', true, 4), { ...mk('rug', false, 5), split: 'train' }]);
+  const g = b.memecoins.find((x) => x.agent === 'safe-near-gates');
+  assert.equal(g.tasks, 4);
+  assert.equal(g.exam_score, 0.625); // 1, 0.75, 0.75, and 0 for the rug the gates passed (sure and wrong)
+  assert.equal(b.memecoins.find((x) => x.agent === 'always-the-commonest-answer').exam_score, 0.5);
+  assert.equal(b.contracts, undefined);
 });
