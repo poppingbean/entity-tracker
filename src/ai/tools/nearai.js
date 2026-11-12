@@ -66,6 +66,8 @@ export async function chatJSON({ system, user, model = config.ai.model, maxToken
       if (!res.ok) { const raw = await res.text(); lastErr = new Error(`NEAR AI ${res.status}: ${redact(raw).slice(0, 300)}`); if (res.status === 429 || res.status >= 500) { await sleep(2000 * (attempt + 1) ** 2); continue; } throw lastErr; }
       const j = stream ? await readStream(res) : JSON.parse(await res.text());
       aiStatus.promptTokens += j.usage?.prompt_tokens || 0; aiStatus.completionTokens += j.usage?.completion_tokens || 0;
+      // tokens per UTC day: the Academy's business books them as its AI cost (never fails the call)
+      import('../../academy/business.js').then((m) => m.countTokens(j.usage)).catch(() => {});
       const msg = j.choices?.[0]?.message || {};
       const parsed = extractJson(msg.content) || extractJson(msg.reasoning_content);
       if (!parsed || typeof parsed !== 'object') {

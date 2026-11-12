@@ -1,5 +1,26 @@
 // Configuration. Everything comes from .env / the environment. There is no wallet and no private key anywhere in this project.
 import 'dotenv/config';
+import { readFileSync } from 'node:fs';
+
+/**
+ * The Academy's business rules (academy-business.json: prices, the revenue split, limits; docs/academy-business.md). Accounts may be set
+ * from the environment instead (ACADEMY_TREASURY …); the agent's signing key only ever comes from the environment (ACADEMY_AGENT_KEY).
+ */
+function academyBusiness() {
+  let r = {};
+  try { r = JSON.parse(readFileSync(new URL('../academy-business.json', import.meta.url), 'utf8')); } catch {}
+  const e = process.env, list = (v) => String(v).split(',').map((x) => x.trim()).filter(Boolean);
+  return {
+    ...r,
+    enabled: e.ACADEMY_BUSINESS != null ? e.ACADEMY_BUSINESS === 'true' : !!r.enabled,
+    treasury: e.ACADEMY_TREASURY || r.treasury || '',
+    agent_account: e.ACADEMY_AGENT_ACCOUNT || r.agent_account || '',
+    reserve_account: e.ACADEMY_RESERVE_ACCOUNT || r.reserve_account || '',
+    contributors: e.ACADEMY_CONTRIBUTORS ? list(e.ACADEMY_CONTRIBUTORS) : r.contributors || [],
+    agent_key: e.ACADEMY_AGENT_KEY || '',
+    oneclick_jwt: e.ACADEMY_ONECLICK_JWT || '',
+  };
+}
 
 const num = (v, d) => (v === undefined || v === '' ? d : Number(v));
 const bool = (v, d) => (v === undefined || v === '' ? d : /^(1|true|yes)$/i.test(String(v)));
@@ -232,7 +253,7 @@ export const config = {
   },
   // ground truth for the accuracy numbers: a launch is "bad" when a buyer at the check held less than this share of the price 24 h later
   // Safe Near Academy (docs/academy-design.md): the graded tasks are rebuilt from the audits and the launch checks this often (0 = never)
-  academy: { rebuildHours: num(process.env.ACADEMY_REBUILD_HOURS, 24) },
+  academy: { rebuildHours: num(process.env.ACADEMY_REBUILD_HOURS, 24), business: academyBusiness() },
   accuracy: { badBelow: num(process.env.ACCURACY_BAD_BELOW, 0.85), everyMs: num(process.env.ACCURACY_EVERY_MS, 3600e3) },
   // the token analysis page's AI review: it reads the latest trades first, then follows tokens moved out by transfer
   // data health (WP-16): block gaps and a sampled cross-check of the indexer against RPC on another host; nothing here changes a verdict

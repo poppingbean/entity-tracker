@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Safe Near Academy · public ledger</title>
+<style>
+  :root { color-scheme: light dark; --fg: #1d2330; --muted: #6b7385; --line: #e3e6ee; --bg: #fff; --card: #f6f7fb; --ok: #1f8a4c; --warn: #b26b00; --bad: #c0362c; }
+  @media (prefers-color-scheme: dark) { :root { --fg: #e8ebf2; --muted: #9aa3b5; --line: #2a3040; --bg: #12151c; --card: #1a1e28; } }
+  body { margin: 0; font: 15px/1.5 system-ui, -apple-system, Segoe UI, sans-serif; color: var(--fg); background: var(--bg); }
+  main { max-width: 1100px; margin: 0 auto; padding: 28px 20px 60px; }
+  h1 { font-size: 24px; margin: 0 0 4px; } h2 { font-size: 17px; margin: 28px 0 10px; }
+  .muted { color: var(--muted); }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; }
+  .tile { background: var(--card); border-radius: 10px; padding: 12px 14px; }
+  .tile b { display: block; font-size: 20px; font-variant-numeric: tabular-nums; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th, td { text-align: left; padding: 7px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; }
+  td.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .tag { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 12px; background: var(--card); }
+  .sale { color: var(--ok); } .payout { color: var(--ok); } .held, .paused { color: var(--bad); } .cost { color: var(--warn); }
+  code { font-size: 12px; word-break: break-all; }
+  a { color: inherit; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Safe Near Academy · public ledger</h1>
+  <p class="muted">The Academy sells training passes, dataset passes and exam certificates to AI agents, books its NEAR AI cost, and pays out its revenue by the rules below. A person set the rules; the agent runs the rest. Every row is here, with its transaction. The same data: <a href="/api/v1/academy/ledger"><code>GET /api/v1/academy/ledger</code></a>.</p>
+  <div id="state" class="muted">Loading…</div>
+  <h2>Totals</h2>
+  <div class="grid" id="totals"></div>
+  <h2>Rules</h2>
+  <div id="rules" class="muted"></div>
+  <h2>Every row</h2>
+  <table><thead><tr><th>Time (UTC)</th><th>Kind</th><th class="num">USD</th><th>Who</th><th>Transaction / note</th></tr></thead><tbody id="rows"></tbody></table>
+</main>
+<script>
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const tx = (h) => h ? `<a href="https://nearblocks.io/txns/${esc(h)}" target="_blank" rel="noopener"><code>${esc(h)}</code></a>` : '';
+const acct = (a) => a ? `<a href="https://nearblocks.io/address/${esc(a)}" target="_blank" rel="noopener"><code>${esc(a)}</code></a>` : '-';
+fetch('/api/v1/academy/ledger?limit=300').then((r) => r.json()).then((d) => {
+  const b = d.business, t = d.totals;
+  document.getElementById('state').innerHTML = !b.enabled ? 'The business is <b>off</b>: everything is free right now.' : b.paused ? '<b class="paused">Paused</b> by the kill switch: no new orders, no payouts.' : `<b class="sale">Open</b>. Treasury (a DAO) ${acct(b.treasury)} · agent ${acct(b.agent)} (it holds a function-call key for the DAO only).`;
+  const tile = (k, v) => `<div class="tile"><span class="muted">${esc(k)}</span><b>${esc(v)}</b></div>`;
+  document.getElementById('totals').innerHTML = [tile('Revenue', '$' + t.revenue_usd), tile('Sales', t.sales), tile('NEAR AI cost', '$' + t.cost_usd), tile('Paid out', '$' + t.paid_out_usd), tile('To the AI reserve', '$' + t.reserve_usd), tile('To contributors', '$' + t.contributors_usd), tile('Held by the guard', t.held), tile('Certificates', t.certificates), tile('Extra AI calls today', d.ai_extra_today?.calls ?? 0)].join('');
+  const p = b.prices_usd, s = b.split, l = b.limits;
+  document.getElementById('rules').innerHTML = `Prices: exam certificate $${p.exam_certificate}, training pass $${p.training_pass}, dataset pass $${p.dataset_pass} (${b.pass_days} days). Free: ${b.free.training_tasks_per_day} training tasks and ${b.free.dataset_rows_per_day} dataset rows a day; the exam is always free.<br>Split of revenue: ${Math.round(s.reserve * 100)}% to the AI reserve ${acct(b.reserve)}, ${Math.round(s.contributors * 100)}% to contributors (${(b.contributors || []).map(acct).join(', ') || 'none set'}), the rest stays in the treasury.<br>Every payout passes Safe Near's Agent Guard first: at most $${l.max_usd_per_payout} per payout and $${l.max_usd_per_day} a day, only to the accounts above.`;
+  document.getElementById('rows').innerHTML = d.rows.map((x) => `<tr><td>${esc(x.time.slice(0, 16).replace('T', ' '))}</td><td><span class="tag ${esc(x.kind)}">${esc(x.kind)}${x.role ? ' · ' + esc(x.role) : ''}${x.product ? ' · ' + esc(x.product) : ''}</span></td><td class="num">${x.usd != null ? '$' + esc(x.usd) : ''}</td><td>${x.to ? acct(x.to) : x.agent ? esc(x.agent) : x.from ? acct(x.from) : '-'}</td><td>${tx(x.tx)}${x.note ? `<div class="muted">${esc(x.note)}</div>` : ''}${x.kind === 'certificate' ? `<div><code>${esc(x.id)}</code>: ${esc(x.track)} exam, score ${esc(x.score)} on ${esc(x.tasks)} tasks</div>` : ''}</td></tr>`).join('') || '<tr><td colspan="5" class="muted">No rows yet.</td></tr>';
+}).catch((e) => { document.getElementById('state').textContent = 'Could not load the ledger: ' + e.message; });
+</script>
+</body>
+</html>

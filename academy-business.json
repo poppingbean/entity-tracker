@@ -1,0 +1,38 @@
+{
+  "_what": "The rules the Safe Near Academy runs its business by (docs/academy-business.md). A person sets these; the agent does the rest. The agent's signing key is never here: it is the secret ACADEMY_AGENT_KEY.",
+  "enabled": false,
+  "paused": false,
+  "treasury": "",
+  "agent_account": "",
+  "reserve_account": "",
+  "contributors": [],
+  "usdc": "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+  "prices_usd": {
+    "exam_certificate": 1,
+    "training_pass": 3,
+    "dataset_pass": 5
+  },
+  "pass_days": 30,
+  "free": {
+    "training_tasks_per_day": 50,
+    "dataset_rows_per_day": 100
+  },
+  "split": {
+    "reserve": 0.5,
+    "contributors": 0.3,
+    "treasury": 0.2
+  },
+  "limits": {
+    "max_usd_per_payout": 25,
+    "max_usd_per_day": 50,
+    "min_usd_to_pay_out": 0.05
+  },
+  "payout_hour_utc": 1,
+  "inference": {
+    "usd_per_million_input_tokens": 0.15,
+    "usd_per_million_output_tokens": 0.6,
+    "usd_per_ai_call": 0.002,
+    "max_extra_ai_calls_per_day": 200
+  },
+  "order_minutes": 60
+}

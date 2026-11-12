@@ -38,6 +38,8 @@
 //   node src/cli.js watch-list [--status s] [--limit N]   money watch cases (docs/money-watch-design.md); watch-show <id>; watch-scan [N] (read-only: what would open in the latest N blocks)
 //   node src/cli.js watch-report <address> [--source <link>] [--note "<text>"]   a person reports an address; watch-confirm <id> [--source]; watch-close <id> <reason>; watch-review <id>
 //   node src/cli.js academy-build [--dry]              rebuild the Safe Near Academy's graded tasks (docs/academy-design.md); --dry counts them per track and level
+//   node src/cli.js academy-business [status|scan|close [--dry]|pause|resume]   the Academy's business (docs/academy-business.md)
+//   node src/cli.js academy-demo <agent> [product] [usdc|near]   one loop: an order, its payment (you send it), the credit, a dry close
 //   node src/cli.js link-eval                         pairwise precision / recall of the wallet grouping against pairs of known owners (changes nothing)
 //   node src/cli.js exchanges-prune [--apply]          list (or remove) registry entries that rest only on being busy (IDENTIFY_BUSY_NEUTRAL)
 //   node src/cli.js golden-candidates [--class <class>] [--limit N]   resolved accounts not in the golden set, strongest evidence first (JSON lines; writes nothing)
@@ -279,6 +281,28 @@ try {
     if (!r.dry) await metaSet('academy_build', { ts: Date.now(), tasks: r.tasks, counts: r.counts });
     for (const k of Object.keys(r.counts).sort()) console.log(`${k.padEnd(24)} ${r.counts[k]}`);
     console.log(`${r.tasks} tasks ${r.dry ? 'would be built' : 'built'}`);
+  } else if (cmd === 'academy-business') {
+    const B = await import('./academy/business.js'), sub = args[0] || 'status';
+    if (sub === 'pause' || sub === 'resume') { await B.setPaused(sub === 'pause'); console.log(`kill switch ${sub === 'pause' ? 'ON: no new orders, no payouts' : 'off'}`); }
+    else if (sub === 'scan') console.log(JSON.stringify(await B.scanPayments({ log: (m) => info(m) }), null, 1));
+    else if (sub === 'close') console.log(JSON.stringify(await B.dailyClose({ force: true, dry: args.includes('--dry'), log: (m) => info(m) }), null, 1));
+    else { const l = await B.publicLedger({ limit: 10 }); console.log(JSON.stringify({ business: l.business, totals: l.totals, ai_extra_today: l.ai_extra_today, why_not_running: B.notReady(B.rules()) }, null, 1)); }
+  } else if (cmd === 'academy-demo') {
+    // one full loop, in under two minutes: an order, its payment (sent by you from any wallet), the credit, then a dry daily close
+    const B = await import('./academy/business.js'), agent = args[0], product = args[1] || 'exam_certificate', pay = args[2] || 'usdc';
+    if (!agent) throw new Error('usage: academy-demo <agent> [product] [usdc|near]');
+    const o = await B.createOrder(agent, product, { pay_with: pay });
+    console.log(`order ${o.order}: send ${o.how_to_pay.send} to ${o.how_to_pay.to}${o.how_to_pay.memo ? ` (memo ${o.how_to_pay.memo})` : ''}. Waiting up to 3 minutes for it…`);
+    await B.scanPayments(); // start the cursor if it is new
+    for (let i = 0; i < 36; i++) {
+      await new Promise((r) => setTimeout(r, 5000));
+      await B.scanPayments();
+      const s = await B.orderStatus(agent, o.order);
+      if (s.status === 'paid') { console.log(`paid by ${s.paid.tx}`); break; }
+      if (i === 35) console.log('not paid yet: the worker keeps watching for 6 hours after the order expires');
+    }
+    console.log('entitlements:', JSON.stringify(await B.entitlements(agent)));
+    console.log('daily close (dry):', JSON.stringify(await B.dailyClose({ force: true, dry: true }), null, 1));
   } else if (cmd === 'nft-from-deploys') {
     // node src/cli.js nft-from-deploys [days] [--dry]: NFT collections the deploy watcher saw that NFT Collectibles does not list yet
     const { backfillNftDeploys } = await import('./nft/sync.js');

@@ -84,6 +84,8 @@ const statsOf = async (ids) => new Map((await col('academy_stats').find({ _id: {
  */
 export async function nextTask(agentRaw, trackRaw, { level = null, mode = 'train', order = 'random', kind = null } = {}) {
   const agent = checkAgent(agentRaw), track = checkTrack(trackRaw), a = await agentDoc(agent);
+  // the free tier caps training tasks a day when the Academy sells passes (the exam is always free)
+  if (mode !== 'exam') { const gate = await (await import('./business.js')).trainingGate(agent); if (gate) throw new Error(gate); }
   // a kind asked for without a level: the highest level at or below the agent's that has that kind
   const allKindLevels = kind && !level ? await col('academy_tasks').distinct('level', { track, kind: String(kind) }) : [];
   const kindLevels = allKindLevels.filter((l) => l <= a.levels[track]);
@@ -148,8 +150,13 @@ export async function progress(agentRaw) {
 }
 
 /** The training set: training tasks with their answers and why (JSON lines for fine-tuning or as worked examples). Test tasks never leave. */
-export async function dataset(trackRaw, { level = null, kind = null, limit = 100, offset = 0 } = {}) {
+export async function dataset(trackRaw, { level = null, kind = null, limit = 100, offset = 0, agent = null } = {}) {
   const track = checkTrack(trackRaw);
+  // the free tier: so many rows a day per agent when the Academy sells passes
+  const B = await import('./business.js');
+  const want = Math.min(500, Math.max(1, limit));
+  limit = await B.datasetAllowance(agent ? checkAgent(agent) : null, want);
+  if (limit <= 0) throw new Error(`the free tier's dataset rows for today are used. A dataset pass (academy_buy, product dataset_pass, $${B.rules().prices_usd.dataset_pass}) lifts the cap for ${B.rules().pass_days} days.`);
   const rows = await col('academy_tasks').find({ track, split: 'train', ...(level ? { level: Number(level) } : {}), ...(kind ? { kind: String(kind) } : {}) }).sort({ level: 1, _id: 1 }).skip(Math.max(0, offset)).limit(Math.min(500, Math.max(1, limit))).toArray();
   return { track, count: rows.length, items: rows.map((t) => ({ ...publicTask(t), answer: t.gold, why: t.rationale, label_source: t.label_source })) };
 }
