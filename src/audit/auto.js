@@ -178,6 +178,8 @@ export async function autoAudit(account, { deploy = null, force = false, ai = tr
   if (ai && config.autoAudit.writeUp) auto.summary = await aiWriteUp(account, auto).catch(() => null);
   await col('audits').updateOne({ _id: account }, { $set: { auto } }, { upsert: true });
   await (await import('../ontology/writers.js')).syncFacts(['audits'], { scope: { audits: { ids: [account] } } }); // G1: the contract's class at once
+  // an NFT contract (any factory) joins NFT Collectibles as soon as its audit says so
+  if (auto.role === 'nft') await (await import('../nft/sync.js')).registerAuditedNft(account, 'nft', auto.deploy || null).catch(() => {});
   return { ...(legacy || { _id: account }), auto };
 }
 

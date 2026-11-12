@@ -1,5 +1,7 @@
-// NFT collections: discovery (HOT Craft, near.cooking, every collection NearBlocks lists, or added by hand) and syncing each collection's
-// history into nft_events. The worker runs nftTick() beside its main loop.
+// NFT collections: discovery and syncing each collection's history into nft_events. The worker runs nftTick() beside its main loop.
+// Discovery, fastest first: the deploy watcher (every block): a contract deployed by HOT Craft (nfts.tg) or near.cooking (nft.cookon.near,
+// dnft.cookon.near) is listed in the block it appears, and any other contract the automated audit classes as an NFT when its audit is saved;
+// then the platforms' own histories (names, owners, max supply), every collection NearBlocks lists, and collections added by hand.
 import { col, metaGet, metaSet } from '../db.js';
 import { config } from '../config.js';
 import { info, warn } from '../log.js';
@@ -10,7 +12,9 @@ import { nftEventsOf, isSpamCollection } from './decode.js';
 const MIN = 60e3, HOUR = 3600e3;
 const ROWS_PER_SYNC = 400;          // transactions read per collection per pass
 const STUB_MAX_TOKENS = 20000;      // collections bigger than this are not mined for wallets to profile
-export const SOURCES = { hotcraft: 'HOT Craft', cookon: 'near.cooking', nearblocks: 'NearBlocks', manual: 'added by hand', market: 'traded on a followed market' };
+export const SOURCES = { hotcraft: 'HOT Craft', cookon: 'near.cooking', deploy: 'deployed on NEAR (an NFT contract the audit found)', nearblocks: 'NearBlocks', manual: 'added by hand', market: 'traded on a followed market' };
+// the platforms' factories: a contract they deploy is one of their collections
+const PLATFORM_OF = { 'nfts.tg': 'hotcraft', 'nft.cookon.near': 'cookon', 'dnft.cookon.near': 'cookon' };
 const COOKON = /\.(d?nft)\.cookon\.near$/;
 
 /** Register a collection (never downgrades a richer source). */
@@ -22,6 +26,69 @@ export async function registerCollection(id, fields = {}) {
   }, { upsert: true });
   if (r.upsertedCount) info(`NFT collection ${id} (${fields.source || '?'})`);
   return !!r.upsertedCount;
+}
+
+/**
+ * The platform a deploy belongs to: HOT Craft (<prefix>.nfts.tg, deployed by nfts.tg) or near.cooking (<name>.nft.cookon.near /
+ * <name>.dnft.cookon.near, created by those accounts' own keys with no method call: invisible to a history poller that looks for calls or
+ * NFT events). Pure. Returns 'hotcraft' | 'cookon' | null.
+ */
+export function platformOfDeploy(d) {
+  const acc = String(d?.account || ''), by = String(d?.by || d?.signer || '');
+  if (PLATFORM_OF[by] && acc !== by && acc.endsWith(`.${by}`)) return PLATFORM_OF[by];
+  if (/\.nfts\.tg$/.test(acc)) return 'hotcraft';
+  if (COOKON.test(acc)) return 'cookon';
+  return null;
+}
+
+/** Fields of a new collection from its deploy (the platform's own history or the sync fills in name, owner, max supply). */
+const deployFields = (d) => ({ deployer: d.signer || d.by || null, launched_ts: d.ts || null, launch_height: d.height || null });
+
+/**
+ * The deploy watcher's deploys of one batch of blocks: the platforms' collections are listed at once (with their source). Returns how many
+ * were new. Never downgrades a source a richer path already set.
+ */
+export async function registerPlatformDeploys(deploys) {
+  if (!config.nft.enabled) return 0;
+  let n = 0;
+  for (const d of deploys || []) {
+    const src = platformOfDeploy(d);
+    if (!src) continue;
+    if (await registerCollection(d.account, deployFields(d))) n++;
+    await col('nft_collections').updateOne({ _id: d.account, source: { $in: [null, 'nearblocks', 'deploy', 'market'] } }, { $set: { source: src } });
+  }
+  return n;
+}
+
+/**
+ * A contract the automated audit has just classed as an NFT collection (any factory, any deployer): listed with source 'deploy' unless a
+ * platform or a person already listed it. Called when an audit is saved (audit/auto.js).
+ */
+export async function registerAuditedNft(account, role, deploy = null) {
+  if (!config.nft.enabled || !['nft'].includes(role)) return false;
+  // the audit keeps { deployer, signer } without a time: the deploy watcher's record has it
+  const rec = await col('contract_deploys').find({ account }).sort({ ts: 1 }).limit(1).next().catch(() => null);
+  deploy = { ...(rec || {}), ...(deploy || {}), by: deploy?.by || deploy?.deployer || rec?.by || null };
+  const isNew = await registerCollection(account, deployFields(deploy));
+  await col('nft_collections').updateOne({ _id: account, source: { $exists: false } }, { $set: { source: platformOfDeploy({ account, ...(deploy || {}) }) || 'deploy' } });
+  return isNew;
+}
+
+/** Backfill: every NFT collection the deploy watcher saw in the last `days` (the platforms' deploys, and contracts the audit classed as NFT). */
+export async function backfillNftDeploys(days = 30, { dry = false } = {}) {
+  const since = Date.now() - days * 86400e3;
+  const deps = await col('contract_deploys').aggregate([{ $match: { ts: { $gte: since } } }, { $sort: { ts: 1 } }, { $group: { _id: '$account', d: { $first: '$$ROOT' } } }]).toArray();
+  const nftRole = new Set((await col('audits').find({ _id: { $in: deps.map((x) => x._id) }, 'auto.role': 'nft' }, { projection: { _id: 1 } }).toArray()).map((a) => a._id));
+  const listed = new Set((await col('nft_collections').find({ _id: { $in: deps.map((x) => x._id) } }, { projection: { _id: 1 } }).toArray()).map((c) => c._id));
+  const out = [];
+  for (const { d } of deps) {
+    const src = platformOfDeploy(d) || (nftRole.has(d.account) ? 'deploy' : null);
+    if (!src) continue;
+    out.push({ account: d.account, source: src, new: !listed.has(d.account) });
+    if (dry) continue;
+    if (src === 'deploy') await registerAuditedNft(d.account, 'nft', d); else await registerPlatformDeploys([d]);
+  }
+  return out;
 }
 
 // ---------------------------------------------------------------- discovery
@@ -49,7 +116,8 @@ export async function followCookon(maxRows = 120) {
     if (!rows.length) continue;
     for (const t of await fetchTxs(rows.map((r) => r.hash))) {
       // only accounts that emit NFT events or that a market call names as the NFT contract (not fee / royalty accounts it pays)
-      const contracts = new Set([...t.events.filter((e) => e.standard === 'nep171').map((e) => e.executor), ...t.calls.map((c) => c.args?.nft_contract_id).filter(Boolean)]);
+      // the creation itself has no call and no event: its receiver is the new collection
+      const contracts = new Set([...t.events.filter((e) => e.standard === 'nep171').map((e) => e.executor), ...t.calls.map((c) => c.args?.nft_contract_id).filter(Boolean), t.receiver]);
       for (const x of contracts) {
         if (!x) continue;
         if (COOKON.test(x)) { if (await registerCollection(x, { source: 'cookon' })) n++; }
@@ -80,7 +148,7 @@ export async function discoverNearblocks(perPage = 50) {
 
 // ---------------------------------------------------------------- sync
 /** Which collections are mined in full (events + wallets): followed sources and hand-added ones always; discovered ones when active, not spam, not huge. */
-export const ingestable = (c) => ['hotcraft', 'cookon', 'manual', 'market'].includes(c.source) || (!c.spam && (c.nb?.transfers_day ?? 0) > 0 && (c.nb?.tokens ?? 0) <= STUB_MAX_TOKENS);
+export const ingestable = (c) => ['hotcraft', 'cookon', 'manual', 'market'].includes(c.source) || (c.source === 'deploy' && !c.spam) || (!c.spam && (c.nb?.transfers_day ?? 0) > 0 && (c.nb?.tokens ?? 0) <= STUB_MAX_TOKENS);
 
 /** Read a collection's next transactions and store its NFT events. Returns { added, caughtUp }. */
 export async function syncCollection(c, { maxRows = ROWS_PER_SYNC } = {}) {
@@ -110,7 +178,7 @@ export async function syncCollection(c, { maxRows = ROWS_PER_SYNC } = {}) {
 /** Collections due for a sync, followed sources first. */
 async function syncDue(limit) {
   const due = await col('nft_collections').find({ next_sync_ts: { $lte: Date.now() }, spam: { $ne: true } }).sort({ next_sync_ts: 1 }).limit(200).toArray();
-  const rank = (c) => ({ manual: 0, hotcraft: 1, cookon: 1, market: 2 }[c.source] ?? 3);
+  const rank = (c) => ({ manual: 0, hotcraft: 1, cookon: 1, market: 2, deploy: 2 }[c.source] ?? 3);
   const todo = due.filter(ingestable).sort((a, b) => rank(a) - rank(b)).slice(0, limit);
   let n = 0;
   for (const c of todo) { try { await syncCollection(c); n++; } catch (e) { warn(`NFT sync ${c._id} failed: ${e.message}`); await col('nft_collections').updateOne({ _id: c._id }, { $set: { next_sync_ts: Date.now() + 15 * MIN, sync_error: e.message.slice(0, 200) } }); } }
