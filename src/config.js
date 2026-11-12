@@ -44,7 +44,7 @@ export const config = {
     groundingRetry: process.env.AI_GROUNDING_RETRY !== 'false', // a write-up quoting an account or number that is not in its evidence is asked again once; false = only mark it
   },
 
-  rpcUrls: list(process.env.NEAR_RPC_URLS, ['https://rpc.mainnet.fastnear.com', 'https://free.rpc.fastnear.com', 'https://near.lava.build']),
+  rpcUrls: list(process.env.NEAR_RPC_URLS, ['https://rpc.mainnet.fastnear.com', 'https://free.rpc.fastnear.com', 'https://near.drpc.org']),
   httpTimeoutMs: num(process.env.NEAR_HTTP_TIMEOUT_SECONDS, 30) * 1000, // one NEAR RPC / FastNEAR / indexer request; a stalled one is retried
   txIndexerUrl: process.env.FASTNEAR_TX_URL || 'https://tx.main.fastnear.com',
   fastnearApiUrl: process.env.FASTNEAR_API_URL || 'https://api.fastnear.com',
@@ -262,7 +262,7 @@ export const config = {
     checkEveryMinutes: num(process.env.DATA_CHECK_EVERY_MINUTES, 60), // 0 = off
     checkSample: num(process.env.DATA_CHECK_SAMPLE, 10),
     checkReceipts: process.env.DATA_CHECK_RECEIPTS === 'true',      // also compare the receipt count (calibrate on real captures first)
-    rpcUrls: list(process.env.DATA_CHECK_RPC_URLS, ['https://near.lava.build']), // NOT FastNEAR: a second source
+    rpcUrls: list(process.env.DATA_CHECK_RPC_URLS, ['https://near.drpc.org', 'https://rpc.mainnet.near.org']), // NOT FastNEAR: a second source (near.lava.build was discontinued in Nov 2026)
   },
   analysis: {
     syncMinutes: num(process.env.ANALYSIS_SYNC_MINUTES, 5),  // how long an AI review reads new trades before writing (the worker reads the rest)

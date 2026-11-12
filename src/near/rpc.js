@@ -16,7 +16,8 @@ export async function rpc(method, params) {
       const res = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json', ...(isFastnear(url) ? fastnearHeaders() : {}) }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }), signal: timeout() });
       const j = await res.json();
       if (j.result !== undefined) return j.result;
-      lastErr = new Error(JSON.stringify(j.error).slice(0, 200));
+      // the whole error is kept: the reason that makes it final (UNKNOWN_ACCOUNT …) sits past the first 200 characters
+      lastErr = new Error(JSON.stringify(j.error ?? j).slice(0, 2000));
       if (!/429|rate|timeout|UNKNOWN_BLOCK|Too Many/i.test(lastErr.message)) throw lastErr;
     } catch (e) { lastErr = e; if (/MethodNotFound|does not exist|AccountDoesNotExist|UNKNOWN_ACCOUNT|CodeDoesNotExist/i.test(e.message)) throw e; }
     await sleep(600 * (i + 1));
