@@ -2,7 +2,7 @@
 
 **The problem.** On NEAR, a user about to sign a transaction, send to a wallet or buy a new token cannot tell whether it is safe, and when an exchange or a protocol is drained, nobody can see where the money goes until it is gone.
 
-**Safe Near** reads every NEAR block live, audits every new contract, catches large outflows within seconds, traces stolen money across chains, follows every new token from the moment it gets liquidity, and answers "is it safe?" for anything a user pastes: on a website, a Telegram bot, an API wallets call before signing, and MCP tools for AI agents. It is read-only: no wallet, no keys, no trading.
+**Safe Near** reads every NEAR block live, audits every new contract, catches large outflows within seconds, traces stolen money across chains, follows every new token from the moment it gets liquidity, and answers "is it safe?" for anything a user pastes: on a website, a Telegram bot, an API wallets call before signing, and MCP tools for AI agents. Its audits and launch checks also become **graded training tasks for other AI agents** (the Safe Near Academy, a public B2B MCP). It is read-only: no wallet, no keys, no trading.
 
 **Website (live, public, no login): <https://app.safe-near.org>** · **Telegram:** [@safenear_bot](https://t.me/safenear_bot) · **API:** `https://app.safe-near.org/api/v1/…` ([docs](docs/tx-firewall.md)) · **MCP:** `https://app.safe-near.org/mcp` · **B2B MCP:** `https://app.safe-near.org/b2b/mcp` · **License:** [MIT](LICENSE)
 
@@ -20,6 +20,7 @@
 | In Telegram, send `/safe fuk-3.smithii.near` to [@safenear_bot](https://t.me/safenear_bot) (or just paste the account in a private chat) | **Danger**: the same answer as Safety Check, including that 4 of the 10 wallets that bought this token are wallets of the Binance hack case |
 | In Telegram, send `/hacks` to [@safenear_bot](https://t.me/safenear_bot), then `/hack efd224256518a7cacd209867963276efed302a8e222c013c43f4b1bd369ae5af` | The latest proven hacks, then this case with an evidence file to forward to whoever can act (an exchange, a bridge, SEAL 911) |
 | Add the Agent Guard to Claude Code: `claude mcp add --transport http safe-near https://app.safe-near.org/mcp`, then ask *"Send 0.5 NEAR from my-agent.near to efd224256518a7cacd209867963276efed302a8e222c013c43f4b1bd369ae5af"* | The agent calls `guard_transaction` and gets **BLOCK**: the receiver holds the Binance drain. Codex: `codex mcp add safe-near --url https://app.safe-near.org/mcp` ([docs/agent-guard.md](docs/agent-guard.md)) |
+| Add the Academy to Claude Code: `claude mcp add --transport http safe-near-b2b https://app.safe-near.org/b2b/mcp`, then ask *"Use the Safe Near Academy as my-auditor: take 5 contract tasks, read each contract's code and answer"* | The agent gets real NEAR contracts to audit, is scored by fixed rules (no AI grades it), and sees the right answer and why after each one. `academy_leaderboard` shows where it stands against Safe Near's own gates ([docs/academy-design.md](docs/academy-design.md)) |
 | Press `/` on any page and type `binance`, then `burrow`, then paste `efd224256518a7cacd209867963276efed302a8e222c013c43f4b1bd369ae5af` | **One search over everything**: the Binance hot wallets and the drain case; the Rhea (Burrow) exploit and its lending contract; for a pasted account, **Is it safe?** first, then its wallet page and the case |
 | Open <https://app.safe-near.org/entities/9c484fa5d2d069569ba063fc555c34e621ccd88fdbb0295fc79bad232621c5c1>, or run `curl "https://app.safe-near.org/api/v1/entity?id=solver-priv-liq.near"` | **What Safe Near calls it** (the ontology): *an exchange hot wallet · operated by Binance*, why (it sends its reserves to `binancecold3.near`), and its links. The API answers the same for any account; an agent asks with the `what_is` tool |
 | Run `npm install && npm run agent-example` | An agent in code guards three transactions: a payment to the drain account (**BLOCK**), wrapping 0.5 NEAR (**ALLOW**), a full-access key for a "support agent" (**BLOCK**), then plans a function-call key limited to one contract instead |
@@ -48,6 +49,13 @@
 - **Measures itself:** every gate, score and AI verdict is scored against what happened afterwards: hacks called and retracted, how fast real hacks were caught, the firewall's misses and false alarms, audit levels against outcomes, a golden set of known accounts, chain data against a second source. [Measured accuracy](#measured-accuracy)
 - **AI cannot be steered by chain data:** token names and memos are cleaned before any AI reads them, every AI text is checked against its evidence, and the AI can never make something look safer than the rules say.
 
+**Training other agents**
+- **Safe Near Academy (B2B MCP):** 2,500+ graded tasks with known answers, built every day from Safe Near's own work. There are two tracks:
+  - contract security in 5 levels: types, powerful methods, open doors, powers over users, upgrades;
+  - memecoins in 4 levels: real, rug or dud from the first minutes; which buyers work together; how a rug was pulled.
+
+  Answers are scored by fixed rules against the code, the chain and what the price did. Training tasks show the answer and why, for retraining. Hidden test tasks and a fixed exam measure what an agent learnt, on a leaderboard beside Safe Near's gates. [docs/academy-design.md](docs/academy-design.md)
+
 ## How it works
 
 ```
@@ -57,7 +65,7 @@ FastNEAR blocks (every block, live) ──► deploy watcher ──┬─► con
                                                           └─► money watch ($100k+ movements)
 FastNEAR indexer + RPC ──► account histories, funding chains, contract code and state
                        ontology (one answer per account, with why) ◄──► every module above
-NEAR AI Cloud ──► write-ups and reviews (checked against their evidence)      MongoDB ──► web UI · API · Telegram · MCP
+NEAR AI Cloud ──► write-ups and reviews (checked against their evidence)      MongoDB ──► web UI · API · Telegram · MCP · Academy (B2B MCP)
 ```
 
 Rules decide every verdict; NEAR AI explains, reviews and can only add risk. Grave tags (*Hack*, *Exploited*, *Rugged*) need the rules' evidence or a public report.
@@ -74,7 +82,7 @@ Rules decide every verdict; NEAR AI explains, reviews and can only add risk. Gra
 
 - **Window:** this repository was created on 2026-10-20, after the hackathon's announcement (2026-10-19); every commit is inside the window.
 - **Carried over from our earlier work (baseline, Q-005):** the token/contract audit core was ported from our own earlier, pre-hackathon backend (`contractAuditService`, `nearContractAnalysis`, `nearRpcClient`: keys, privileged methods, sell checks; the "Keys, code and token checks" card and its risk/trust scores); the scanner's hard gates were ported from our live launch scanner; the token analyst prompt adapts our earlier hand-written analyst prompt.
-- **Built in the window:** everything else: Safety Check, the transaction firewall and the Agent Guard; the live chain watch; automated audits of every new contract; tokens found from their deploy and first liquidity; hack detection, tracing, deep reviews and follow-ups; the money watch and the laundering-ring detector; wallet grouping and the scanner; the ontology layer; accuracy measurement and the grounding check on AI texts; the web UI, the Telegram bot, the API and the MCP server.
+- **Built in the window:** everything else: Safety Check, the transaction firewall and the Agent Guard; the live chain watch; automated audits of every new contract; tokens found from their deploy and first liquidity; hack detection, tracing, deep reviews and follow-ups; the money watch and the laundering-ring detector; wallet grouping and the scanner; the ontology layer; accuracy measurement and the grounding check on AI texts; the web UI, the Telegram bot, the API and the MCP server; the Safe Near Academy (graded training tasks for other agents, a second MCP server).
 - **Libraries:** `mongodb`, `wabt` (WASM decompiling), `dotenv`, `@modelcontextprotocol/sdk` and `zod` (the Agent Guard). Written with the help of AI coding agents (Claude Code).
 - **Tracks:** AI Security & Defense (`security`): scam and hack detection, a policy engine and spending limits for agents, function-call keys instead of full-access keys. Agent Economy (`agents`): the Agent Guard lets an agent hold and spend money on NEAR, checked before every payment.
 
@@ -98,7 +106,7 @@ The checks above as **MCP tools**, for any agent that speaks MCP (Claude, Codex,
 - Remote: `https://app.safe-near.org/mcp` (Streamable HTTP). Local: `npm run mcp` (stdio; asks the hosted API, no database needed).
 - Setup for Claude Code and Desktop, Codex and agents in code, the policy fields and the limits: [docs/agent-guard.md](docs/agent-guard.md). Example agent: [examples/agent-guard.mjs](examples/agent-guard.mjs).
 
-## Safe Near Academy (training other AI agents)
+## Safe Near Academy (B2B MCP: training other AI agents)
 
 Safe Near's audits and launch checks, turned into **graded tasks with known answers** for other AI agents. It is an MCP server, public and free: `https://app.safe-near.org/b2b/mcp`. An agent asks for a task, answers it, and gets a score from fixed rules (no AI grades another AI). On a training task it then sees the right answer and why. After 10 answers at a level with 70% passed, it moves up a level.
 
@@ -419,6 +427,7 @@ npm start                # worker + web UI (http://127.0.0.1:8790)
 | `src/ai/tools/` | What the AI stages share: `nearai.js` (the NEAR AI client: `chatJSON`, models, retries), `untrusted.js` (the guard for chain data, see below), `budget.js` (the daily AI call budget, `AUTO_AUDIT_AI_PER_DAY`), `verify.js` (checks on what the AI says: audit findings must cite code that exists, amounts in an incident write-up must match the evidence). |
 | `src/<feature>/` | Each feature with its own AI stage next to its rules: `analysis/` (token analyst), `audit/` (contract audits, function review), `evaluate/` (group verdicts and `ai-review.js`), `firewall/`, `incident/` (hacks, deep review), `nft/`, `scanner/`. |
 | `src/ontology/` | The ontology layer: `classes.js` (the class tree, source ranks), `resolve.js` (facts → one answer, pure), `index.js` (`whatIs`, `whatIsMany`, `relationsOf`, `entityView`, `assert`), `sync.js` (the in-memory snapshot the tracers, grouping and the firewall read; `ONTOLOGY_READ`), `known.js` (facts that live in code: router lists, launchpads, trusted dapps, name patterns), `backfill.js` (facts from the other collections, daily), `apply.js` (re-syncs grouping's stored kinds when its rule changes), `replay.js` (stored cases, old rules vs ontology), `shadow.js` (shadow mode and the heartbeat), `gate.js` + `golden.js` + `triage.json` (the migration gate). |
+| `src/academy/` | The Safe Near Academy (B2B MCP): `tasks.js` (the task format, the train / test split, the scorers for classes, odds and lists, levelling, anonymising, balancing, the exam set; all pure), `contracts.js` and `memecoin.js` (the task generators, from the audits, the checks, the trades and the wallet grouping), `service.js` (storage, next task, submit, exam, progress, dataset, leaderboard, baselines), `mcp.js` (the MCP tools at `/b2b/mcp`). |
 | `src/web/server.js` | The API, and the UI files below. |
 | `src/web/public/` | The UI: `index.html` (the page shell), `assets/app.css`, and `assets/js/`: `core.js` (helpers, formatting, API access, state; loaded first), `pages/*.js` (one file per section: explore, tokens, wallets, scanner, creators, analysis, nfts, alerts, system, accuracy, safety, incidents, audit), `search.js`, and `app.js` (navigation and the router; loaded last). They are plain scripts sharing one scope, loaded in the order `index.html` lists, so no build step is needed. Every file is served with a version stamp (`?v=`, new on each start), so a deploy never shows a stale mix. |
 
