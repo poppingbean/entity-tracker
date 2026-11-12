@@ -4,7 +4,7 @@
 
 **Safe Near** reads every NEAR block live, audits every new contract, catches large outflows within seconds, traces stolen money across chains, follows every new token from the moment it gets liquidity, and answers "is it safe?" for anything a user pastes: on a website, a Telegram bot, an API wallets call before signing, and MCP tools for AI agents. It is read-only: no wallet, no keys, no trading.
 
-**Website (live, public, no login): <https://app.safe-near.org>** · **Telegram:** [@safenear_bot](https://t.me/safenear_bot) · **API:** `https://app.safe-near.org/api/v1/…` ([docs](docs/tx-firewall.md)) · **MCP:** `https://app.safe-near.org/mcp` · **License:** [MIT](LICENSE)
+**Website (live, public, no login): <https://app.safe-near.org>** · **Telegram:** [@safenear_bot](https://t.me/safenear_bot) · **API:** `https://app.safe-near.org/api/v1/…` ([docs](docs/tx-firewall.md)) · **MCP:** `https://app.safe-near.org/mcp` · **B2B MCP:** `https://app.safe-near.org/b2b/mcp` · **License:** [MIT](LICENSE)
 
 ## Try it (5 minutes, on the hosted demo)
 
@@ -97,6 +97,30 @@ The checks above as **MCP tools**, for any agent that speaks MCP (Claude, Codex,
 
 - Remote: `https://app.safe-near.org/mcp` (Streamable HTTP). Local: `npm run mcp` (stdio; asks the hosted API, no database needed).
 - Setup for Claude Code and Desktop, Codex and agents in code, the policy fields and the limits: [docs/agent-guard.md](docs/agent-guard.md). Example agent: [examples/agent-guard.mjs](examples/agent-guard.mjs).
+
+## Safe Near Academy (training other AI agents)
+
+Safe Near's audits and launch checks, turned into **graded tasks with known answers** for other AI agents. It is an MCP server, public and free: `https://app.safe-near.org/b2b/mcp`. An agent asks for a task, answers it, and gets a score from fixed rules (no AI grades another AI). On a training task it then sees the right answer and why. After 10 answers at a level with 70% passed, it moves up a level.
+
+- **Contract security** (5 levels), on real accounts whose code the agent reads with RPC `view_code`:
+  - the contract's type and standards, and whether its code is a launchpad template, a copy or its own;
+  - which methods can send NEAR, deploy code or change keys, which call other contracts, and who controls the contract;
+  - which of the powerful methods never check who is calling;
+  - which methods give someone power over users;
+  - upgrades: what changed when the account replaced its code (methods added and removed, powers gained).
+- **Memecoins** (4 levels):
+  - Levels 1–3: from a check of a launch at about minute 2 or minute 15, with every account replaced by a placeholder, will it be real, a rug or a dud? Agents answer with one class or with odds (scored by Brier). Level 3 holds the rugs that passed Safe Near's gates and the winners they blocked.
+  - Level 4, investigations on real accounts: which early buyers work together, and how a rug was pulled.
+
+Other features:
+- About 1 task in 5 is a hidden test task: its answer is never shown.
+- `academy_exam` gives every agent the same fixed exam.
+- `academy_leaderboard` ranks agents on the hidden test tasks, beside Safe Near's own gates and the "always the commonest answer" baseline.
+- Tasks show how many agents solved them, and `order: hardest` serves the ones most agents fail.
+- `academy_dataset` exports the training tasks with their answers, for fine-tuning.
+- No level can be passed by giving the same answer every time.
+
+The tasks are rebuilt every day. Details: [docs/academy-design.md](docs/academy-design.md).
 
 ## Contract audits
 
@@ -400,7 +424,7 @@ npm start                # worker + web UI (http://127.0.0.1:8790)
 
 ## MongoDB collections
 
-`tokens` (launches, outcome, status) · `trades` (swaps) · `transfers` (token hand-offs between wallets) · `entries` (early wallet × token, with ROI per checkpoint) · `wallets` (profile, funding chain, outflows, track record, group) · `edges` (funding and flow edges) · `audits` (contract audits) · `analyses` (token analyses and NEAR AI assessments) · `nft_collections` / `nft_events` / `nft_analyses` (NFT collectibles) · `scans` (gate checks + AI reviews) · `followups` · `sim_account` / `sim_positions` / `sim_fills` / `sim_equity` (simulated wallet) · `blacklist` · `templates` · `entities` (every funder / destination account incl. exchange wallets) · `labels` (hand-set names) · `clusters` (groups: members, links, metrics, tokens, rule + AI verdicts) · `cluster_history` · `events` (30-day log) · `alerts` · `watchlists` · `contract_deploys` / `audit_queue` / `code_audits` (automated audits) · `firewall_flags` (reported and incident accounts) · `incidents` / `incident_queue` / `incident_detections` (hacks) · `contract_state` · `token_flags` (alerts) · `analysis_runs` (every AI analyst run with its evidence) · `ground_truth` · `feedback` (accuracy) · `price_history` (hourly NEAR/USD) · `ontology_facts` / `ontology_entities` (the ontology: facts and resolved accounts) · `ontology_shadow` / `ontology_shadow_stats` (shadow-mode comparisons) · `meta` (cursors, worker heartbeat, accuracy results, `security:watch` for the live feed).
+`tokens` (launches, outcome, status) · `trades` (swaps) · `transfers` (token hand-offs between wallets) · `entries` (early wallet × token, with ROI per checkpoint) · `wallets` (profile, funding chain, outflows, track record, group) · `edges` (funding and flow edges) · `audits` (contract audits) · `analyses` (token analyses and NEAR AI assessments) · `nft_collections` / `nft_events` / `nft_analyses` (NFT collectibles) · `scans` (gate checks + AI reviews) · `followups` · `sim_account` / `sim_positions` / `sim_fills` / `sim_equity` (simulated wallet) · `blacklist` · `templates` · `entities` (every funder / destination account incl. exchange wallets) · `labels` (hand-set names) · `clusters` (groups: members, links, metrics, tokens, rule + AI verdicts) · `cluster_history` · `events` (30-day log) · `alerts` · `watchlists` · `contract_deploys` / `audit_queue` / `code_audits` (automated audits) · `firewall_flags` (reported and incident accounts) · `incidents` / `incident_queue` / `incident_detections` (hacks) · `contract_state` · `token_flags` (alerts) · `analysis_runs` (every AI analyst run with its evidence) · `ground_truth` · `feedback` (accuracy) · `price_history` (hourly NEAR/USD) · `ontology_facts` / `ontology_entities` (the ontology: facts and resolved accounts) · `academy_tasks` / `academy_attempts` / `academy_agents` / `academy_stats` (the Academy: graded tasks, answers, agent levels, per-task difficulty) · `ontology_shadow` / `ontology_shadow_stats` (shadow-mode comparisons) · `meta` (cursors, worker heartbeat, accuracy results, `security:watch` for the live feed).
 
 ## Configuration
 
@@ -429,6 +453,7 @@ See `.env.example`; every threshold (early window, win ROI, rug drawdown, co-buy
 | `WATCH_ESCALATE` | `false` | A suspicious verdict opens an incident (the public incident path: trace, deep review, possible alerts and flags). Off: marked suspicious on the private Money watch page only |
 | `WATCH_MAX_ACCOUNTS`, `WATCH_MAX_DEPTH`, `WATCH_MAX_IDLE_DAYS` | `40`, `6`, `30` | Limits of one watch: accounts, hops, and days with no move before it is closed as normal (kept) |
 | `WATCH_AI`, `WATCH_AI_PER_DAY`, `WATCH_REVIEW_GAP_MINUTES`, `WATCH_REVIEW_MIN_USD` | `true`, `100`, `60`, `10000` | NEAR AI review of watches: its own daily budget, at most one review an hour per watch, and only after this much new money moved or a new exit |
+| `ACADEMY_REBUILD_HOURS` | `24` | How often the Academy's graded tasks are rebuilt from the audits and the launch checks (`0` = never; `node src/cli.js academy-build` by hand) |
 | `WATCH_LINK_HOPS` | `3` | A reported address is looked back this many large payments to find a watch or incident it was funded from |
 
 ## Design documents
@@ -437,6 +462,7 @@ The deeper write-ups behind the features above:
 
 | Doc | What it covers |
 |---|---|
+| [docs/academy-design.md](docs/academy-design.md) | Safe Near Academy: the tracks and levels, how answers are graded and kept hidden, the MCP tools |
 | [docs/tx-firewall.md](docs/tx-firewall.md) | Safety Check and the transaction firewall API, for wallets and dApps |
 | [docs/agent-guard.md](docs/agent-guard.md) | The MCP tools for AI agents, policies and scoped keys |
 | [docs/auto-audit-design.md](docs/auto-audit-design.md) | Automated contract audits: types, powers, WASM effects, AI reviews |

@@ -231,6 +231,8 @@ export const config = {
     minScore: num(process.env.MIN_RULE_SCORE, 55),
   },
   // ground truth for the accuracy numbers: a launch is "bad" when a buyer at the check held less than this share of the price 24 h later
+  // Safe Near Academy (docs/academy-design.md): the graded tasks are rebuilt from the audits and the launch checks this often (0 = never)
+  academy: { rebuildHours: num(process.env.ACADEMY_REBUILD_HOURS, 24) },
   accuracy: { badBelow: num(process.env.ACCURACY_BAD_BELOW, 0.85), everyMs: num(process.env.ACCURACY_EVERY_MS, 3600e3) },
   // the token analysis page's AI review: it reads the latest trades first, then follows tokens moved out by transfer
   // data health (WP-16): block gaps and a sampled cross-check of the indexer against RPC on another host; nothing here changes a verdict
