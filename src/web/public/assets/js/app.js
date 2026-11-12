@@ -73,5 +73,28 @@ loadStatus(); setInterval(loadStatus, 60000);
 window.addEventListener('popstate', render);
 Promise.all([loadMemeIds(), loadWatch().catch(() => {})]).then(render);
 setInterval(loadMemeIds, 600000);
-// list pages refresh every 30 s; detail pages, open search results and focused inputs are left alone
-setInterval(() => { if (location.pathname.split('/').filter(Boolean).length < 2 && location.pathname !== '/firewall' && !document.querySelector('.sr.open') && !['INPUT', 'SELECT'].includes(document.activeElement?.tagName)) render(); }, 30000);
+/**
+ * A list page's data, refreshed in place: the view is built again in the background and only the top-level blocks that changed are
+ * swapped. No loading state, the scroll position stays, a block marked data-keep (a panel the reader opened) is left alone, and a failed
+ * request (a deploy restarting the server, a slow network) keeps what is on screen instead of replacing it with an error.
+ */
+async function refreshInPlace() {
+  const view = location.pathname.split('/').filter(Boolean)[0] || 'explore';
+  if (!views[view]) return;
+  const my = seq; // a navigation in the meantime wins
+  let html;
+  try { html = await views[view](); } catch { return; }
+  if (my !== seq || (location.pathname.split('/').filter(Boolean)[0] || 'explore') !== view) return;
+  const t = document.createElement('template'); t.innerHTML = html;
+  const next = [...t.content.children], now = [...$('main').children];
+  if (next.length === 1 && next[0].classList.contains('err') && now.length) return; // an error answer: keep the page
+  if (next.length !== now.length) { // the page's shape changed: swap all, but keep the reader's open panels
+    const kept = new Map(now.filter((el) => el.hasAttribute('data-keep') && el.id).map((el) => [el.id, el]));
+    next.forEach((el, i) => { if (el.id && kept.has(el.id)) next[i] = kept.get(el.id); });
+    $('main').replaceChildren(...next);
+    return;
+  }
+  now.forEach((el, i) => { if (!el.hasAttribute('data-keep') && el.outerHTML !== next[i].outerHTML) el.replaceWith(next[i]); });
+}
+// list pages refresh their data every 30 s, in place; detail pages, Safety Check (it has its own live feed), open search results and focused inputs are left alone
+setInterval(() => { if (location.pathname.split('/').filter(Boolean).length < 2 && location.pathname !== '/firewall' && !document.querySelector('.sr.open') && !['INPUT', 'SELECT', 'TEXTAREA'].includes(document.activeElement?.tagName)) refreshInPlace(); }, 30000);
