@@ -449,7 +449,7 @@ npm start                # worker + web UI (http://127.0.0.1:8790)
 ## Deploying online (e.g. Railway)
 
 1. Create a service from this repository, start command `npm start` (the default).
-2. Variables: `MONGODB_URI`, `MONGODB_DB`, `NEAR_AI_API_KEY`, `FASTNEAR_API_KEY` (plus any threshold you want to change). On Railway the UI listens on `0.0.0.0` and port **8080** (or `PORT` when the host sets it); point the service's public domain at port 8080.
+2. Variables: `MONGODB_URI`, `MONGODB_DB`, `NEAR_AI_API_KEY` (one key, or several separated by `;`: a key out of credits is set aside and the next one is used), `FASTNEAR_API_KEY` (plus any threshold you want to change). On Railway the UI listens on `0.0.0.0` and port **8080** (or `PORT` when the host sets it); point the service's public domain at port 8080.
 3. `DASHBOARD_PASSWORD` is **optional**. Without it the UI is public and read-only: the simulated-sell button is disabled (otherwise anyone could sell the paper positions). Set it to require HTTP Basic auth (any username) and re-enable the button.
 4. In MongoDB Atlas allow the service's IP under Network Access.
 5. Run **one** worker only (two workers would duplicate work). `npm run web` serves the UI alone if you want to scale it separately.
@@ -503,7 +503,7 @@ See `.env.example`; every threshold (early window, win ROI, rug drawdown, co-buy
 | `WATCH_RECORD_MIN_USD` | `100` | Smaller moves out of a watched account are ignored; from this size they count toward what the account has sent on, even when too small to follow |
 | `WATCH_ESCALATE` | `false` | A suspicious verdict opens an incident (the public incident path: trace, deep review, possible alerts and flags). Off: marked suspicious on the Money watch page only |
 | `WATCH_MAX_ACCOUNTS`, `WATCH_MAX_DEPTH`, `WATCH_MAX_IDLE_DAYS` | `40`, `6`, `30` | Limits of one watch: accounts, hops, and days with no move before it is closed as normal (kept) |
-| `WATCH_AI`, `WATCH_AI_PER_DAY`, `WATCH_REVIEW_GAP_MINUTES`, `WATCH_REVIEW_MIN_USD` | `true`, `100`, `60`, `10000` | NEAR AI review of watches: its own daily budget, at most one review an hour per watch, and only after this much new money moved or a new exit |
+| `WATCH_AI`, `WATCH_AI_PER_DAY`, `WATCH_REVIEW_GAP_MINUTES`, `WATCH_REVIEW_MIN_USD` | `true`, `100`, `60`, `10000` | NEAR AI review of watches: its own daily budget, at most one review an hour per watch, and only after this much new money moved or a new exit. The budget goes first to watches with news (new money moved, money left the network); a watch already suspicious asks the AI again only when money leaves the network; a review without an AI verdict says why (off, budget spent, failed) |
 | `ACADEMY_BUSINESS`, `ACADEMY_TREASURY`, `ACADEMY_AGENT_ACCOUNT`, `ACADEMY_AGENT_KEY`, `ACADEMY_RESERVE_ACCOUNT`, `ACADEMY_CONTRIBUTORS` | off, unset | The Academy's business: on/off, its treasury DAO, the agent's account and its function-call key (a secret), the payees. Prices, the split and the limits are in `academy-business.json` ([docs/academy-business.md](docs/academy-business.md)) |
 | `ACADEMY_REBUILD_HOURS` | `24` | How often the Academy's graded tasks are rebuilt from the audits and the launch checks (`0` = never; `node src/cli.js academy-build` by hand) |
 | `WATCH_LINK_HOPS` | `3` | A reported address is looked back this many large payments to find a watch or incident it was funded from |

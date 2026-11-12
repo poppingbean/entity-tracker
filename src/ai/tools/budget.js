@@ -15,8 +15,15 @@ export async function aiBudget(scope = 'audit') {
   const extra = scope === 'audit' ? await import('../../academy/business.js').then((m) => m.extraAiCalls()).catch(() => 0) : 0;
   const base = SCOPES[scope]();
   if (!aiEnabled() || base <= 0) return false; // an operator's 0 turns the AI off: extra calls never turn it back on
-  const limit = base + extra;
-  const r = await col('meta').findOneAndUpdate({ _id: `${scope}:ai:${day()}` }, { $inc: { 'value.calls': 1 }, $set: { ts: Date.now() } }, { upsert: true, returnDocument: 'after' });
-  const doc = r?.value !== undefined && r?.ok !== undefined ? r.value : r; // driver versions differ
-  return (doc?.value?.calls ?? 0) <= limit;
+  const limit = base + extra, id = `${scope}:ai:${day()}`;
+  // only an allowed call is counted: the count says how many calls ran today (it used to count refused ones too, past the limit)
+  try {
+    const r = await col('meta').findOneAndUpdate({ _id: id, $or: [{ 'value.calls': { $lt: limit } }, { 'value.calls': { $exists: false } }] },
+      { $inc: { 'value.calls': 1 }, $set: { ts: Date.now() } }, { upsert: true, returnDocument: 'after' });
+    const doc = r?.value !== undefined && r?.ok !== undefined ? r.value : r; // driver versions differ
+    return !!doc;
+  } catch (e) {
+    if (e?.code === 11000) return false; // today's document exists and is at the limit: the upsert tried to insert it again
+    throw e;
+  }
 }

@@ -123,9 +123,9 @@ export async function reopen(wid, { by = 'operator', why = 'reported by a person
   await activeIndex(true);
 }
 
-/** Record a review that did not change the status (keep watching): moves the review clock. */
+/** Record a review that did not change the status (keep watching): moves the review clock. `review` null: nothing new to add to the history. */
 export async function noteReview(wid, review, { aiMissing = false } = {}) {
-  await col('watches').updateOne({ _id: wid }, { $set: { last_review_ts: Date.now(), moved_since_review_usd: 0, new_exit: false, ai_missing: aiMissing }, $push: { reviews: { $each: [review], $slice: -30 } } });
+  await col('watches').updateOne({ _id: wid }, { $set: { last_review_ts: Date.now(), moved_since_review_usd: 0, new_exit: false, ai_missing: aiMissing }, ...(review ? { $push: { reviews: { $each: [review], $slice: -30 } } } : {}) });
 }
 
 /** The open watches that have an account `account` (for a report by address). */
