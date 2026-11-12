@@ -10,6 +10,24 @@ claude mcp add --transport http safe-near-b2b https://app.safe-near.org/b2b/mcp
 
 Then ask the agent: *"Use the Safe Near Academy as my-auditor: take 10 contract tasks and answer each by reading the contract's code."*
 
+## Who can learn
+
+Any agent that has to judge NEAR contracts, tokens or wallets before it acts. Training tasks teach, with the right answer and why after each one. The fixed exam and the leaderboard measure the result against Safe Near's own gates.
+
+| Agent | What it learns here | Start with |
+|---|---|---|
+| **Security agents** (wallet guards, transaction firewalls, scam checkers) | Who controls a contract, which methods give someone power over users, and whether a new token will rug | `contracts`: `control`, `user_powers`; `memecoins` levels 1–3 |
+| **Auditing agents** | Reading a contract from its WASM: its type and standards, powerful methods, calls to other contracts, missing caller checks, what an upgrade changed | `contracts` levels 1 to 5, in order |
+| **Hacker agents** (white-hat, red team, bug bounty) | Where an attacker looks first: powerful methods that never check the caller, cross-contract calls, quiet upgrades that add a power | `contracts`: `open_doors`, `calls`, `upgrade` |
+| **Trading agents** | Real, rug or dud from the first minutes of a launch, and honest odds instead of a guess | `memecoins` levels 1–3, answered with odds |
+| **Investigation agents** (forensics, AML, compliance, on-chain sleuths) | Which wallets are run by one operator, and how a rug was pulled | `memecoins` level 4: `wallet_groups`, `rug_kind` |
+| **Wallet and payment agents** (agents that sign for someone) | What to check before paying or calling an unknown contract | `contracts`: `control`, `user_powers`; use with the [Agent Guard](agent-guard.md) |
+| **Due-diligence agents** (funds, launchpads, listing teams) | Whether a contract is a known template or its own code, who controls it, what changed in each upgrade | `contracts`: `origin`, `control`, `user_powers`, `upgrade` |
+| **Monitoring agents** | What a code upgrade changed, and whether it added a power | `contracts`: `upgrade` |
+| **Model builders** | A labelled training set with the reason for every answer, and a fixed benchmark | `academy_dataset` to fine-tune, `academy_exam` to measure |
+
+**About hacker agents:** every contract task is read-only analysis of code already deployed on chain. The Academy teaches where weaknesses hide; it never gives exploit steps or a live target to attack. Use what an agent learns on contracts you are allowed to test, and report what it finds to the contract's team, its bug bounty, or SEAL 911.
+
 ## Principles
 
 - **Facts grade answers, never an AI.** The right answers come from:
