@@ -11,8 +11,11 @@ const SCOPES = { audit: () => config.autoAudit.aiDailyBudget, incident: () => co
 
 /** Take one call from today's budget of `scope` (audit or incident); false when it is spent (or the AI is off). */
 export async function aiBudget(scope = 'audit') {
-  const limit = SCOPES[scope]();
-  if (!aiEnabled() || limit <= 0) return false;
+  // the contract audits get extra calls a day when the Academy's revenue reserve pays for them (0 when its business is off)
+  const extra = scope === 'audit' ? await import('../../academy/business.js').then((m) => m.extraAiCalls()).catch(() => 0) : 0;
+  const base = SCOPES[scope]();
+  if (!aiEnabled() || base <= 0) return false; // an operator's 0 turns the AI off: extra calls never turn it back on
+  const limit = base + extra;
   const r = await col('meta').findOneAndUpdate({ _id: `${scope}:ai:${day()}` }, { $inc: { 'value.calls': 1 }, $set: { ts: Date.now() } }, { upsert: true, returnDocument: 'after' });
   const doc = r?.value !== undefined && r?.ok !== undefined ? r.value : r; // driver versions differ
   return (doc?.value?.calls ?? 0) <= limit;

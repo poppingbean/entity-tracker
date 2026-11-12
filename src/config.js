@@ -1,5 +1,26 @@
 // Configuration. Everything comes from .env / the environment. There is no wallet and no private key anywhere in this project.
 import 'dotenv/config';
+import { readFileSync } from 'node:fs';
+
+/**
+ * The Academy's business rules (academy-business.json: prices, the revenue split, limits; docs/academy-business.md). Accounts may be set
+ * from the environment instead (ACADEMY_TREASURY …); the agent's signing key only ever comes from the environment (ACADEMY_AGENT_KEY).
+ */
+function academyBusiness() {
+  let r = {};
+  try { r = JSON.parse(readFileSync(new URL('../academy-business.json', import.meta.url), 'utf8')); } catch {}
+  const e = process.env, list = (v) => String(v).split(',').map((x) => x.trim()).filter(Boolean);
+  return {
+    ...r,
+    enabled: e.ACADEMY_BUSINESS != null ? e.ACADEMY_BUSINESS === 'true' : !!r.enabled,
+    treasury: e.ACADEMY_TREASURY || r.treasury || '',
+    agent_account: e.ACADEMY_AGENT_ACCOUNT || r.agent_account || '',
+    reserve_account: e.ACADEMY_RESERVE_ACCOUNT || r.reserve_account || '',
+    contributors: e.ACADEMY_CONTRIBUTORS ? list(e.ACADEMY_CONTRIBUTORS) : r.contributors || [],
+    agent_key: e.ACADEMY_AGENT_KEY || '',
+    oneclick_jwt: e.ACADEMY_ONECLICK_JWT || '',
+  };
+}
 
 const num = (v, d) => (v === undefined || v === '' ? d : Number(v));
 const bool = (v, d) => (v === undefined || v === '' ? d : /^(1|true|yes)$/i.test(String(v)));
@@ -23,7 +44,7 @@ export const config = {
     groundingRetry: process.env.AI_GROUNDING_RETRY !== 'false', // a write-up quoting an account or number that is not in its evidence is asked again once; false = only mark it
   },
 
-  rpcUrls: list(process.env.NEAR_RPC_URLS, ['https://rpc.mainnet.fastnear.com', 'https://free.rpc.fastnear.com', 'https://near.lava.build']),
+  rpcUrls: list(process.env.NEAR_RPC_URLS, ['https://rpc.mainnet.fastnear.com', 'https://free.rpc.fastnear.com', 'https://near.drpc.org']),
   httpTimeoutMs: num(process.env.NEAR_HTTP_TIMEOUT_SECONDS, 30) * 1000, // one NEAR RPC / FastNEAR / indexer request; a stalled one is retried
   txIndexerUrl: process.env.FASTNEAR_TX_URL || 'https://tx.main.fastnear.com',
   fastnearApiUrl: process.env.FASTNEAR_API_URL || 'https://api.fastnear.com',
@@ -232,7 +253,7 @@ export const config = {
   },
   // ground truth for the accuracy numbers: a launch is "bad" when a buyer at the check held less than this share of the price 24 h later
   // Safe Near Academy (docs/academy-design.md): the graded tasks are rebuilt from the audits and the launch checks this often (0 = never)
-  academy: { rebuildHours: num(process.env.ACADEMY_REBUILD_HOURS, 24) },
+  academy: { rebuildHours: num(process.env.ACADEMY_REBUILD_HOURS, 24), business: academyBusiness() },
   accuracy: { badBelow: num(process.env.ACCURACY_BAD_BELOW, 0.85), everyMs: num(process.env.ACCURACY_EVERY_MS, 3600e3) },
   // the token analysis page's AI review: it reads the latest trades first, then follows tokens moved out by transfer
   // data health (WP-16): block gaps and a sampled cross-check of the indexer against RPC on another host; nothing here changes a verdict
@@ -241,7 +262,7 @@ export const config = {
     checkEveryMinutes: num(process.env.DATA_CHECK_EVERY_MINUTES, 60), // 0 = off
     checkSample: num(process.env.DATA_CHECK_SAMPLE, 10),
     checkReceipts: process.env.DATA_CHECK_RECEIPTS === 'true',      // also compare the receipt count (calibrate on real captures first)
-    rpcUrls: list(process.env.DATA_CHECK_RPC_URLS, ['https://near.lava.build']), // NOT FastNEAR: a second source
+    rpcUrls: list(process.env.DATA_CHECK_RPC_URLS, ['https://near.drpc.org', 'https://rpc.mainnet.near.org']), // NOT FastNEAR: a second source (near.lava.build was discontinued in Nov 2026)
   },
   analysis: {
     syncMinutes: num(process.env.ANALYSIS_SYNC_MINUTES, 5),  // how long an AI review reads new trades before writing (the worker reads the rest)

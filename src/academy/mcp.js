@@ -4,15 +4,17 @@
 // The hidden test tasks (about one in five) never show their answer: they are the exam and the leaderboard. See docs/academy-design.md.
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
-import { tracks, nextTask, submit, progress, dataset, leaderboard, exam } from './service.js';
+import { tracks, nextTask, submit, progress, dataset, leaderboard, exam, checkAgent } from './service.js';
+import { createOrder, orderStatus, certify, publicLedger, entitlements, PRODUCTS, rules } from './business.js';
 
-export const ACADEMY_VERSION = '1.1.0';
+export const ACADEMY_VERSION = '1.2.0';
 const INSTRUCTIONS = `Safe Near Academy trains and tests AI agents on real NEAR data: contract security (from Safe Near's code audits) and memecoins (from its launch checks, what happened after, and its wallet grouping).
 Every answer is scored by fixed rules against facts (the deployed code, the chain, the prices after a check), never by another AI.
 1. academy_tracks: the tracks and levels.  2. academy_next_task with your agent name and a track.  3. Work it out (contract tasks: read the code with RPC view_code).
 4. academy_submit with the task id and your answer in the task's answer_format. Training tasks show the right answer and why: keep them to learn or retrain.
 5. You level up after 10 answers at a level with 70% passed. academy_exam is the fixed exam (the same hidden test tasks for every agent); academy_leaderboard ranks agents on test tasks, beside Safe Near's own gates as a baseline.
-academy_dataset exports the training tasks with their answers (for fine-tuning or worked examples). The first answer to a task counts.`;
+academy_dataset exports the training tasks with their answers (for fine-tuning or worked examples). The first answer to a task counts.
+The Academy runs as a small business: training and the exam are free up to a daily cap; academy_buy sells a training pass, a dataset pass or an exam certificate (pay in NEAR or USDC on NEAR, or from any chain through NEAR Intents). academy_ledger shows every sale, cost and payout.`;
 
 const AGENT = z.string().min(2).max(64).describe('Your agent\'s name (2-64 letters, digits, dots, dashes, underscores), e.g. my-auditor.near. Progress is kept under it.');
 const TRACK = z.enum(['contracts', 'memecoins']).describe('contracts: contract security. memecoins: memecoins from their first minutes');
@@ -80,10 +82,10 @@ export function createAcademy() {
   server.registerTool('academy_dataset', {
     title: 'Export the training set',
     description: 'Training tasks with their right answers and why, a page at a time (up to 500). For fine-tuning or as worked examples. Test tasks are never exported.',
-    inputSchema: { track: TRACK, level: z.number().int().min(1).max(10).optional(), kind: KIND, limit: z.number().int().min(1).max(500).optional(), offset: z.number().int().min(0).optional() },
+    inputSchema: { track: TRACK, agent: AGENT.optional().describe('Your agent\'s name: the free tier counts dataset rows per agent a day'), level: z.number().int().min(1).max(10).optional(), kind: KIND, limit: z.number().int().min(1).max(500).optional(), offset: z.number().int().min(0).optional() },
     annotations: { ...READ, idempotentHint: true },
   }, safe(async (a) => {
-    const r = await dataset(a.track, { level: a.level, kind: a.kind || null, limit: a.limit ?? 100, offset: a.offset ?? 0 });
+    const r = await dataset(a.track, { level: a.level, kind: a.kind || null, limit: a.limit ?? 100, offset: a.offset ?? 0, agent: a.agent || null });
     return reply(`${r.count} training tasks from ${a.track}${a.level ? ` level ${a.level}` : ''}${a.kind ? ` (${a.kind})` : ''} (offset ${a.offset ?? 0}). One JSON object per line:\n${r.items.map((x) => JSON.stringify(x)).join('\n')}`, { track: r.track, count: r.count });
   }));
 
@@ -96,6 +98,48 @@ export function createAcademy() {
     const r = await leaderboard(a.track, { limit: a.limit ?? 20 });
     const agents = r.agents.length ? r.agents.map((x) => `${x.rank}. ${x.agent}: ${x.exam_score} on ${x.test_tasks} test tasks (level ${x.level})`).join('\n') : `No agent has answered ${r.min_test_tasks} test tasks on ${r.track} yet.`;
     return reply(`${agents}${r.baselines.length ? `\nBaselines:\n${r.baselines.map((b) => `- ${b.agent}: ${b.exam_score} on ${b.test_tasks} test tasks (${b.what})`).join('\n')}` : ''}`, r);
+  }));
+
+  server.registerTool('academy_buy', {
+    title: 'Buy a pass or a certificate',
+    description: `Order a product and get the exact payment to make. Products: ${Object.entries(PRODUCTS).map(([k, v]) => `${k} (${v})`).join('; ')}. pay_with: "usdc" (USDC on NEAR), "near", or "intents" (any chain through NEAR Intents: give origin_asset and refund_to). The amount is unique to your order: pay exactly that, and the Academy credits you within a minute or two.`,
+    inputSchema: { agent: AGENT, product: z.enum(Object.keys(PRODUCTS)), pay_with: z.enum(['usdc', 'near', 'intents']).optional(),
+      origin_asset: z.string().max(120).optional().describe('intents only: the 1Click asset id you pay with, e.g. nep141:base-0x833589fcd6edb6e08f4c7c32d4f71b54bda02913.omft.near (USDC on Base)'),
+      refund_to: z.string().max(120).optional().describe('intents only: your address on the origin chain, for a refund if the swap fails') },
+    annotations: { ...READ, openWorldHint: true },
+  }, safe(async (a) => {
+    const r = await createOrder(checkAgent(a.agent), a.product, { pay_with: a.pay_with || 'usdc', origin_asset: a.origin_asset || null, refund_to: a.refund_to || null });
+    const h = r.how_to_pay;
+    return reply(`Order ${r.order}: ${r.product} for $${r.usd}. Send ${h.send} to ${h.to}${h.memo ? ` (memo ${h.memo})` : ''} before ${r.expires}. ${h.note} Check it with academy_order.`, r);
+  }));
+
+  server.registerTool('academy_order', {
+    title: 'An order\'s state',
+    description: 'Whether an order is paid (and by which transaction), still open, or expired; for a NEAR Intents order, the swap\'s state too. Also your passes and certificates.',
+    inputSchema: { agent: AGENT, order: z.string().min(5).max(40) }, annotations: { ...READ, idempotentHint: true, openWorldHint: true },
+  }, safe(async (a) => {
+    const agent = checkAgent(a.agent), r = await orderStatus(agent, a.order), e = await entitlements(agent);
+    const ent = { certificates: e.certificates || 0, training_pass_until: e.training_until ? new Date(e.training_until).toISOString() : null, dataset_pass_until: e.dataset_until ? new Date(e.dataset_until).toISOString() : null };
+    return reply(`Order ${r.order} (${r.product}, $${r.usd}): ${r.status.toUpperCase()}${r.swap ? `; NEAR Intents swap: ${r.swap}` : ''}${r.paid ? `; paid by ${r.paid.tx}` : ''}. Certificates: ${ent.certificates}; training pass until ${ent.training_pass_until || '-'}; dataset pass until ${ent.dataset_pass_until || '-'}.`, { ...r, entitlements: ent });
+  }));
+
+  server.registerTool('academy_certify', {
+    title: 'Certify your exam result',
+    description: 'Once you have answered every task of academy_exam on a track, use one exam certificate (academy_buy) to record your result on the public ledger, with an id anyone can check.',
+    inputSchema: { agent: AGENT, track: TRACK }, annotations: READ,
+  }, safe(async (a) => {
+    const agent = checkAgent(a.agent), r = await certify(agent, a.track, await exam(agent, a.track));
+    return reply(`Certified: ${r.agent} scored ${r.score} on the ${r.track} exam (${r.tasks} hidden test tasks). Certificate ${r.certificate}, public on the ledger.`, r);
+  }));
+
+  server.registerTool('academy_ledger', {
+    title: 'The public ledger',
+    description: 'The Academy\'s business in the open: the rules (prices, split, limits), the totals, and every sale, cost, payout and certificate with its transaction.',
+    inputSchema: { kind: z.enum(['sale', 'cost', 'payout', 'kept', 'held', 'certificate']).optional(), limit: z.number().int().min(1).max(200).optional() },
+    annotations: { ...READ, idempotentHint: true },
+  }, safe(async (a) => {
+    const r = await publicLedger({ kind: a.kind || null, limit: a.limit ?? 30 }), t = r.totals;
+    return reply(`${r.business.enabled ? (r.business.paused ? 'PAUSED' : 'Open') : 'Not selling (free only)'}. Revenue $${t.revenue_usd} from ${t.sales} sales; AI cost $${t.cost_usd}; paid out $${t.paid_out_usd} (reserve $${t.reserve_usd}, contributors $${t.contributors_usd}); ${t.certificates} certificates.${r.rows.length ? '\n' + r.rows.slice(0, 15).map((x) => `- ${x.time.slice(0, 16)} ${x.kind}${x.usd != null ? ` $${x.usd}` : ''}${x.to ? ` to ${x.to}` : ''}${x.agent ? ` (${x.agent})` : ''}${x.tx ? ` tx ${x.tx}` : ''}${x.note ? `: ${x.note}` : ''}`).join('\n') : ''}`, r);
   }));
 
   return server;

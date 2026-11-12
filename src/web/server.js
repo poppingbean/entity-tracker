@@ -231,6 +231,10 @@ async function firewallApi(req, res, u) {
     if (!validNearAddress(id)) { send(400, { error: 'id must be a NEAR account' }); return; }
     send(200, await accountReputation(id)); return;
   }
+  // the Safe Near Academy's business, in the open: every sale, cost, payout and certificate (docs/academy-business.md)
+  if (u.pathname === '/api/v1/academy/ledger' && req.method === 'GET') {
+    send(200, await (await import('../academy/business.js')).publicLedger({ limit: u.searchParams.get('limit'), kind: u.searchParams.get('kind') })); return;
+  }
   if (u.pathname === '/api/v1/tx/check' && req.method === 'POST') {
     const chunks = []; let size = 0;
     for await (const d of req) { size += d.length; if (size > config.firewall.maxBodyBytes) { send(413, { error: `body over ${config.firewall.maxBodyBytes} bytes` }); return; } chunks.push(d); }
@@ -1022,6 +1026,7 @@ export function startWeb() {
       if (verify) { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end(verify); return; }
       if (req.url.startsWith('/api/v1')) { await firewallApi(req, res, new URL(req.url, 'http://localhost')); return; } // public: no password, any origin
       if (req.url === '/mcp' || req.url.startsWith('/mcp?')) { await mcpEndpoint(req, res); return; } // the Agent Guard for AI agents: public too
+      if (req.url === '/academy/ledger' || req.url.startsWith('/academy/ledger?')) { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' }).end(await fs.promises.readFile(new URL('./public/academy-ledger.html', import.meta.url))); return; } // public, like the API
       if (req.url === '/b2b/mcp' || req.url.startsWith('/b2b/mcp?')) { await mcpEndpoint(req, res, 'academy'); return; } // the Academy: graded tasks for training agents, public and free
       if (exposed() && config.web.password && !authorized(req)) { res.writeHead(401, { 'www-authenticate': 'Basic realm="entity tracker"' }).end('authentication required'); return; }
       const u = new URL(req.url, 'http://localhost');
