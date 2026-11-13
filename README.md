@@ -59,6 +59,7 @@
   - It sells training passes, dataset passes and exam certificates, and gets paid in NEAR or USDC, or from any chain through NEAR Intents (1Click).
   - It books its own NEAR AI cost, and its revenue buys it extra AI calls.
   - Every day it pays out the revenue through its treasury DAO. Each payout first passes Safe Near's own Agent Guard, and the agent holds only a function-call key.
+  - The exam is free; a $1 certificate records the score publicly. Each order has a unique exact amount, so a payment is matched to its agent with no account link or memo needed.
   - Every sale, cost and payout is on a public ledger: <https://app.safe-near.org/academy/ledger>. [docs/academy-business.md](docs/academy-business.md)
 
 ## How it works
