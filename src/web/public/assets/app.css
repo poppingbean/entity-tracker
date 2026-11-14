@@ -30,7 +30,7 @@
   .topbar { position:sticky; top:0; z-index:40; background:color-mix(in srgb, var(--bg) 88%, transparent); backdrop-filter:blur(10px); border-bottom:1px solid var(--line); }
   .topin { max-width:1440px; margin:0 auto; padding:10px 24px; display:flex; align-items:center; gap:18px; }
   .brand { display:flex; align-items:center; gap:10px; color:var(--text); text-decoration:none !important; flex:0 0 auto; }
-  .logo { width:32px; height:32px; border-radius:9px; display:grid; place-items:center; color:var(--accent-ink); background:linear-gradient(135deg,var(--accent),var(--accent-2)); }
+  .logo { width:32px; height:32px; display:grid; place-items:center; }
   .brand b { font-size:15px; letter-spacing:.1px; } .brand small { display:block; color:var(--muted); font-size:11px; line-height:1.1; }
   #nav { display:flex; gap:2px; }
   #nav a { padding:7px 12px; border-radius:9px; color:var(--muted); font-weight:600; white-space:nowrap; text-decoration:none; }

@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 520 164" role="img" aria-label="Safe Near">
+  <title>Safe Near</title>
+  <path d="M80 6 L146 28 V80 C146 120 118 146 80 158 C42 146 14 120 14 80 V28 Z" fill="#17b890"/>
+  <path d="M80 20 L133 38 V80 C133 112 111 133 80 144 C49 133 27 112 27 80 V38 Z" fill="none" stroke="#fff" stroke-width="6" stroke-linejoin="round"/>
+  <path d="M56 110 V60 L90 104 L110 56" fill="none" stroke="#fff" stroke-width="11" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="176" y="98" fill="#17b890" font-family="Inter, Segoe UI, Helvetica, Arial, sans-serif" font-size="44" font-weight="700" letter-spacing="7">SAFE NEAR</text>
+</svg>

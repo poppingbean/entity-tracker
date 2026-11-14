@@ -1,3 +1,5 @@
+<p align="center"><img src="src/web/public/assets/logo-wordmark.svg" alt="Safe Near" width="360"></p>
+
 # Safe Near: security gate and defenses for NEAR
 
 **The problem.** On NEAR, a user about to sign a transaction, send to a wallet or buy a new token cannot tell whether it is safe, and when an exchange or a protocol is drained, nobody can see where the money goes until it is gone.
