@@ -19,17 +19,21 @@ import { exchangeWalletMap, unusualOutflow } from '../incident/exchanges.js';
 import { ownFunds } from '../incident/ownfunds.js';
 import { pastTransfers } from '../incident/deepreview.js';
 import { enqueueIncident } from '../incident/service.js';
-import { classifyOrigin, decide, isIdle, reviewDue, OPEN } from './rules.js';
+import { classifyOrigin, decide, isIdle, reviewDue, OPEN, custodyPattern } from './rules.js';
 import { setStatus, noteReview } from './store.js';
 import { metaGet } from '../db.js';
 
 const SYSTEM = prompt('watch-review'); // src/ai/prompts/watch-review.md
+export const STAKING_POOL = /^[a-z0-9_-]+(\.[a-z0-9_-]+)*\.(pool|poolv\d+|pool-v\d+)\.near$/;
 const KIND = { 'contract/staking': 'staking', 'contract/vault_farm': 'farm', 'contract/lending': 'lending', 'contract/amm': 'amm' };
 
 /** The payer's kind for the origin rules, from the ontology. */
 export async function payerKind(account) {
   const c = (await whatIs(account).catch(() => null))?.class || 'unknown';
   if (KIND[c]) return KIND[c];
+  // a validator's staking pool (<name>.poolv1.near, <name>.pool.near …): money from it is a delegator's unstaked funds, even when the
+  // ontology has not classed the pool yet (it read as "no history" before)
+  if (STAKING_POOL.test(account)) return 'staking';
   if (c.startsWith('exchange')) return 'exchange';
   if (c.startsWith('service') || c.startsWith('contract')) return 'service';
   if (c.startsWith('person')) return 'wallet';
@@ -42,6 +46,37 @@ export async function activityOf(account) {
   const last = await txIndexer('/v0/account', { account_id: account, limit: 200, desc: true }).catch(() => null);
   const t = Number(first?.account_txs?.[0]?.tx_block_timestamp) / 1e6;
   return { first_ts: Number.isFinite(t) ? t : null, txs: (last?.account_txs || []).length };
+}
+
+/**
+ * The chain facts the custody rule reads, per account of a watch (its accounts and where its moves went, up to 30): how many transactions,
+ * the NEAR balance, the share of its latest 20 transactions it signed, and the exchange it belongs to when the registry knows. A fact that
+ * cannot be read is left out (the rule then does not count that account as custody).
+ */
+export async function custodyFacts(w, cache = null) {
+  const { accountPage } = await import('../near/indexer.js');
+  const { viewAccount } = await import('../audit/rpc.js');
+  const { builtinLabel } = await import('../labels.js');
+  const reg = await exchangeWalletMap().catch(() => new Map());
+  const ids = [...new Set([...(w.accounts || []).map((a) => a.account), ...(w.moves || []).map((m) => m.to)])].filter((a) => a && a !== 'reported').slice(0, 30);
+  const facts = new Map();
+  for (const a of ids) if (cache?.has(a)) facts.set(a, cache.get(a)); // a run over many watches reads each account once
+  const todo = ids.filter((a) => !facts.has(a));
+  for (let i = 0; i < todo.length; i += 6) {
+    await Promise.all(todo.slice(i, i + 6).map(async (a) => {
+      const f = {};
+      const ex = reg.get(a)?.exchange || (builtinLabel(a)?.type === 'exchange' ? builtinLabel(a).label : null);
+      if (ex) f.exchange = ex;
+      const p = await accountPage(a, { desc: true, limit: 20 }).catch(() => null);
+      if (p) { f.txs = p.count ?? p.rows.length; f.sign_share = p.rows.length ? p.rows.filter((r) => r.isSigner).length / p.rows.length : null; }
+      const v = await viewAccount(a).catch(() => null);
+      if (v?.amount) f.balance_near = Number(BigInt(v.amount) / 10n ** 21n) / 1000;
+      // a contract (a bridge, a router, a protocol) is never a custody wallet, however busy: exchange wallets are plain accounts
+      if (v) f.contract = (v.code_hash && v.code_hash !== '11111111111111111111111111111111') || !!v.global_contract_hash || !!v.global_contract_account_id;
+      facts.set(a, f); cache?.set(a, f);
+    }));
+  }
+  return facts;
 }
 
 /** Step 1: gather the facts about where the money came from, and classify. Never throws: a missing fact is null. */
@@ -114,6 +149,17 @@ export async function reviewWatch(w) {
   const incidentOpen = !!inc && !['cleared', 'nothing_found'].includes(inc.status);
   const rulesOnly = decide(w, origin, null, { incidentOpen });
   const closedByRules = rulesOnly.action === 'normal' && rulesOnly.by === 'rules';
+  // custody flow: the money ended inside an exchange's or custodian's wallets (an operator not known yet). Checked by the rules from chain
+  // facts before the AI is asked, so these cases neither read as suspicious nor spend the AI budget. Never while an incident is open.
+  if (!closedByRules && !incidentOpen && (w.moves || []).length) {
+    const cp = custodyPattern(w, await custodyFacts(w).catch(() => new Map()), origin);
+    if (cp.custody) {
+      const review = { ts: Date.now(), verdict: 'custody', by: 'rules', what_it_is: cp.why, confidence: null, reasons: cp.wallets.slice(0, 6).map((x) => `${x.account}: ${x.kind}`), check_next: [], model: null, origin_class: origin.class };
+      await setStatus(w._id, 'custody', { by: 'rules', review, why: cp.why });
+      info(`watch ${w._id}: custody (${cp.why})`);
+      return 'custody';
+    }
+  }
   // a watch already suspicious gets a new AI look only when money leaves the network: confirming "still suspicious" every hour spent
   // the day's whole budget in the first hours after midnight, and left the watches with new movements without an AI verdict
   const holdSuspicious = w.status === 'suspicious' && !w.new_exit;

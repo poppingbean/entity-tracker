@@ -40,6 +40,7 @@
 //   node src/cli.js academy-build [--dry]              rebuild the Safe Near Academy's graded tasks (docs/academy-design.md); --dry counts them per track and level
 //   node src/cli.js academy-business [status|scan|close [--dry]|pause|resume]   the Academy's business (docs/academy-business.md)
 //   node src/cli.js academy-demo <agent> [product] [usdc|near]   one loop: an order, its payment (you send it), the credit, a dry close
+//   node src/cli.js watch-custody [--dry]             open money watches whose money ended inside custody wallets (an exchange or custodian): closed as custody flows
 //   node src/cli.js link-eval                         pairwise precision / recall of the wallet grouping against pairs of known owners (changes nothing)
 //   node src/cli.js exchanges-prune [--apply]          list (or remove) registry entries that rest only on being busy (IDENTIFY_BUSY_NEUTRAL)
 //   node src/cli.js golden-candidates [--class <class>] [--limit N]   resolved accounts not in the golden set, strongest evidence first (JSON lines; writes nothing)
@@ -321,6 +322,20 @@ try {
     const rows = await col('watches').find(si >= 0 ? { status: args[si + 1] } : {}, { projection: { moves: 0, reviews: 0 } }).sort({ opened_ts: -1 }).limit(li >= 0 ? Number(args[li + 1]) : 30).toArray();
     for (const w of rows) console.log(`${w._id.slice(0, 40).padEnd(40)} ${w.status.padEnd(10)} $${String(w.trigger.usd).padEnd(9)} ${(w.origin?.class || 'no origin yet').padEnd(26)} accounts ${(w.accounts || []).filter((a) => a.state === 'active').length}/${(w.accounts || []).length}  ${new Date(w.opened_ts).toISOString().slice(0, 16)}`);
     console.log(`${rows.length} watches`);
+  } else if (cmd === 'watch-custody') {
+    // open watches (watching and suspicious) whose money ended inside custody wallets; --dry shows them without changing anything
+    const { custodyFacts } = await import('./watch/review.js'), { custodyPattern } = await import('./watch/rules.js'), { setStatus } = await import('./watch/store.js');
+    const dry = args.includes('--dry'), ws = await col('watches').find({ status: { $in: ['watching', 'suspicious'] } }).sort({ status: -1, opened_ts: 1 }).toArray(), cache = new Map();
+    let n = 0;
+    for (const w of ws) {
+      const inc = w.incident ? await col('incidents').findOne({ _id: w.incident }, { projection: { status: 1 } }) : null;
+      if (inc && !['cleared', 'nothing_found'].includes(inc.status)) { console.log(`${w._id.slice(0, 40)} ${w.status}: kept (incident ${inc.status})`); continue; }
+      const cp = custodyPattern(w, await custodyFacts(w, cache), w.origin);
+      if (!cp.custody) { if (w.status === 'suspicious') console.log(`${w._id.slice(0, 40)} suspicious: kept (${cp.why})`); continue; }
+      n++; console.log(`${w._id.slice(0, 40)} ${w.status} -> custody: ${cp.why}`);
+      if (!dry) await setStatus(w._id, 'custody', { by: 'rules', why: cp.why, review: { ts: Date.now(), verdict: 'custody', by: 'rules', what_it_is: cp.why, confidence: null, reasons: cp.wallets.slice(0, 6).map((x) => `${x.account}: ${x.kind}`), check_next: [], model: null, origin_class: w.origin?.class || null } });
+    }
+    console.log(`${n} of ${ws.length} open watches ${dry ? 'would be' : 'were'} closed as custody flows`);
   } else if (cmd === 'watch-show') {
     console.log(JSON.stringify(await col('watches').findOne({ _id: args[0] }), null, 1));
   } else if (cmd === 'watch-report') {

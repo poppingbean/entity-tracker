@@ -164,3 +164,61 @@ test('busy-only exchanges are not endpoints for the money watch (WP-08)', async 
   assert.equal(notAPerson({ top: 'exchange', source: 'behaviour', operator: 'org:binance' }), true, 'named: proven');
   assert.equal(notAPerson({ top: 'contract', source: 'audit' }), true);
 });
+
+// ---- custody flows: money that ends inside an exchange's or custodian's wallets is not layering
+const { custodyKind, custodyPattern } = await import('../src/watch/rules.js');
+const facts = (o) => new Map(Object.entries(o));
+const watch = (o = {}) => ({
+  trigger: { usd: 100000 }, reports: [], origin: { class: 'established_accounts', lean: 'low' },
+  accounts: [{ account: 'r.near', in_usd: 100000, out_usd: 100000 }, { account: 'dep1', in_usd: 100000, out_usd: 99000 }],
+  moves: [{ from: 'r.near', to: 'dep1', usd: 100000 }, { from: 'dep1', to: 'hot', usd: 99000 }], ...o,
+});
+
+test('custody wallets: busy hot wallets, large holders that rarely sign, known exchange wallets', () => {
+  assert.equal(custodyKind({ txs: 79329 }), 'hot');
+  assert.equal(custodyKind({ txs: 456, balance_near: 20357509, sign_share: 0 }), 'cold');
+  assert.equal(custodyKind({ txs: 218, balance_near: 2725590, sign_share: 0.4 }), null); // big but signs a lot: not cold
+  assert.equal(custodyKind({ exchange: 'OKX' }), 'exchange');
+  assert.equal(custodyKind({ txs: 50, balance_near: 10 }), null);
+  assert.equal(custodyKind(undefined), null);
+});
+
+test('money that ends in a hot wallet, with nothing left in ordinary accounts, is a custody flow', () => {
+  const r = custodyPattern(watch(), facts({ hot: { txs: 80000 } }));
+  assert.equal(r.custody, true);
+  assert.match(r.why, /custody flow/); assert.match(r.why, /80,000 transactions/);
+  assert.deepEqual(r.wallets, [{ account: 'hot', kind: 'hot' }]);
+});
+
+test('not a custody flow: reported, a suspicious origin, money left NEAR, or an ordinary account still holds it', () => {
+  const F = facts({ hot: { txs: 80000 } });
+  assert.equal(custodyPattern(watch({ reports: [{ by: 'x' }] }), F).custody, false);
+  assert.equal(custodyPattern(watch({ origin: { class: 'fresh_receiver', lean: 'high' } }), F).custody, false);
+  assert.equal(custodyPattern(watch({ moves: [...watch().moves, { from: 'hot', to: 'x', usd: 5000, exit: { kind: 'swap_out' } }] }), F).custody, false);
+  const kept = custodyPattern(watch({ accounts: [...watch().accounts, { account: 'holder', in_usd: 60000, out_usd: 0 }] }), F);
+  assert.equal(kept.custody, false); assert.match(kept.why, /ordinary accounts still hold/);
+  const little = custodyPattern(watch({ moves: [{ from: 'r.near', to: 'hot', usd: 20000 }] }), F);
+  assert.equal(little.custody, false); assert.match(little.why, /reached custody-like wallets/);
+  assert.equal(custodyPattern(watch({ moves: [] }), F).custody, false);
+});
+
+test('an exit to a known exchange counts as reaching custody', () => {
+  const w = watch({ moves: [{ from: 'r.near', to: 'binance.near', usd: 95000, exit: { kind: 'exchange' } }], accounts: [{ account: 'r.near', in_usd: 100000, out_usd: 95000 }] });
+  assert.equal(custodyPattern(w, facts({})).custody, true);
+});
+
+test('a validator staking pool is classed as staking by its name (only the pool factories create those names)', async () => {
+  const { virtualFacts } = await import('../src/ontology/known.js');
+  const cls = (a) => virtualFacts(a).find((f) => f.predicate === 'is_a')?.object || null;
+  assert.equal(cls('twinstake.poolv1.near'), 'contract/staking');
+  assert.equal(cls('aurora.pool.near'), 'contract/staking');
+  assert.equal(cls('evilpoolv1.near'), null);
+  assert.equal(cls('poolv1.near'), null);
+  const { STAKING_POOL } = await import('../src/watch/review.js');
+  assert.ok(STAKING_POOL.test('twinstake.poolv1.near') && !STAKING_POOL.test('pool.near'));
+});
+
+test('a busy contract (a bridge, a router) is never a custody wallet', () => {
+  assert.equal(custodyKind({ txs: 3735995, contract: true }), null);
+  assert.equal(custodyKind({ exchange: 'Binance', contract: true }), 'exchange'); // a named exchange wallet still counts
+});

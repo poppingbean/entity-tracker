@@ -59,7 +59,9 @@ export function virtualFacts(account) {
 
   // name patterns: the weakest source, only what an account's name says
   const N = (cls, conf, why) => out.push(v(a, 'is_a', cls, 'name_pattern', conf, why, 'ontology/names'));
-  if (/\.user\.intear\.near$|\.racerbot\.near$|\.trade\.unrlzd\.near$/.test(a)) N('person/app_user', 0.7, 'an account a wallet / trading app made for its user');
+  // a validator's staking pool: only the pool factories (poolv1.near, pool.near) can create these names, so the name is strong evidence
+  if (/^[a-z0-9_-]+(\.[a-z0-9_-]+)*\.(pool|poolv\d+|pool-v\d+)\.near$/.test(a)) N('contract/staking', 0.8, 'a validator staking pool (an account the pool factory created)');
+  else if (/\.user\.intear\.near$|\.racerbot\.near$|\.trade\.unrlzd\.near$/.test(a)) N('person/app_user', 0.7, 'an account a wallet / trading app made for its user');
   else if (/\.tg$/.test(a)) N('person/app_user', 0.7, 'a Telegram-wallet account');
   else if (/(^|[.-])solver([.-]|$)/.test(a)) N('service/intents_solver', 0.6, 'its name says it is a NEAR Intents solver');
   else if (/relayer|wallet-relay|registrar/.test(a)) N('service/relayer', 0.5, 'its name says it is a relayer');
