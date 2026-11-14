@@ -1,6 +1,6 @@
 // ================================================================== MONEY WATCH (every movement of $100k or more, followed until the reviewer calls it normal)
 // Public and read-only. People report an address through the Telegram bot (/hack, /report): it is investigated from the chain. A watch is not an accusation: nothing here is called a hack unless a person or a public report says so.
-const MW_STATUS = { watching: ['neutral', 'Watching'], suspicious: ['bad', 'Looks suspicious'], normal: ['good', 'Normal'], confirmed: ['bad', 'Confirmed hack'] };
+const MW_STATUS = { watching: ['neutral', 'Watching'], suspicious: ['bad', 'Looks suspicious'], custody: ['neutral', 'Custody flow'], normal: ['good', 'Normal'], confirmed: ['bad', 'Confirmed hack'] };
 const MW_ORIGIN = { own_funds_withdrawal: 'withdrawal of its own deposit', routine_relationship: 'routine: paid by the same account before', exchange_withdrawal: 'exchange paying a customer', unusual_exchange_outflow: 'exchange paying an unusual amount', exchange_to_new_account: 'exchange paying a new account',
   fresh_receiver: 'brand-new receiver', protocol_payout: 'paid out by a protocol', established_accounts: 'old accounts, no earlier payments between them', no_history: 'no earlier history between them', reported_by_person: 'reported by a person' };
 const mwUsd = (x) => (x == null ? '–' : '$' + Math.round(x).toLocaleString('en-US'));
@@ -27,14 +27,14 @@ async function mwCase(id) {
 }
 
 views.moneywatch = async () => {
-  const st = new URLSearchParams(location.search).get('status') || '';
-  const j = await get('/api/money-watch', { status: st });
+  const st = new URLSearchParams(location.search).get('status') || 'suspicious';
+  const j = await get('/api/money-watch', { status: st === 'all' ? '' : st });
   if (j.error) return `<div class="card"><p class="muted">${esc(j.error)}</p></div>`;
   const by = j.by || {}, n = (k) => by[k]?.n || 0;
-  const tabs = ['', 'watching', 'suspicious', 'confirmed', 'normal'].map((k) => `<a class="chip ${k === st ? 'on' : ''}" href="/moneywatch${k ? '?status=' + k : ''}" onclick="return navA(event,this)">${k ? esc(MW_STATUS[k][1]) + ' ' + n(k) : 'All ' + (j.total && !st ? j.total : Object.values(by).reduce((s, x) => s + x.n, 0))}</a>`).join(' ');
-  return `<div class="card"><div class="tiles">${tile('Watching', n('watching'), `${mwUsd(by.watching?.usd)} first movements`)}${tile('Look suspicious', n('suspicious'), 'an incident was opened', n('suspicious') ? 'r' : '')}${tile('Confirmed', n('confirmed'), 'by a person or a report')}${tile('Closed as normal', n('normal'), 'kept in the database')}
+  const tabs = ['suspicious', 'watching', 'custody', 'confirmed', 'normal', 'all'].map((k) => `<a class="chip ${k === st ? 'on' : ''}" href="/moneywatch${k === 'suspicious' ? '' : '?status=' + k}" onclick="return navA(event,this)">${k === 'all' ? 'All ' + Object.values(by).reduce((s, x) => s + x.n, 0) : esc(MW_STATUS[k][1]) + ' ' + n(k)}</a>`).join(' ');
+  return `<div class="card"><div class="tiles">${tile('Watching', n('watching'), `${mwUsd(by.watching?.usd)} first movements`)}${tile('Look suspicious', n('suspicious'), 'an incident was opened', n('suspicious') ? 'r' : '')}${tile('Custody flows', n('custody'), 'inside an exchange or custodian')}${tile('Confirmed', n('confirmed'), 'by a person or a report')}${tile('Closed as normal', n('normal'), 'kept in the database')}
       ${tile('Opened, 24 h', j.opened_24h, `movements of ${mwUsd(j.min_usd)} or more`)}${tile('AI calls today', `${j.ai_calls_today} / ${j.ai_budget}`, 'its own budget')}</div>
-    <p class="muted small" style="margin:8px 0 0">Every movement of ${mwUsd(j.min_usd)} or more, whatever the token, is watched: where the money came from, and where it goes next. A watch is not an accusation. It is closed as normal when the reviewer (rules first, then NEAR AI) says so, and stays here. ${j.enabled ? '' : '<b>The money watch is switched off (WATCH_ENABLED=false).</b>'}
+    <p class="muted small" style="margin:8px 0 0">Every movement of ${mwUsd(j.min_usd)} or more, whatever the token, is watched: where the money came from, and where it goes next. A watch is not an accusation. It is closed as normal when the reviewer (rules first, then NEAR AI) says so, or as a custody flow when the money ends inside wallets that act like an exchange's or a custodian's (busy hot wallets, large holders that rarely sign), and stays here. ${j.enabled ? '' : '<b>The money watch is switched off (WATCH_ENABLED=false).</b>'}
  Know an address that is part of a hack? Send <code>/hack &lt;address&gt;</code> or <code>/report &lt;address&gt; what happened</code> to <a href="https://t.me/safenear_bot" target="_blank" rel="noopener">@safenear_bot</a>: it is investigated from the chain.</p></div>
   <div class="card"><p>${tabs}</p>${j.rows.length ? `<table><tr><th>Opened</th><th>Status</th><th class="num">Movement</th><th>From → to</th><th>Where it came from</th><th class="num">Accounts</th><th>Last review</th></tr>
     ${j.rows.map((r) => `<tr style="cursor:pointer" data-id="${esc(r.id)}" onclick="mwCase(this.dataset.id)"><td class="small">${esc(when(r.opened_ts))}</td><td>${mwTag(r.status)}${r.reports ? ' <span class="chip" title="a person reported it">reported</span>' : ''}</td><td class="num">${mwUsd(r.usd)} <span class="muted small">${esc(r.token || '')}</span></td>

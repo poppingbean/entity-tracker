@@ -1,5 +1,5 @@
 // Money watch storage (collection `watches`, docs/money-watch-design.md section 3) and the in-memory index of watched accounts the block scan reads.
-//   _id 'w:<tx>:<receiver>'   status 'watching' | 'normal' | 'suspicious' | 'confirmed'
+//   _id 'w:<tx>:<receiver>'   status 'watching' | 'normal' | 'custody' | 'suspicious' | 'confirmed'
 //   trigger { tx, from, to, usd, token, symbol, amount, ts, kind: 'movement' | 'reported' }
 //   accounts [{ account, depth, in_usd, out_usd, state: 'active' | 'dropped' | 'closed', since, reason }]
 //   moves [{ ts, tx, from, to, usd, token, symbol, amount, exit, followed, why }], reviews [{ ts, verdict, ... }], reports [{ ts, by, source, note }]
@@ -103,7 +103,7 @@ export async function recordInbound(wid, mv) {
 export async function setStatus(wid, status, { by = 'rules', review = null, incident = null, why = null } = {}) {
   const now = Date.now(), w = await col('watches').findOne({ _id: wid }, { projection: { accounts: 1, status: 1 } });
   if (!w) return false;
-  const closing = status === 'normal' || status === 'confirmed'; // a suspicious watch is still followed (its incident follows it too)
+  const closing = status === 'normal' || status === 'confirmed' || status === 'custody'; // a suspicious watch is still followed (its incident follows it too)
   await col('watches').updateOne({ _id: wid }, {
     $set: { status, ...(closing ? { closed_ts: now } : {}), ...(incident ? { incident } : {}), ...(review ? { last_review_ts: now, moved_since_review_usd: 0, new_exit: false, ai_missing: false } : {}) },
     $push: { status_history: { ts: now, status, by, ...(why ? { why } : {}) }, ...(review ? { reviews: review } : {}) },

@@ -109,3 +109,53 @@ export function decide(watch, origin, ai, { incidentOpen = false } = {}) {
   if (ai.verdict === 'normal' && sure && !(watch.reports || []).some((r) => r.source) && !incidentOpen) return { action: 'normal', by: 'ai', why: ai.what_it_is || 'normal activity' };
   return { action: 'keep', by: 'ai', why: ai.what_it_is || 'too early to tell' };
 }
+
+/**
+ * Custody flows: money moving inside an exchange's or a custodian's own wallets, whose operator Safe Near does not know yet. Seen from
+ * outside it looks like layering (deposit addresses that keep nothing, busy hubs, money mixing with other customers'), but it ends in the
+ * custodian's wallets, not with a person. The signs, from the chain:
+ *   hot       a busy plain account (no contract): `hotTxs` transactions or more (20,000: a busy trading bot has around 10,000)
+ *   cold      a large holder that rarely signs: `coldNear` NEAR or more, signing at most `coldSignShare` of its recent transactions
+ *   exchange  a wallet the registry or the ontology names as an exchange's
+ */
+export const CUSTODY = { hotTxs: 20000, coldNear: 1_000_000, coldSignShare: 0.2, keptShare: 0.1, reachShare: 0.5 };
+/** What kind of custody wallet an account looks like (`f`: { txs, balance_near, sign_share, exchange }), or null. Pure. */
+export function custodyKind(f, C = CUSTODY) {
+  if (!f) return null;
+  if (f.exchange) return 'exchange';
+  if (f.contract) return null; // a bridge, a router or a protocol: busy, but money there is not held by a custodian
+  if ((f.txs ?? 0) >= C.hotTxs) return 'hot';
+  if ((f.balance_near ?? 0) >= C.coldNear && (f.sign_share ?? 1) <= C.coldSignShare) return 'cold';
+  return null;
+}
+const usdText = (x) => '$' + Math.round(x).toLocaleString('en-US');
+/**
+ * Does a watch's money end inside custody wallets? `facts`: Map account -> { txs, balance_near, sign_share, exchange }. Yes only when:
+ *   - no person reported it, and the rules did not find the origin suspicious (lean 'high': a fresh receiver, an exchange paying a new
+ *     account or an unusual amount);
+ *   - no money left NEAR (no swap_out exit to another chain);
+ *   - at least `reachShare` of the opening movement reached custody wallets (moves into them, or exits to a known exchange);
+ *   - ordinary accounts (not custody-like) still hold at most `keptShare` of it.
+ * Returns { custody, why, wallets: [{ account, kind }] }. Pure.
+ */
+export function custodyPattern(w, facts, origin = w.origin, C = CUSTODY) {
+  const no = (why) => ({ custody: false, why, wallets: [] });
+  if ((w.reports || []).length) return no('a person reported it');
+  if (origin?.lean === 'high') return no(`the rules found the origin suspicious (${String(origin.class || '').replace(/_/g, ' ')})`);
+  const moves = w.moves || [], base = w.trigger?.usd || 0;
+  if (!base || !moves.length) return no('no money has moved on yet');
+  if (moves.some((m) => m.exit?.kind === 'swap_out')) return no('money left NEAR for another chain');
+  const kindOf = (a) => custodyKind(facts.get(a), C);
+  const reached = moves.filter((m) => kindOf(m.to) || m.exit?.kind === 'exchange').reduce((s, m) => s + (m.usd || 0), 0);
+  if (reached < C.reachShare * base) return no(`only ${usdText(reached)} of ${usdText(base)} reached custody-like wallets`);
+  const kept = (w.accounts || []).filter((a) => !kindOf(a.account)).reduce((s, a) => s + Math.max(0, (a.in_usd || 0) - (a.out_usd || 0)), 0);
+  if (kept > C.keptShare * base) return no(`ordinary accounts still hold about ${usdText(kept)}`);
+  const wallets = [...new Set([...(w.accounts || []).map((a) => a.account), ...moves.map((m) => m.to)])].map((a) => ({ account: a, kind: kindOf(a) })).filter((x) => x.kind);
+  const say = (x) => {
+    const f = facts.get(x.account) || {};
+    const what = x.kind === 'cold' ? `${Math.round(f.balance_near).toLocaleString('en-US')} NEAR, signs ${Math.round((f.sign_share || 0) * 100)}% of its transactions`
+      : x.kind === 'hot' ? `${(f.txs || 0).toLocaleString('en-US')} transactions` : f.exchange;
+    return `${x.account.slice(0, 10)}… (${what})`;
+  };
+  return { custody: true, wallets, why: `custody flow: the money went into wallets that act like an exchange's or custodian's: ${wallets.slice(0, 4).map(say).join(', ')}; ordinary accounts kept about ${usdText(kept)}` };
+}
