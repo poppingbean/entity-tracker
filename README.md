@@ -42,7 +42,7 @@
 **Who is behind the money**
 - **Early buyers and linked wallets:** every tracked token's early buyers are traced to who really funded them, linked into groups by money only (shared funders, flows between wallets, creator funding), and judged by how their buys turned out, then by NEAR AI.
 - **The scanner:** each new token gets a first check 130 s after its liquidity: hard gates, the tracker's memory of who the early buyers and the creator are, and an AI analyst, with a simulated wallet to measure it.
-- **One answer for "what is this account?"** (the ontology): a person, an exchange hot or cold wallet, a NEAR Intents solver, a relayer, a contract … from the strongest evidence, with why. The hack tracer, wallet grouping and the firewall read the same answer, and modules write what they learn at once (a case's accounts, a token's creator). [docs/ontology-design.md](docs/ontology-design.md)
+- **One answer for "what is this account?"** (the ontology): a person, an exchange hot or cold wallet, a NEAR Intents solver, a relayer, a contract … from the strongest evidence, with why. The hack tracer, wallet grouping and the firewall read the same answer, and modules write what they learn at once (a case's accounts, a token's creator). Built for Safe Near, it can serve as an ontology layer for all of NEAR: a public API and an MCP tool, with every fact's source. [Toward an ontology layer for all of NEAR](#toward-an-ontology-layer-for-all-of-near) · [docs/ontology-design.md](docs/ontology-design.md)
 
 **Trust**
 - **Warns in time:** alerts on rugs in progress, contract changes, large moves of anything watched, on the dashboard, the Telegram bot, an API and webhooks. [Alerts and watchlists](#alerts-and-watchlists)
@@ -263,6 +263,40 @@ Every part of Safe Near asks what an account is: the hack tracer (is this payer 
 - **Try it:** `node src/cli.js what-is solver-priv-liq.near` (class, why, conflicts, edges); `node src/cli.js ontology-backfill --dry` (every fact derived from today's data, and the golden set).
 - **Every module decides with it:** the hack tracer and live drain detection (one pass-through rule instead of three lists; who paid a case's account), wallet grouping (which accounts link owners: wallet-app users are people, exchanges, solvers, routers and contracts link nothing) and the firewall (names, and "known dapp" only from strong evidence). `ONTOLOGY_READ` lists the modules that do (default `pass_through,tracer,grouping,firewall`); `ONTOLOGY_READ=none` puts them all back on their old rules without a deploy. Shadow mode keeps comparing the old rules with the ontology (`ontology_shadow`), and `node src/cli.js ontology-gate` reports it.
 - **Checked before switching:** `node src/cli.js ontology-replay` traces every stored case with the old rules and with the ontology and compares status, kind, accounts, sources and exits; grouping's stored kinds are re-synced once when its rule changes (`node src/cli.js ontology-apply --dry` shows what moves), then groups are rebuilt.
+
+### Toward an ontology layer for all of NEAR
+
+Safe Near built its ontology for its own security work, but nothing in it is specific to Safe Near. Every wallet, explorer, indexer, dApp and AI agent on NEAR asks the same question: *what is this account?* An exchange's hot wallet, a NEAR Intents solver, a validator's staking pool, a launchpad token, a person, a hack's cash-out wallet. Today each one answers with its own hand-made list. The same layer could give one shared answer for all of NEAR, with its evidence.
+
+**What already makes it work as a shared layer:**
+
+| Need | What exists today |
+|---|---|
+| **One answer, with its reason** | Each account gets one class from a small tree, the evidence for it, and what it overruled. Sources are ranked: a public report beats the registry, which beats the code audit, then behaviour on chain, then the account's name |
+| **Provenance for every fact** | Every fact records who wrote it, from which source, with what confidence, and from when. Corrections retract a fact instead of deleting it, so the history stays |
+| **Kept up to date from the chain** | 15 writers assert facts the moment a module learns them: the contract audits, the deploy watcher, the hack tracer, wallet grouping, the exchange registry, the firewall's flags, token discovery |
+| **A knowledge graph** | Typed edges (`funded`, `controls`, `created_by`, `deployed`, `member_of`, `operated_by`, `swept_to`, `role_in` a case …) in an in-memory graph, fast enough for live checks: "this receiver is 2 hops from a hack's wallet" |
+| **Open to anyone** | `GET /api/v1/entity?id=<account>` (public, no key), the MCP tool `what_is` for AI agents, and a *What Safe Near calls it* card on every wallet page |
+
+**Coverage today (14 November 2026):**
+
+| Measure | Count |
+|---|---|
+| Accounts with a resolved class | 7,595 |
+| Facts in force | 15,307 (26,063 with history) |
+| Contracts (tokens, DAOs, AMMs, NFTs, farms, lending …) | 3,615 |
+| People (wallets, smart wallets, app users) | 2,355 |
+| Exchange wallets | 75 |
+| Services (bridges, routers, factories, solvers, relayers …) | 68 |
+| Facts by source | 6,219 from code audits, 3,637 from behaviour, 3,432 from traces, 1,964 from names, 26 from the registry, 29 from public reports |
+
+**This is a start, not the whole network.** The layer covers the accounts Safe Near's work touches: new contracts, launches, early buyers, hack cases and large movements. That is thousands of accounts out of NEAR's millions, and only 2 exchange operators are named so far (Binance, Bybit). Becoming the layer for all of NEAR needs:
+- **writers on every block** for the classes that can be read straight from the chain, such as staking pools, factories' children, DAOs, tokens and multisigs;
+- **a public way to submit facts with evidence**, so exchanges, protocols and investigators can name their own wallets and the source ranking keeps them honest;
+- **bulk export and graph queries**, so indexers and explorers can use the whole layer, not one account at a time;
+- **shared governance** of the class tree and the source ranks.
+
+The design is in [docs/ontology-design.md](docs/ontology-design.md).
 
 ## Tokens, early investors and groups
 
