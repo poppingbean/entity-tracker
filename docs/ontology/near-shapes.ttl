@@ -1,0 +1,28 @@
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+@prefix dcterms: <http://purl.org/dc/terms/> .
+@prefix prov: <http://www.w3.org/ns/prov#> .
+@prefix sh: <http://www.w3.org/ns/shacl#> .
+
+# SHACL shapes for a fact (the rules of invalid() in src/ontology/index.js). Run them over an export together with near-ontology.ttl.
+<https://app.safe-near.org/ns/shapes/FactShape> a sh:NodeShape ; sh:targetClass <https://app.safe-near.org/ns/Fact> ;
+  sh:property [ sh:path <https://app.safe-near.org/ns/subject> ; sh:minCount 1 ; sh:maxCount 1 ; sh:nodeKind sh:IRI ] ;
+  sh:property [ sh:path <https://app.safe-near.org/ns/predicate> ; sh:minCount 1 ; sh:maxCount 1 ; sh:in ( <https://app.safe-near.org/ns/pred/controls> <https://app.safe-near.org/ns/pred/created_by> <https://app.safe-near.org/ns/pred/deployed> <https://app.safe-near.org/ns/pred/flagged> <https://app.safe-near.org/ns/pred/funded> <https://app.safe-near.org/ns/pred/is_a> <https://app.safe-near.org/ns/pred/label> <https://app.safe-near.org/ns/pred/member_of> <https://app.safe-near.org/ns/pred/operated_by> <https://app.safe-near.org/ns/pred/pass_through> <https://app.safe-near.org/ns/pred/role_in> <https://app.safe-near.org/ns/pred/sent_to> <https://app.safe-near.org/ns/pred/solver_for> <https://app.safe-near.org/ns/pred/swept_to> <https://app.safe-near.org/ns/pred/trusted> ) ] ;
+  sh:property [ sh:path <https://app.safe-near.org/ns/object> ; sh:minCount 1 ; sh:maxCount 1 ] ;
+  sh:property [ sh:path <https://app.safe-near.org/ns/source> ; sh:minCount 1 ; sh:maxCount 1 ; sh:in ( <https://app.safe-near.org/ns/source/manual> <https://app.safe-near.org/ns/source/public_report> <https://app.safe-near.org/ns/source/registry> <https://app.safe-near.org/ns/source/audit> <https://app.safe-near.org/ns/source/trace> <https://app.safe-near.org/ns/source/behaviour> <https://app.safe-near.org/ns/source/name_pattern> ) ] ;
+  sh:property [ sh:path <https://app.safe-near.org/ns/confidence> ; sh:maxCount 1 ; sh:datatype xsd:decimal ; sh:minInclusive 0 ; sh:maxInclusive 1 ] ;
+  sh:property [ sh:path <https://app.safe-near.org/ns/by> ; sh:minCount 1 ; sh:maxCount 1 ; sh:datatype xsd:string ] ;
+  sh:property [ sh:path <https://app.safe-near.org/ns/evidence> ; sh:maxCount 1 ; sh:datatype xsd:string ] ;
+  sh:property [ sh:path <https://app.safe-near.org/ns/validFrom> ; sh:maxCount 1 ; sh:datatype xsd:dateTime ] ;
+  sh:property [ sh:path <https://app.safe-near.org/ns/validTo> ; sh:maxCount 1 ; sh:datatype xsd:dateTime ] ;
+  sh:sparql [ a sh:SPARQLConstraint ; sh:message "an is_a fact's object must be a class of the tree (load near-ontology.ttl with the data)" ;
+    sh:select """SELECT $this ?value WHERE { $this <https://app.safe-near.org/ns/predicate> <https://app.safe-near.org/ns/pred/is_a> ; <https://app.safe-near.org/ns/object> ?value . FILTER NOT EXISTS { ?value a <http://www.w3.org/2002/07/owl#Class> } }""" ] ;
+  sh:sparql [ a sh:SPARQLConstraint ; sh:message "a role_in fact needs a role" ;
+    sh:select """SELECT $this WHERE { $this <https://app.safe-near.org/ns/predicate> <https://app.safe-near.org/ns/pred/role_in> . FILTER NOT EXISTS { $this <https://app.safe-near.org/ns/role> ?r } }""" ] ;
+  sh:sparql [ a sh:SPARQLConstraint ; sh:message "a flagged fact's object must be a severity (critical, high, medium, low)" ;
+    sh:select """SELECT $this ?value WHERE { $this <https://app.safe-near.org/ns/predicate> <https://app.safe-near.org/ns/pred/flagged> ; <https://app.safe-near.org/ns/object> ?value . FILTER (?value NOT IN ("critical", "high", "medium", "low")) }""" ] ;
+  sh:sparql [ a sh:SPARQLConstraint ; sh:message "a fact that ends (validTo) cannot end before it starts (validFrom)" ;
+    sh:select """SELECT $this WHERE { $this <https://app.safe-near.org/ns/validFrom> ?a ; <https://app.safe-near.org/ns/validTo> ?b . FILTER (?b < ?a) }""" ] .

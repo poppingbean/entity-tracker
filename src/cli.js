@@ -78,6 +78,7 @@ import { listFeedback, resolveFeedback, setTruth, clearTruth } from './accuracy/
 import { backfill as ontologyBackfill } from './ontology/backfill.js';
 import { gate as ontologyGate, gateText } from './ontology/gate.js';
 import { whatIs, relationsOf } from './ontology/index.js';
+import { normalizeId } from './ontology/caip.js';
 import { checkGolden } from './ontology/golden.js';
 import { resolve as ontologyResolve } from './ontology/resolve.js';
 import { virtualFacts } from './ontology/known.js';
@@ -481,8 +482,20 @@ try {
   } else if (cmd === 'ontology-gate') {
     const g = await ontologyGate();
     console.log(args.includes('--json') ? JSON.stringify(g, null, 1) : gateText(g));
+  } else if (cmd === 'ontology-export') {
+    // the ontology in formats other tools read (docs/ontology-layer-research.md, Stage 0): node src/cli.js ontology-export <nquads|csv|oli|stix|vocabulary|shapes|context> [--out <file>]
+    //   nquads and csv carry history (--live: only the facts in force); oli (Open Labels Initiative shape) and stix only what is in force
+    const fmt = args[0], oi = args.indexOf('--out'), fs = await import('node:fs'), v = await import('./ontology/vocab.js'), { exportFacts } = await import('./ontology/export.js');
+    const sink = oi >= 0 ? fs.createWriteStream(args[oi + 1]) : process.stdout, write = (s) => sink.write(s);
+    if (fmt === 'vocabulary') write(v.vocabularyTurtle()); else if (fmt === 'shapes') write(v.shapesTurtle()); else if (fmt === 'context') write(JSON.stringify(v.contextJsonLd(), null, 1) + '\n');
+    else {
+      const filter = args.includes('--live') || fmt === 'oli' || fmt === 'stix' ? { $or: [{ valid_to: null }, { valid_to: { $gt: Date.now() } }] } : {};
+      const n = await exportFacts(fmt, col('ontology_facts').find(filter).batchSize(2000), write);
+      info(`ontology-export ${fmt}: ${n} facts`);
+    }
+    if (oi >= 0) await new Promise((r) => sink.end(r));
   } else if (cmd === 'what-is') {
-    const [account] = args;
+    const account = normalizeId(args[0]); // a chain address keeps its case, a NEAR account is lower case
     console.log(JSON.stringify({ ...(await whatIs(account)), relations: (await relationsOf(account, { direction: 'both' })).slice(0, 40).map((f) => `${f.subject} ${f.predicate} ${JSON.stringify(f.object)} · ${f.source} ${f.confidence ?? ''} · ${f.evidence || ''}`) }, null, 1));
   } else {
     console.log('commands: backfill <launchpad|all> <hours> | process | creators [max] | ledger [token] | evaluate | review [n] | status | check-ai');

@@ -1,6 +1,6 @@
 # The ontology layer of NEAR: standards and databases we could build on
 
-Status: research and recommendation, written 2026-11-17 (code freeze: nothing here is built). Web claims were read from search results and a few pages; where a claim is unverified or sources disagree it says so. The question: Safe Near's ontology (`docs/ontology-design.md`) answers "what is this account?" for its own security work. What would make it a *real* layer that wallets, explorers, indexers and AI agents on NEAR can build on, and which standards and database should it sit on?
+Status: research and recommendation, written 2026-11-17 (code freeze). **Stage 0 is built on the local branch `ontology-stage0`** (see section 9 of `ontology-design.md`); Stages 1 and 2 are not. Web claims were read from search results and a few pages; where a claim is unverified or sources disagree it says so. The question: Safe Near's ontology (`docs/ontology-design.md`) answers "what is this account?" for its own security work. What would make it a *real* layer that wallets, explorers, indexers and AI agents on NEAR can build on, and which standards and database should it sit on?
 
 ## 1. Where we are
 

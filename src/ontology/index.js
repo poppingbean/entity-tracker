@@ -10,6 +10,8 @@ import { col } from '../db.js';
 import { isA, isClass, PREDICATES, rankOf } from './classes.js';
 import { virtualFacts } from './known.js';
 import { resolve, live } from './resolve.js';
+import { normalizeId, caip10, didPkh, idScope } from './caip.js';
+import { orgInfo } from './orgs.js';
 
 export { resolve } from './resolve.js';
 export { cutsLinks, isA, topOf, CLASSES } from './classes.js';
@@ -55,7 +57,7 @@ export async function relationsOf(account, { predicate = null, direction = 'out'
   return [...stored, ...virt].filter((f) => live(f, now)).sort((a, b) => rankOf(b.source) - rankOf(a.source));
 }
 
-const CLASS_WORDS = {
+export const CLASS_WORDS = {
   'person': 'a person', 'person/wallet': 'a personal wallet', 'person/smart_wallet': 'a smart wallet (an account contract)', 'person/app_user': 'a wallet-app user (a real person trading through an app)',
   'exchange': 'an exchange wallet', 'exchange/hot_wallet': 'an exchange hot wallet', 'exchange/cold_wallet': 'an exchange cold wallet (its reserves)', 'exchange/deposit_address': 'an exchange deposit address',
   'service': 'a service', 'service/intents_solver': 'a NEAR Intents solver (fills swaps for many users)', 'service/relayer': 'a relayer (pays gas or creates accounts for users)', 'service/bridge': 'a bridge to another chain',
@@ -64,16 +66,19 @@ const CLASS_WORDS = {
   'contract/dao': 'a DAO', 'contract/multisig': 'a multisig', 'contract/staking': 'a staking contract', 'contract/other': 'a contract', 'system': 'a NEAR system account', 'unknown': 'not classified yet (treated like a person)',
 };
 export const classWords = (c) => CLASS_WORDS[c] || c;
+/** An ordinary wallet (true), an account contract or a contract (false), or unknown (null): the class says it only where it is certain. Matches the Open Labels Initiative tag is_eoa. */
+export const isEoa = (c) => (['person/wallet', 'person/app_user'].includes(c) ? true : c === 'person/smart_wallet' || String(c).startsWith('contract') ? false : null);
 
 /** What the public API and the Agent Guard show: the answer, in words, and the account's edges in the knowledge graph. */
 export async function entityView(account) {
-  const id = String(account || '').trim().toLowerCase();
+  const id = normalizeId(account); // a NEAR account is lower case; an XRP, Tron or Bitcoin address keeps its case
   const [e, rel] = await Promise.all([whatIs(id), relationsOf(id, { direction: 'both' })]);
   const edges = rel.filter((f) => f.predicate !== 'is_a' && f.predicate !== 'label').slice(0, 60).map((f) => ({
     from: f.subject, predicate: f.predicate, to: f.object, role: f.role || undefined, status: f.status || undefined, source: f.source, confidence: f.confidence ?? null, evidence: f.evidence || null,
   }));
   return {
-    account: id, class: e.class, is: classWords(e.class), label: e.label, operator: e.operator, why: e.why, source: e.source, confidence: e.confidence,
+    account: id, caip10: caip10(id), did: didPkh(id), id_scope: idScope(id), is_eoa: isEoa(e.class),
+    class: e.class, is: classWords(e.class), label: e.label, operator: e.operator, operator_org: e.operator ? orgInfo(e.operator) : null, why: e.why, source: e.source, confidence: e.confidence,
     pass_through: e.pass_through, links_owners: !e.cuts_links, trusted: e.trusted, flagged: e.flagged, cases: e.roles, groups: e.groups,
     overruled: e.conflicts.map((c) => ({ is: classWords(c.object), class: c.object, source: c.source, confidence: c.confidence, evidence: c.evidence })),
     edges,

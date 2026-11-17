@@ -1,0 +1,68 @@
+{
+ "@context": {
+  "@vocab": "https://app.safe-near.org/ns/entity#",
+  "ns": "https://app.safe-near.org/ns/",
+  "owl": "http://www.w3.org/2002/07/owl#",
+  "xsd": "http://www.w3.org/2001/XMLSchema#",
+  "prov": "http://www.w3.org/ns/prov#",
+  "caip10": {
+   "@id": "https://app.safe-near.org/ns/caip10"
+  },
+  "did": {
+   "@id": "https://app.safe-near.org/ns/did"
+  },
+  "id_scope": {
+   "@id": "https://app.safe-near.org/ns/idScope"
+  },
+  "is_eoa": {
+   "@id": "https://app.safe-near.org/ns/isEoa",
+   "@type": "xsd:boolean"
+  },
+  "confidence": {
+   "@id": "https://app.safe-near.org/ns/confidence",
+   "@type": "xsd:decimal"
+  },
+  "source": {
+   "@id": "https://app.safe-near.org/ns/source"
+  },
+  "evidence": {
+   "@id": "https://app.safe-near.org/ns/evidence"
+  },
+  "why": {
+   "@id": "https://app.safe-near.org/ns/why"
+  },
+  "pass_through": {
+   "@id": "https://app.safe-near.org/ns/pred/pass_through",
+   "@type": "xsd:boolean"
+  },
+  "trusted": {
+   "@id": "https://app.safe-near.org/ns/pred/trusted",
+   "@type": "xsd:boolean"
+  },
+  "flagged": {
+   "@id": "https://app.safe-near.org/ns/pred/flagged"
+  },
+  "operator_org": {
+   "@id": "https://app.safe-near.org/ns/pred/operated_by"
+  },
+  "same_as": {
+   "@id": "owl:sameAs",
+   "@type": "@id"
+  },
+  "name": {
+   "@id": "http://www.w3.org/2000/01/rdf-schema#label"
+  },
+  "edges": {
+   "@id": "https://app.safe-near.org/ns/edges"
+  },
+  "cases": {
+   "@id": "https://app.safe-near.org/ns/cases"
+  },
+  "groups": {
+   "@id": "https://app.safe-near.org/ns/groups"
+  },
+  "overruled": {
+   "@id": "https://app.safe-near.org/ns/overruled"
+  }
+ }
+}
