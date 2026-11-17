@@ -1,0 +1,71 @@
+{
+  "id": "bitget-2026-09-24",
+  "name": "Bitget hot-wallet breach",
+  "victim": "Bitget",
+  "kind": "exchange_drain",
+  "status": "confirmed",
+  "started_utc": "2026-09-24T18:31:00Z",
+  "detected_utc": "2026-09-24T19:05:00Z",
+  "loss_usd": 387500000,
+  "loss_note": "Early reports said $351.6M; later reports about $387.5M, from 12 hot and warm wallet addresses (Bitget).",
+  "chains": ["Ethereum", "Arbitrum", "Optimism", "Base", "BNB Chain", "Avalanche", "Tron", "XRP Ledger"],
+  "summary": "An attacker took about $387.5M from Bitget's hot and warm wallets on several chains. Bitget says its cold wallets and private keys were not touched and that its User Protection Fund covers the losses. The money was stolen and laundered outside NEAR; the NEAR part of the story is NEAR Intents: the attacker tried to move more than $50M through it and its SHIELD risk layer blocked or froze most of it.",
+  "root_cause": "Reported: a compromised backend system in Bitget's wallet infrastructure that was used to spoof transaction data and trigger Bitget's own authorization (Bitget, as relayed by the press). Not verified here.",
+  "attribution": [],
+  "notes": [
+    "Attribution to North Korea is reported by Bitget's CEO and by some analytics firms (Scorechain, Elliptic). It was not verified here and is not used as evidence for any address.",
+    "Bitget published four attacker-controlled addresses. Analytics firms report 28 attacker-controlled addresses on eight networks (Scorechain) but publish them only shortened, so only full addresses are recorded here."
+  ],
+  "sources": [
+    { "id": "bitget", "publisher": "Bitget (official incident page)", "url": "https://www.bitget.com/campaigns/bitget-security-incident-2026", "says": "Lists four attacker-controlled addresses (EVM, XRP, ZEC, TRON); the first unauthorized transfers began at 18:31 UTC on 24 Sept 2026 and anomalies were detected at 19:05 UTC; 12 wallet addresses were involved." },
+    { "id": "blocksec", "publisher": "BlockSec", "url": "https://blocksec.com/blog/bitget-hack-laundering-fund-tracing", "says": "Laundering path and freezes: an attacker address deposited 173,819 XRP into NEAR Intents on 25 Sept 16:35 to be swapped into BTC (order id rhMr4vRDbUC5R38x3VZ9aHfuvmA4A1RjsS); NEAR Intents' disclosure of 28 Sept; USDT 218,022.97 and USDC 99,989.91 frozen at one address by Tether and Circle; about $840K frozen in total." },
+    { "id": "cointelegraph", "publisher": "Cointelegraph", "url": "https://cointelegraph.com/news/near-intents-says-it-blocked-50m-tied-to-bitget-hackers", "says": "NEAR Intents general manager Alex Shevchenko said SHIELD blocked more than $50M of attempted transfers, about $166K of suspected stolen funds passed through and $503K was frozen during execution; NEAR Intents forgoes the 5% freeze bounty and the 5% recovery bounty Bitget offered." },
+    { "id": "cryptobriefing", "publisher": "Crypto Briefing", "url": "https://cryptobriefing.com/bitget-hack-near-intents-defi-recovery/", "says": "About $387.5M drained on 24 Sept 2026; Bitget credits NEAR Intents as the DeFi protocol that helped; users' losses are covered by the User Protection Fund." },
+    { "id": "oneclick", "publisher": "NEAR Intents 1Click status API (public)", "url": "https://1click.chaindefuser.com/v0/status?depositAddress=rhMr4vRDbUC5R38x3VZ9aHfuvmA4A1RjsS", "says": "Order for deposit address rhMr4vRDbUC5R38x3VZ9aHfuvmA4A1RjsS: 173,819.0026 XRP to BTC, recipient bc1q05x2asa57q4re28y5w487jx7ausx4ddkw7m5jr, refund address rN9kDsMB1butehgX6shJ5diekvZ4aZaQfn, created 2026-09-25T16:35:27Z, status FAILED with the full amount refunded (last update 2026-09-30T16:21Z)." },
+    { "id": "explorer", "publisher": "NEAR Intents explorer (public)", "url": "https://explorer.near-intents.org/?search=rN9kDsMB1butehgX6shJ5diekvZ4aZaQfn", "says": "The same order is listed with sender rN9…Qfn, 173.81K XRP to 3.22628 BTC, status Failed, referral thorwallet; searching Bitget's four published addresses finds no order." }
+  ],
+  "addresses": [
+    { "chain": "eth", "address": "0x770b10b273fc44fe9197d6bf20f145c2e98463ee", "role": "attacker", "source": "bitget", "confidence": 0.9, "evidence": "Published by Bitget as its attacker-controlled EVM address (the same address is used on several EVM networks)." },
+    { "chain": "xrp", "address": "rwNhefsz1UQEusxhCvHip3RANinWi4CTck", "role": "attacker", "source": "bitget", "confidence": 0.9, "evidence": "Published by Bitget as its attacker-controlled XRP Ledger address." },
+    { "chain": "zec", "address": "t1WgMdtND8NF7NDUuYmq8MpMj1NTCXkMDVG", "role": "attacker", "source": "bitget", "confidence": 0.9, "evidence": "Published by Bitget as its attacker-controlled Zcash address." },
+    { "chain": "tron", "address": "TBWNguTTgezw9dVorX441C6nDrZpRxYwKD", "role": "attacker", "source": "bitget", "confidence": 0.9, "evidence": "Published by Bitget as its attacker-controlled Tron address." },
+    { "chain": "xrp", "address": "rN9kDsMB1butehgX6shJ5diekvZ4aZaQfn", "role": "intents_depositor", "source": "blocksec", "confidence": 0.8, "evidence": "Sent 173,819 XRP to a NEAR Intents deposit address on 25 Sept 2026 16:35 UTC, the deposit BlockSec attributes to the attacker; the 1Click order names it as the refund address and the explorer lists it as the sender. Inferred from the order's size and time matching BlockSec's description, not named by BlockSec." },
+    { "chain": "btc", "address": "bc1q05x2asa57q4re28y5w487jx7ausx4ddkw7m5jr", "role": "intended_recipient", "source": "oneclick", "confidence": 0.7, "evidence": "The destination of that order (173,819 XRP into BTC). The order failed and was refunded, so the address never received this money." }
+  ],
+  "intents": {
+    "activity": "blocked and frozen",
+    "blocked_usd": 50000000,
+    "processed_usd": 166000,
+    "frozen_usd": 503000,
+    "checked": "On 2026-11-17 the NEAR Intents explorer was searched (wallet or deposit address) for each of Bitget's four published attacker addresses, the XRP depositor and the BTC recipient: only the 173,819 XRP order was found. The other orders NEAR Intents froze or processed ($503K frozen, $166K processed) are not under any published address, so they are not recorded.",
+    "orders": [
+      {
+        "deposit_address": "rhMr4vRDbUC5R38x3VZ9aHfuvmA4A1RjsS",
+        "deposit_chain": "xrp",
+        "status": "FAILED",
+        "created_utc": "2026-09-25T16:35:27Z",
+        "deadline_utc": "2026-09-25T17:35:27Z",
+        "last_update_utc": "2026-09-30T16:21:00Z",
+        "origin_asset": "nep141:xrp.omft.near",
+        "amount_in": "173819.0026",
+        "amount_in_usd": 274634,
+        "destination_asset": "1cs_v1:btc:native:coin",
+        "recipient": { "chain": "btc", "address": "bc1q05x2asa57q4re28y5w487jx7ausx4ddkw7m5jr" },
+        "refund_to": { "chain": "xrp", "address": "rN9kDsMB1butehgX6shJ5diekvZ4aZaQfn" },
+        "refunded": "173819.0026 XRP",
+        "origin_tx": "B172A9416A3F1057018FF0348EB20463DD647E1730438F85BAA59BFC9EDC1A53",
+        "near_txs": ["2N5QRSeqkXZgeKksLaRPRZRgCBB1p5WJMLxFHSuJnzfW", "5Ue8ycY3hBK7hpiFKkbSj5rnxZUiDrRWH7LLWtgVh196", "EhVXG7mmLXQXb1j6BfurbSGu6JSVXSmSPH36PkhzssH6"],
+        "intent_hashes": ["8SiiDscSgmAKUYd2TnD5PtS7ftbxd9FVUXeXwnwrncsZ"],
+        "referral": "thorwallet",
+        "source": "oneclick",
+        "note": "BlockSec saw this order still Processing past its deadline between 25 and 29 Sept; the status API now shows FAILED with the whole amount refunded to the depositor."
+      }
+    ],
+    "statements": [
+      { "when": "2026-09-28", "by": "NEAR Intents (general manager Alex Shevchenko), on X", "source": "cointelegraph", "says": "SHIELD detected and blocked more than $50M in attempted transfers, which then went to other providers; about $166K of suspected stolen funds passed through and $503K was frozen during execution. NEAR Intents forgoes the 5% freeze bounty and the 5% recovery bounty Bitget offered; frozen funds are to be returned through a legal process. Figures may be off by up to 10% (BlockSec's reading of the disclosure)." }
+    ]
+  },
+  "other_freezes": [
+    { "by": "Circle and Tether", "usd": 318013, "source": "blocksec", "note": "USDT 218,022.97 and USDC 99,989.91 at one address (shown as 0xe07b…7d57) on 25 Sept 2026; BlockSec totals about $840K frozen across all parties." }
+  ]
+}

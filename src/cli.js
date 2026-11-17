@@ -35,6 +35,7 @@
 //   node src/cli.js chain-links                        addresses on other chains that received money from 2+ NEAR cases (leads; flags nothing)
 //   node src/cli.js nft-from-deploys [days] [--dry]    list NFT collections deployed in the last N days (default 30): HOT Craft, near.cooking, any contract the audit calls NFT
 //   node src/cli.js tokens-from-deploys [days] [--dry]   open tokens deployed in the last N days (default 7) that already have a pool (any factory, no launchpad)
+//   node src/cli.js external-case <id | file | all> [--dry]   a hack on another chain from public reports (Bitget, Bybit), loaded from src/incident/external/*.json; external-list
 //   node src/cli.js watch-list [--status s] [--limit N]   money watch cases (docs/money-watch-design.md); watch-show <id>; watch-scan [N] (read-only: what would open in the latest N blocks)
 //   node src/cli.js watch-report <address> [--source <link>] [--note "<text>"]   a person reports an address; watch-confirm <id> [--source]; watch-close <id> <reason>; watch-review <id>
 //   node src/cli.js academy-build [--dry]              rebuild the Safe Near Academy's graded tasks (docs/academy-design.md); --dry counts them per track and level
@@ -316,6 +317,17 @@ try {
     const { backfillFromDeploys } = await import('./collect/liquidity.js');
     const r = await backfillFromDeploys(Number(args.find((a) => /^\d+$/.test(a))) || 7, { dry: args.includes('--dry'), log: (m) => info(m) });
     console.log(`${r.tokens.length} tokens ${args.includes('--dry') ? 'would be opened' : `opened (${r.tokens.filter((x) => x.opened).length} new)`} of ${r.checked} contracts checked${r.failed.length ? `; ${r.failed.length} could not be read (run it again)` : ''}`);
+  } else if (cmd === 'external-case') {
+    // a hack on another chain known from public reports, loaded from src/incident/external/<id>.json (docs/external-cases.md): the case, and one ontology fact per address.
+    //   node src/cli.js external-case <id | file | all> [--dry]      --dry only validates and counts (writes nothing)
+    const { loadExternal } = await import('./incident/external.js'), fs = await import('node:fs'), path = await import('node:path');
+    const dir = new URL('./incident/external/', import.meta.url), dry = args.includes('--dry'), want = args.find((a) => !a.startsWith('--'));
+    if (!want) throw new Error('usage: external-case <id | file | all> [--dry]');
+    const files = want === 'all' ? fs.readdirSync(dir).filter((f) => f.endsWith('.json')).map((f) => new URL(f, dir)) : [fs.existsSync(want) ? path.resolve(want) : new URL(`${want.replace(/\.json$/, '')}.json`, dir)];
+    for (const f of files) console.log(JSON.stringify(await loadExternal(JSON.parse(fs.readFileSync(f, 'utf8')), { dry })));
+  } else if (cmd === 'external-list') {
+    const { listExternal } = await import('./incident/external.js');
+    for (const d of await listExternal()) console.log(`${d._id.padEnd(28)} ${d.status} $${Math.round(d.loss_usd / 1e6)}M  ${new Date(d.started_ts).toISOString().slice(0, 10)}  intents: ${d.intents?.activity}  ${d.name}`);
   } else if (cmd === 'watch-list') {
     // money watch cases (docs/money-watch-design.md): node src/cli.js watch-list [--status watching|suspicious|normal|confirmed] [--limit N]
     const si = args.indexOf('--status'), li = args.indexOf('--limit');
