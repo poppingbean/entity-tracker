@@ -100,3 +100,21 @@ What we need from the store: millions of nodes and tens of millions of annotated
 What this says: **queries are fast at our size and still fast at ten times it, except full scans, which grow with the data.** What it does not say is the load time at scale: ten times the facts took 86 times as long, so the in-process route is fine for a spike and not for production. The on-disk server (RocksDB, with its bulk loader) was **not measured**; that is the number that matters for the Railway service, and it needs the server binary. Question Q3 (two hops from a flagged account) returned no rows because the random graph has no such path; it was not tested.
 
 **Not done:** the same questions on our real facts (the database was unreachable: the Atlas IP allow-list has lapsed again), and a comparison against Mongo plus our in-memory graph on the same questions.
+
+### Stage 1 spike, on our real facts (2026-11-17)
+
+The official server `oxigraph 0.5.13` (Windows binary, from the project's GitHub release) loaded an N-Quads export of **all 26,918 real facts** (271,442 quads, 52 MB) from the production database (read-only) into an on-disk store, and answered ten questions over HTTP on localhost.
+
+| | Result |
+|---|---|
+| bulk load | **0.8 s**; 83 MB on disk after `optimize` |
+| server memory while serving | about 40 MB |
+| fidelity against MongoDB | facts 26,918 = 26,918; facts in force 16,156 in Mongo against 16,154 triples in force in the `live` graph (identical triples from two sources merge, by RDF set semantics); critical flags 12 = 12; one case's accounts 24 = 24; a source-and-confidence filter 103 = 103 |
+| the ten questions (all facts of the busiest account, a flagged account's neighbours, critical flags with evidence, each organisation's wallets and where they sweep to, a case's members, the class tree, a filter by source and confidence, accounts per class, facts that ended by writer, an account's full history) | **2 to 60 ms each** (median of 15), the slowest being the history-by-writer aggregate (56 ms) and one account's full history with 1,012 facts (30 ms) |
+
+**Against MongoDB Atlas.** The same questions on Atlas, from this laptop, took 85 to 350 ms. That is not a fair comparison: Atlas is remote and its times include the network, Oxigraph ran on localhost. On Railway the service reaches Atlas over a short network path, so the gap would be smaller. What can be said: **Mongo already answers each of these single questions with one or two indexed queries; the gain from Oxigraph is not speed but that the same question is one declarative SPARQL query** (the neighbours of a flagged account, a transitive class walk, a per-class aggregate) **in a standard other tools can also send.**
+
+**What this settles and what it does not.**
+- Settled: the export, the vocabulary and the load work on real data with no loss; the layer fits comfortably in a small service (tens of MB); a read model rebuilt in under a second at today's size.
+- Not settled: behaviour at millions of facts on the server (the in-memory test above was the npm package, whose load time grew steeply; the server's bulk loader is built for this but was only measured at 271K quads); updates (this test is a full reload; an incremental projection from the facts is still to be designed); and whether anyone needs SPARQL. The two-hops question returned no rows for the accounts tried, so it was not exercised on real data.
+- A second look at the earlier recommendation: Stage 1 as a read model stays cheap and reversible, but **Stage 0's published formats (CAIP-10 ids, JSON-LD, N-Quads, the vocabulary) already deliver most of the "layer" value without running a second service.** Add the service when a consumer needs SPARQL or the graph outgrows the in-memory one.
