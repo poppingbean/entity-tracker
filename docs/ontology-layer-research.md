@@ -80,3 +80,23 @@ What we need from the store: millions of nodes and tens of millions of annotated
 2. Is the aim to **publish** the layer (open export, submission API, OLI/STIX formats), or to keep it Safe Near's own with a better internal model? The first needs the trust and governance work in section 5.
 3. Who may sign for an exchange or a protocol: only the account's own key, or also a named third party such as an investigator?
 4. Should NEAR-specific vocabulary be proposed upstream (a CAIP-10 NEAR profile, OLI tags for NEAR classes)?
+
+## 8. Stage 1 spike: first results (2026-11-17)
+
+**Files checked by real engines.** Oxigraph 0.5.13 (npm, in memory) parsed `near-ontology.ttl`, `near-shapes.ttl` and an N-Quads export of sample facts without errors; a transitive query for the classes below `account` returned all 28; a closed fact was absent from the `live` graph; the organisations' Wikidata links read back. pyshacl 0.40.2 ran our shapes over the facts graph plus the vocabulary: **the 5 good facts conform; each of 7 deliberately bad facts is caught with the right message** (confidence above 1, an unknown source, a severity that is not one, a `role_in` with no role, an end before the start, an `is_a` that is not a class, a fact with no writer).
+
+**Scale test on synthetic data** (a random graph shaped like ours: 40 % `funded` edges, 25 % `is_a`, a few flags; not our data; the npm package is an in-memory WebAssembly store, not the on-disk server):
+
+| | 30,000 facts (about today) | 300,000 facts |
+|---|---|---|
+| quads (reified facts plus the plain `live` triples) | 285 thousand | 2.8 million |
+| load time | **2.8 s** | **241 s** |
+| process memory | 300 MB | 1.1 GB |
+| point lookups (everything about one account, its facts with sources, a case's members, a class tree walk) | 0.1 to 0.2 ms | 0.1 to 1 ms |
+| flagged accounts with their evidence | 0.6 ms | 2.2 ms |
+| a join over a whole class and its flagged neighbours (Q9) | 3.7 ms | 84 ms |
+| a filter over every fact by source and confidence (Q8) | 34 ms | 425 ms |
+
+What this says: **queries are fast at our size and still fast at ten times it, except full scans, which grow with the data.** What it does not say is the load time at scale: ten times the facts took 86 times as long, so the in-process route is fine for a spike and not for production. The on-disk server (RocksDB, with its bulk loader) was **not measured**; that is the number that matters for the Railway service, and it needs the server binary. Question Q3 (two hops from a flagged account) returned no rows because the random graph has no such path; it was not tested.
+
+**Not done:** the same questions on our real facts (the database was unreachable: the Atlas IP allow-list has lapsed again), and a comparison against Mongo plus our in-memory graph on the same questions.
