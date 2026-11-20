@@ -56,3 +56,14 @@ test('classes: a deposit address is an exchange class that does not cut links; e
   assert.equal(cutsLinks('person/wallet'), false); assert.equal(cutsLinks('unknown'), false);
   assert.ok(DEPOSIT.minSweeps >= 3 && DEPOSIT.sweepShare >= 0.9);
 });
+
+test('names for exchange wallets nobody has named: "CEX user wallet" and "Unidentified exchange wallet"; a label or an operator wins', async () => {
+  const { displayName } = await import('../src/ontology/index.js');
+  assert.equal(displayName('exchange/deposit_address', null, null), 'CEX user wallet');
+  assert.equal(displayName('exchange/deposit_address', null, 'org:bybit'), 'CEX user wallet (bybit)');
+  assert.equal(displayName('exchange', null, null), 'Unidentified exchange wallet');
+  assert.equal(displayName('exchange/hot_wallet', null, null), 'Unidentified exchange wallet');
+  assert.equal(displayName('exchange/hot_wallet', null, 'org:binance'), 'binance wallet');
+  assert.equal(displayName('exchange/hot_wallet', 'Binance hot wallet', 'org:binance'), 'Binance hot wallet', 'a label wins');
+  assert.equal(displayName('person/wallet', null, null), null);
+});

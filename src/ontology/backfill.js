@@ -150,17 +150,19 @@ export const WRITERS = {
   },
 
   // scope { ids }: only these accounts (the block watcher just verified them). An implicit account that receives from outside and passes everything on to one
-  // exchange's wallets, repeatedly, sweeps into that exchange (deposits.js). Who it is depends on how many accounts pay it. Behaviour, not a label the exchange gave.
-  //   one or two depositors  one customer's deposit address (exchange/deposit_address, 0.7): two wallets that pay it are that customer's, so it does not cut links
-  //   three or more          a shared collection account (exchange, 0.5): its depositors are different people, so it cuts links like any exchange wallet.
-  //                          Whether the exchange itself runs it is not known (an OTC desk or payment processor sweeping into the exchange looks the same): hence 0.5.
+  // exchange's wallets, repeatedly, sweeps into an exchange (deposits.js). Behaviour, not a label the exchange gave, and it does NOT say which exchange:
+  // the registry names an exchange from the name of the cold wallet a hot wallet sweeps to, and a name proves nothing. So no `operated_by` is written here;
+  // the `swept_to` edge keeps the fact, and the exchange follows from the hot wallet's own identity when that is proven (a hand label, a published list).
+  //   one or two depositors  a CEX user's deposit address (exchange/deposit_address, 0.7, "CEX user wallet"): two wallets that pay it are that user's, so it does not cut links
+  //   three or more          a shared collection account of an exchange not yet identified (exchange, 0.5, "Unidentified exchange wallet"): its depositors are different
+  //                          people, so it cuts links like any exchange wallet.
   async deposit_addresses({ ids = null } = {}) {
     const out = [];
     for await (const d of col('deposit_candidates').find({ verified: true, ...(ids ? { _id: { $in: ids } } : {}) })) {
       const j = d.judged || {}, one = (j.depositors ?? 99) <= 2, conf = one ? 0.7 : 0.5;
-      const ev = `${j.out_n} sends of ${j.out_near} NEAR, all to ${d.exchange}'s wallets; ${j.in_n} deposits of ${j.in_near} NEAR from ${j.depositors ?? '?'} account${j.depositors === 1 ? '' : 's'} (median ${j.median_deposit_near ?? '?'} NEAR), passed on whole${one ? '' : '; many depositors: a shared collection account, not one customer\'s'}`;
+      const ev = `${j.out_n} sends of ${j.out_near} NEAR, all to wallets of one exchange (the registry names it ${d.exchange} from an account name only); ${j.in_n} deposits of ${j.in_near} NEAR from ${j.depositors ?? '?'} account${j.depositors === 1 ? '' : 's'} (median ${j.median_deposit_near ?? '?'} NEAR), passed on whole${one ? '' : '; many depositors: a shared collection account, not one user\'s'}`;
       out.push({ subject: d._id, predicate: 'is_a', object: one ? 'exchange/deposit_address' : 'exchange', source: 'behaviour', confidence: conf, evidence: ev },
-        { subject: d._id, predicate: 'operated_by', object: org(d.exchange), source: 'behaviour', confidence: conf, evidence: ev },
+        { subject: d._id, predicate: 'label', object: one ? 'CEX user wallet' : 'Unidentified exchange wallet', source: 'behaviour', confidence: conf, evidence: ev },
         { subject: d._id, predicate: 'swept_to', object: d.hot, source: 'behaviour', confidence: 0.8, evidence: ev });
     }
     return out;
