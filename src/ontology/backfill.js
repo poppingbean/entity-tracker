@@ -149,6 +149,23 @@ export const WRITERS = {
     return out;
   },
 
+  // scope { ids }: only these accounts (the block watcher just verified them). An implicit account that receives from outside and passes everything on to one
+  // exchange's wallets, repeatedly, sweeps into that exchange (deposits.js). Who it is depends on how many accounts pay it. Behaviour, not a label the exchange gave.
+  //   one or two depositors  one customer's deposit address (exchange/deposit_address, 0.7): two wallets that pay it are that customer's, so it does not cut links
+  //   three or more          a shared collection account (exchange, 0.5): its depositors are different people, so it cuts links like any exchange wallet.
+  //                          Whether the exchange itself runs it is not known (an OTC desk or payment processor sweeping into the exchange looks the same): hence 0.5.
+  async deposit_addresses({ ids = null } = {}) {
+    const out = [];
+    for await (const d of col('deposit_candidates').find({ verified: true, ...(ids ? { _id: { $in: ids } } : {}) })) {
+      const j = d.judged || {}, one = (j.depositors ?? 99) <= 2, conf = one ? 0.7 : 0.5;
+      const ev = `${j.out_n} sends of ${j.out_near} NEAR, all to ${d.exchange}'s wallets; ${j.in_n} deposits of ${j.in_near} NEAR from ${j.depositors ?? '?'} account${j.depositors === 1 ? '' : 's'} (median ${j.median_deposit_near ?? '?'} NEAR), passed on whole${one ? '' : '; many depositors: a shared collection account, not one customer\'s'}`;
+      out.push({ subject: d._id, predicate: 'is_a', object: one ? 'exchange/deposit_address' : 'exchange', source: 'behaviour', confidence: conf, evidence: ev },
+        { subject: d._id, predicate: 'operated_by', object: org(d.exchange), source: 'behaviour', confidence: conf, evidence: ev },
+        { subject: d._id, predicate: 'swept_to', object: d.hot, source: 'behaviour', confidence: 0.8, evidence: ev });
+    }
+    return out;
+  },
+
   async clusters() {
     const out = [];
     for (const c of await col('clusters').find({}, { projection: { members: 1, verdict: 1 } }).toArray()) {
@@ -169,6 +186,7 @@ const SCOPES = {
   firewall_flags: ({ ids }) => ({ $and: [{ subject: { $in: ids }, predicate: 'flagged' }] }),
   tokens: ({ ids }) => ({ $and: [{ $or: [{ subject: { $in: ids }, predicate: 'created_by' }, { object: { $in: ids }, predicate: 'deployed' }] }] }),
   account_creations: ({ ids }) => ({ $and: [{ subject: { $in: ids }, predicate: { $in: ['is_a', 'created_by'] } }] }),
+  deposit_addresses: ({ ids }) => ({ $and: [{ subject: { $in: ids }, predicate: { $in: ['is_a', 'operated_by', 'swept_to'] } }] }),
 };
 
 // One run of a writer at a time across every process (the worker's daily backfill, a sync in the worker, a hand flag in the web process).
