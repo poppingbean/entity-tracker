@@ -90,6 +90,8 @@ export async function watchDeploys() {
   const drains = await scanBlocks(blocks).catch((e) => { warn(`incident detector: ${e.message}`); return []; });
   // money watch: every movement of $100k or more opens a watch case; moves out of watched accounts are followed (src/watch)
   await scanWatches(blocks).catch((e) => warn(`money watch: ${e.message}`));
+  // the ontology learns accounts as the chain creates them: a validator pool, a DAO or a launchpad token made by a known factory is classed the moment it exists (src/ontology/creations.js)
+  await (await import('../ontology/creations.js')).recordCreations(blocks).catch((e) => warn(`account creations: ${e.message}`));
   // tokens from deploys: a contract deployed on NEAR becomes a tracked token the second liquidity is first added for it (any factory, no launchpad needed)
   await trackLiquidity(blocks).catch((e) => warn(`tokens from deploys: ${e.message}`));
   // what the live feed shows: where the watch is, and that it is moving

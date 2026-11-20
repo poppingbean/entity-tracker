@@ -137,6 +137,18 @@ export const WRITERS = {
     return out;
   },
 
+  // scope { ids }: only these accounts (the block watcher just saw a known factory create them). A sub-account can only be created by its parent, so who
+  // created it is a chain fact; what it is follows from the factory (creations.js FACTORIES). The audit of its code, when it comes, says more and wins.
+  async account_creations({ ids = null } = {}) {
+    const out = [];
+    for await (const c of col('account_creations').find(ids ? { _id: { $in: ids } } : {})) {
+      const at = `${c.tx ? ` (tx ${c.tx})` : ''}`;
+      out.push({ subject: c._id, predicate: 'is_a', object: c.class, source: 'audit', confidence: 0.85, evidence: `${c.why}${at}` },
+        { subject: c._id, predicate: 'created_by', object: c.creator, source: 'trace', confidence: 0.95, evidence: `created by ${c.creator}${at}` });
+    }
+    return out;
+  },
+
   async clusters() {
     const out = [];
     for (const c of await col('clusters').find({}, { projection: { members: 1, verdict: 1 } }).toArray()) {
@@ -156,6 +168,7 @@ const SCOPES = {
   incidents: ({ ids }) => ({ $and: [{ $or: [{ object: { $in: ids }, predicate: 'role_in' }, { subject: { $in: ids }, predicate: 'sent_to' }] }] }),
   firewall_flags: ({ ids }) => ({ $and: [{ subject: { $in: ids }, predicate: 'flagged' }] }),
   tokens: ({ ids }) => ({ $and: [{ $or: [{ subject: { $in: ids }, predicate: 'created_by' }, { object: { $in: ids }, predicate: 'deployed' }] }] }),
+  account_creations: ({ ids }) => ({ $and: [{ subject: { $in: ids }, predicate: { $in: ['is_a', 'created_by'] } }] }),
 };
 
 // One run of a writer at a time across every process (the worker's daily backfill, a sync in the worker, a hand flag in the web process).
