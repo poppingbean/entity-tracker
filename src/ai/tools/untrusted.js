@@ -17,6 +17,10 @@ export const MARKER = '[instruction-like text removed]';
 
 const FREE_TEXT = new Set(['name', 'symbol', 'title', 'description', 'memo', 'reference', 'base_uri', 'media', 'text', 'label', 'notes', 'summary', 'conclusion', 'findings', 'changes', 'reasons', 'red_flags']);
 const DROP = new Set(['icon', 'icon_data', 'image', 'media_hash', 'extra']); // images, data URIs and free-form blobs are never needed
+// Text the tracker itself wrote in plain words (a case's signals, its timeline, the price note). It is long by nature (one sentence holds two or three 64-character account ids),
+// and cut at 128 characters it loses its point ("... an account created by the …"). Still scanned for instruction-like text, capped at 1,000 characters.
+const LONG_TEXT = new Set(['signals', 'rule_signals', 'timeline', 'prices', 'note']);
+const LONG_CAP = 1000;
 
 /** Strip invisible / control characters, collapse whitespace, cap the length. */
 export const cleanText = (s, max = 160) => {
@@ -36,7 +40,7 @@ export function sanitizeEvidence(obj, { trusted = [] } = {}) {
     if (typeof v === 'string') {
       // trusted parts (our own earlier assessment): cleaned of invisible characters, kept whole, not matched against the injection patterns
       if (isTrusted(path)) return cleanText(v, 600);
-      const t = cleanText(v, FREE_TEXT.has(key) ? 160 : 128);
+      const t = cleanText(v, LONG_TEXT.has(key) ? LONG_CAP : FREE_TEXT.has(key) ? 160 : 128);
       if (INSTRUCTION.test(t)) { findings.push({ path, sample: t.slice(0, 80) }); return MARKER; }
       return t;
     }

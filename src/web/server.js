@@ -36,6 +36,8 @@ import { report } from '../incident/signals.js';
 import { walletView } from '../near/walletview.js';
 import { entityView } from '../ontology/index.js';
 import { parseChainId } from '../ontology/chains.js';
+import { normalizeId } from '../ontology/caip.js';
+import { NS } from '../ontology/vocab.js';
 
 // the UI: a small shell page (public/index.html) and its assets (public/assets: app.css, js/core.js, js/pages/*.js, js/app.js).
 // Asset links carry the server's start time (?v=) so a deploy is picked up at once while the files themselves are cached long.
@@ -220,9 +222,17 @@ async function firewallApi(req, res, u) {
     send(200, await contractReport(id)); return;
   }
   if (u.pathname === '/api/v1/entity' && req.method === 'GET') {
-    const id = String(u.searchParams.get('id') || '').trim().toLowerCase();
+    const id = normalizeId(String(u.searchParams.get('id') || ''));
     if (!validNearAddress(id) && !parseChainId(id)) { send(400, { error: 'id must be a NEAR account or a chain address such as eth:0x…' }); return; }
-    send(200, await entityView(id)); return;
+    const view = await entityView(id), base = config.alerts.siteUrl || '';
+    // linked data: the same answer with a JSON-LD context (the account's did:pkh is its @id, its class its @type); readers that ignore these keys see no change
+    send(200, { '@context': `${base}/api/v1/ontology/context.jsonld`, '@id': view.did || undefined, '@type': `${NS}class/${view.class}`, ...view }); return;
+  }
+  // the ontology as published vocabularies (generated from the code): the class tree (SKOS/OWL), the SHACL shapes of a fact, the JSON-LD context of the entity answer
+  if (req.method === 'GET' && /^\/api\/v1\/ontology\/(vocabulary\.ttl|shapes\.ttl|context\.jsonld)$/.test(u.pathname)) {
+    const f = u.pathname.split('/').pop(), v = await import('../ontology/vocab.js');
+    const body = f === 'vocabulary.ttl' ? v.vocabularyTurtle() : f === 'shapes.ttl' ? v.shapesTurtle() : JSON.stringify(v.contextJsonLd(), null, 1);
+    res.writeHead(200, { 'content-type': f === 'context.jsonld' ? 'application/ld+json; charset=utf-8' : 'text/turtle; charset=utf-8', 'access-control-allow-origin': '*', 'cache-control': 'public, max-age=3600' }).end(body); return;
   }
   if (u.pathname === '/api/v1/account' && req.method === 'GET') {
     const id = String(u.searchParams.get('id') || '').trim().toLowerCase();
