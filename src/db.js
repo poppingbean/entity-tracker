@@ -34,6 +34,7 @@ async function ensureIndexes() {
     ix('sim_positions', { status: 1, opened_ts: -1 }), ix('sim_positions', { token: 1 }), ix('sim_fills', { position_id: 1, ts: 1 }), ix('sim_equity', { ts: 1 }),
     ix('ontology_facts', { subject: 1, predicate: 1, valid_to: 1 }), ix('ontology_facts', { object: 1, predicate: 1, valid_to: 1 }), ix('ontology_facts', { predicate: 1, source: 1 }), ix('ontology_facts', { by: 1, run: 1 }),
     ix('ontology_shadow', { module: 1, agree: 1, last_ts: -1 }), ix('ontology_shadow_stats', { module: 1, day: 1 }),
+    ix('deposit_candidates', { verified: 1, sweeps: -1 }), ix('deposit_candidates', { sweeps: 1, last_ts: 1 }),
     ix('events', { ts: -1 }), ix('events', { at: 1 }, { expireAfterSeconds: 30 * 86400 }), // log lines expire after 30 days
   ]);
 }

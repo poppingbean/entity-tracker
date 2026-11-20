@@ -5,8 +5,9 @@
 //   sweepsInto(flows, wallets)     pure: the NEAR transfers from outside accounts into an exchange's hot wallets (the candidates)
 //   judgeDeposit({ account, flows, wallets })   pure: does this account's own history look like a deposit address?
 //   watchDeposits(blocks)          the block watcher: count sweeps per candidate, verify the ones with enough of them, tell the ontology
-// A verified account becomes `exchange/deposit_address` (behaviour, 0.7), `operated_by` the exchange and `swept_to` its hot wallet (writer `deposit_addresses`).
-// It is evidence of a pattern, not of a label the exchange gave: sharing a deposit address links the wallets of one customer, so the class does not cut links (classes.js).
+// A verified account with one or two depositors becomes `exchange/deposit_address` ("CEX user wallet", behaviour 0.7, does not cut links: two wallets that pay it are one
+// customer's); with more it is a shared collection account, `exchange` ("Unidentified exchange wallet", 0.5, cuts links). Both get `swept_to` the hot wallet; neither names the
+// exchange, because the registry names exchanges from account names only (writer `deposit_addresses`, backfill.js).
 import { flowsOfReceipt } from '../incident/flows.js';
 
 export const DEPOSIT = { minNear: 1, minSweeps: 3, minIn: 2, sweepShare: 0.9, history: 60, verifyPerTick: 2 };
@@ -71,14 +72,26 @@ export async function verifyAccount(account, wallets) {
  * The block watcher's step: count the sweeps into exchange hot wallets per sending account, then verify the few candidates that have enough of them
  * (at most `verifyPerTick` per call) and tell the ontology about the ones that pass. Returns { candidates, verified, passed }.
  */
+let verifying = null, lastPrune = 0;
+/** Resolves when the verification running beside the watcher is done (for tests and a clean shutdown). */
+export const depositsIdle = () => verifying || Promise.resolve();
 export async function watchDeposits(blocks) {
   const { col } = await import('../db.js'), { exchangeWalletMap } = await import('../incident/exchanges.js');
   const wallets = await exchangeWalletMap();
-  if (!wallets.size) return { candidates: 0, verified: 0, passed: 0 };
+  if (!wallets.size) return { candidates: 0 };
   const hits = sweepsInto(nearFlowsOfBlocks(blocks), wallets);
   const by = new Map();
   for (const h of hits) { const c = by.get(h.account) || { n: 0, near: 0, last: 0, hot: h.hot, exchange: h.exchange }; c.n++; c.near += h.near; c.last = Math.max(c.last, h.ts); by.set(h.account, c); }
   if (by.size) await col('deposit_candidates').bulkWrite([...by].map(([account, c]) => ({ updateOne: { filter: { _id: account }, update: { $inc: { sweeps: c.n, near: c.near }, $set: { last_ts: c.last, exchange: c.exchange, hot: c.hot }, $setOnInsert: { first_ts: Date.now() } }, upsert: true } })), { ordered: false });
+  // senders that never came back are forgotten after 30 days (one row per customer who ever deposited would otherwise grow without end)
+  if (Date.now() - lastPrune > 3600e3) { lastPrune = Date.now(); await col('deposit_candidates').deleteMany({ sweeps: { $lt: DEPOSIT.minSweeps }, last_ts: { $lt: Date.now() - 30 * 86400e3 } }).catch(() => {}); }
+  // verifying reads each candidate's history (seconds): it runs beside the watcher, never in its way; one batch at a time
+  if (!verifying) verifying = verifyDue(col, wallets).catch(() => null).finally(() => { verifying = null; });
+  return { candidates: by.size };
+}
+
+/** Verify the candidates that are due (at most `verifyPerTick`) and tell the ontology. Returns { verified, passed }. */
+export async function verifyDue(col, wallets) {
   // a candidate whose history could not be read is tried again after an hour; one that was judged stays judged
   const due = await col('deposit_candidates').find({ sweeps: { $gte: DEPOSIT.minSweeps }, verified: { $exists: false }, $or: [{ retry_ts: { $exists: false } }, { retry_ts: { $lt: Date.now() } }] }).sort({ sweeps: -1 }).limit(DEPOSIT.verifyPerTick).toArray();
   let passed = 0;
@@ -89,5 +102,5 @@ export async function watchDeposits(blocks) {
     if (j.ok) passed++;
   }
   if (due.length) await (await import('./writers.js')).syncFacts(['deposit_addresses'], { scope: { deposit_addresses: { ids: due.map((d) => d._id) } } });
-  return { candidates: by.size, verified: due.length, passed };
+  return { verified: due.length, passed };
 }

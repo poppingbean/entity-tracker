@@ -67,3 +67,13 @@ test('names for exchange wallets nobody has named: "CEX user wallet" and "Uniden
   assert.equal(displayName('exchange/hot_wallet', 'Binance hot wallet', 'org:binance'), 'Binance hot wallet', 'a label wins');
   assert.equal(displayName('person/wallet', null, null), null);
 });
+
+test('the tracer: a CEX user wallet is a user\'s wallet (not an exchange endpoint, not "busy"); a shared collection account keeps its name and stays neutral', async () => {
+  const { fromOntology } = await import('../src/incident/origin.js');
+  const dep = fromOntology({ class: 'exchange/deposit_address', top: 'exchange', source: 'behaviour', label: 'CEX user wallet', why: 'sweeps' });
+  assert.deepEqual([dep.kind, dep.name, dep.busy], ['wallet', 'CEX user wallet', undefined]);
+  const shared = fromOntology({ class: 'exchange', top: 'exchange', source: 'behaviour', label: 'Unidentified exchange wallet', why: 'sweeps' });
+  assert.deepEqual([shared.kind, shared.name], ['wallet', 'Unidentified exchange wallet']);
+  const busy = fromOntology({ class: 'exchange/hot_wallet', top: 'exchange', source: 'behaviour', label: null, why: 'busy' });
+  assert.equal(busy.name, 'Busy account (unidentified)', 'a busy-only exchange fact keeps the old neutral name');
+});

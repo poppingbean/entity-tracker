@@ -188,7 +188,7 @@ const SCOPES = {
   firewall_flags: ({ ids }) => ({ $and: [{ subject: { $in: ids }, predicate: 'flagged' }] }),
   tokens: ({ ids }) => ({ $and: [{ $or: [{ subject: { $in: ids }, predicate: 'created_by' }, { object: { $in: ids }, predicate: 'deployed' }] }] }),
   account_creations: ({ ids }) => ({ $and: [{ subject: { $in: ids }, predicate: { $in: ['is_a', 'created_by'] } }] }),
-  deposit_addresses: ({ ids }) => ({ $and: [{ subject: { $in: ids }, predicate: { $in: ['is_a', 'operated_by', 'swept_to'] } }] }),
+  deposit_addresses: ({ ids }) => ({ $and: [{ subject: { $in: ids }, predicate: { $in: ['is_a', 'label', 'operated_by', 'swept_to'] } }] }),
 };
 
 // One run of a writer at a time across every process (the worker's daily backfill, a sync in the worker, a hand flag in the web process).

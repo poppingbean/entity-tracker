@@ -41,7 +41,8 @@ export function classifyCreation(c) {
 }
 
 /**
- * Store the creations of known factories in a batch of blocks and tell the ontology at once (writers.js syncFacts). Never throws: the watcher's own work comes first.
+ * Store the creations of known factories in a batch of blocks and tell the ontology at once (writers.js syncFacts). A database error is thrown to the caller (the watcher
+ * catches it and goes on); the ontology sync itself never throws.
  * Returns how many accounts were recorded.
  */
 export async function recordCreations(blocks) {
