@@ -30,7 +30,8 @@ export const STEPS = {
   // changes no decision. G2 waits for its own evidence (parity). G3 removes the rollback switch, so it waits for #74's readers' 7 days.
   G1: { title: 'writers assert facts at the source (step 7, part 1)', needs: ['A', 'C', 'D', 'E', 'F'], days: 0, modules: [] },
   G2: { title: 'the daily backfill off, its old facts retired (step 7, part 2)', needs: ['G1'], days: 0, modules: [], parity: true },
-  G3: { title: 'the old lists and the ONTOLOGY_READ switch go (step 7, part 3)', needs: ['A', 'C', 'D', 'E', 'F', 'G1'], daysOf: ['C', 'D', 'E', 'F'], days: GATE.minDays, modules: [] },
+  // G3 after G2: it removes the rollback switch, so the backfill must already be off and parity clean without it
+  G3: { title: 'the old lists and the ONTOLOGY_READ switch go (step 7, part 3)', needs: ['A', 'C', 'D', 'E', 'F', 'G1', 'G2'], daysOf: ['C', 'D', 'E', 'F'], days: GATE.minDays, modules: [] },
 };
 
 /** Disagreements already explained (the cause, and what was done), kept in the repository so they are reviewed in PRs. */
@@ -57,7 +58,8 @@ export async function gate({ now = Date.now() } = {}) {
   const worker = fresh.filter((b) => b.role === 'worker' || b.role === 'all');
   const web = fresh.filter((b) => b.role === 'web' || b.role === 'all');
   // a step is running only when every fresh process has it (a half-finished deploy does not count)
-  const running = (s) => worker.length > 0 && fresh.every((b) => (b.steps || []).includes(s));
+  // G2 (the backfill off) is a worker setting: only the workers report it
+  const running = (s) => worker.length > 0 && (s === 'G2' ? worker : fresh).every((b) => (b.steps || []).includes(s));
   const since = await metaGet('ontology_steps_since', {});
   const daysSince = (s) => (since[s]?.ts ? (now - since[s].ts) / 86400e3 : 0);
 
