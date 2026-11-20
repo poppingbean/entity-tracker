@@ -10,7 +10,12 @@
 // exchange, because the registry names exchanges from account names only (writer `deposit_addresses`, backfill.js).
 import { flowsOfReceipt } from '../incident/flows.js';
 
-export const DEPOSIT = { minNear: 1, minSweeps: 3, minIn: 2, sweepShare: 0.9, history: 60, verifyPerTick: 2 };
+// oneCustomerMax: up to this many depositors the address is read as one customer's (they may pay it from several of their own wallets); above it, a shared
+// collection account. Measured on the 13 deposit addresses that link early wallets today (docs/linking-findings.md): 2, 2, 2, 3, 4, 4, 5, 6, 6 depositors,
+// then a gap, then 14, 16, 18, 18; the addresses with 3 to 6 depositors sit in groups whose wallets are also tied by funding.
+export const DEPOSIT = { minNear: 1, minSweeps: 3, minIn: 2, sweepShare: 0.9, history: 60, verifyPerTick: 2, oneCustomerMax: 6 };
+/** One customer's address (true) or a shared collection account (false), from the number of accounts that paid it; and the confidence that goes with it. */
+export const depositKind = (depositors) => { const n = depositors ?? 99; return n <= DEPOSIT.oneCustomerMax ? { one: true, confidence: n <= 2 ? 0.7 : 0.6 } : { one: false, confidence: 0.5 }; };
 export const isImplicit = (a) => /^[0-9a-f]{64}$/.test(String(a || ''));
 const near = (f) => { try { return f.token === 'near' ? Number(BigInt(f.raw) / 10n ** 18n) / 1e6 : 0; } catch { return 0; } };
 

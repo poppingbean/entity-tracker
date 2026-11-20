@@ -77,3 +77,11 @@ test('the tracer: a CEX user wallet is a user\'s wallet (not an exchange endpoin
   const busy = fromOntology({ class: 'exchange/hot_wallet', top: 'exchange', source: 'behaviour', label: null, why: 'busy' });
   assert.equal(busy.name, 'Busy account (unidentified)', 'a busy-only exchange fact keeps the old neutral name');
 });
+
+test('one customer or a shared collection account, from the number of depositors (the measured gap: 6 then 14)', async () => {
+  const { depositKind } = await import('../src/ontology/deposits.js');
+  assert.deepEqual(depositKind(1), { one: true, confidence: 0.7 }); assert.deepEqual(depositKind(2), { one: true, confidence: 0.7 });
+  assert.deepEqual(depositKind(4), { one: true, confidence: 0.6 }); assert.deepEqual(depositKind(6), { one: true, confidence: 0.6 });
+  assert.deepEqual(depositKind(7), { one: false, confidence: 0.5 }); assert.deepEqual(depositKind(18), { one: false, confidence: 0.5 });
+  assert.deepEqual(depositKind(undefined), { one: false, confidence: 0.5 }, 'unknown: treated as shared, the cautious side (it cuts links)');
+});
