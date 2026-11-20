@@ -440,19 +440,33 @@ async function inspectWebsite(host, extra = {}) {
 }
 
 /**
- * An address on another chain (WP-14): what Safe Near knows from the NEAR cases whose money was sent to it. Never "safe": no case only means nothing is known;
- * danger only when a confirmed case sent money there. The money is not followed on the other chain.
+ * An address on another chain: what Safe Near knows about it (WP-14 and docs/external-cases.md). Two sources, both public facts:
+ *   - external cases: hacks on other chains written down from public reports (Bitget, Bybit), where this address is named: danger when it is the attacker's
+ *     or held the stolen money, caution when it was only the destination of an attacker's swap order, a plain note when it is a victim's wallet;
+ *   - NEAR cases whose money was swapped out to it: danger only when a confirmed case sent money there.
+ * Never "safe": no case only means nothing is known. The money is not followed on the other chain.
  */
 async function inspectChainAddress(id) {
-  const c = parseChainId(id), { relationsOf } = await import('../ontology/index.js');
+  const c = parseChainId(id), { relationsOf } = await import('../ontology/index.js'), { externalCases, ROLES } = await import('../incident/external.js');
   const rel = (await relationsOf(id, { predicate: 'role_in', direction: 'out' })).filter((f) => !f.valid_to || f.valid_to > Date.now());
-  const ids = [...new Set(rel.map((f) => f.object))], cases = ids.length ? await col('incidents').find({ _id: { $in: ids } }, { projection: INC_FIELDS }).toArray() : [];
+  const ids = [...new Set(rel.map((f) => f.object))], nearIds = ids.filter((x) => !x.startsWith('ext:'));
+  const [cases, ext] = await Promise.all([nearIds.length ? col('incidents').find({ _id: { $in: nearIds } }, { projection: INC_FIELDS }).toArray() : [], externalCases(ids)]);
   const confirmed = cases.filter((d) => d.status === 'confirmed');
   const sent = (await relationsOf(id, { predicate: 'sent_to', direction: 'in' })).reduce((s, f) => s + (f.amount_usd || 0), 0);
   const where = `${c?.name || 'another chain'} address ${short(c?.address || id, 20)}`;
-  if (!cases.length) return { kind: 'chain_address', account: id, verdict: 'unknown', headline: `Nothing known about this ${where}.`, points: [pt('info', 'Safe Near has not seen money from a hack it traced go to it. That does not make it safe: it only follows money on NEAR.')] };
-  return { kind: 'chain_address', account: id, verdict: confirmed.length ? 'danger' : 'caution',
-    headline: `This ${where} received about $${Math.round(sent).toLocaleString('en-US')} from ${confirmed.length ? 'a confirmed hack' : 'a case being watched'} traced on NEAR.`,
-    points: [pt(confirmed.length ? 'bad' : 'warn', `Money from ${cases.length} NEAR case${cases.length === 1 ? '' : 's'} was swapped out to it (see the case${cases.length === 1 ? '' : 's'}). Safe Near does not follow the money on ${c?.name || 'that chain'}.`)],
-    incidents: cases.map((d) => incRow(d, 'cash_out_address')) };
+  if (!cases.length && !ext.length) return { kind: 'chain_address', account: id, verdict: 'unknown', headline: `Nothing known about this ${where}.`, points: [pt('info', 'Safe Near has not seen money from a hack it traced go to it, and it is in no public hack report it has recorded. That does not make it safe: it only follows money on NEAR.')] };
+  const day = (ts) => new Date(ts).toISOString().slice(0, 10), points = [], externalRows = [];
+  for (const d of ext) {
+    const f = rel.find((x) => x.object === d._id), role = f?.role, r = ROLES[role] || { group: 'victim', words: 'named in this case' };
+    points.push(pt(r.group === 'bad' ? 'bad' : r.group === 'recipient' ? 'warn' : 'info', `${d.name} (${day(d.started_ts)}, about $${Math.round(d.loss_usd / 1e6).toLocaleString('en-US')}M): this address is ${r.words}. ${f?.evidence || ''}`.trim()));
+    externalRows.push({ id: d._id, name: d.name, victim: d.victim, role, group: r.group, when: d.started_ts, loss_usd: d.loss_usd, intents: d.intents?.activity || null, sources: (d.sources || []).map((x) => ({ publisher: x.publisher, url: x.url })) });
+  }
+  if (cases.length) points.push(pt(confirmed.length ? 'bad' : 'warn', `Money from ${cases.length} NEAR case${cases.length === 1 ? '' : 's'} was swapped out to it (see the case${cases.length === 1 ? '' : 's'}). Safe Near does not follow the money on ${c?.name || 'that chain'}.`));
+  const bad = externalRows.some((x) => x.group === 'bad') || confirmed.length > 0, warn = externalRows.some((x) => x.group === 'recipient') || cases.length > 0;
+  const first = externalRows.find((x) => x.group === 'bad') || externalRows.find((x) => x.group === 'recipient') || externalRows[0];
+  const headline = first
+    ? (first.group === 'victim' ? `This ${where} is a wallet of ${first.victim} that lost money in the ${first.name}.` : `This ${where} is named in the ${first.name}: ${ROLES[first.role]?.words || 'part of it'}.`)
+    : `This ${where} received about $${Math.round(sent).toLocaleString('en-US')} from ${confirmed.length ? 'a confirmed hack' : 'a case being watched'} traced on NEAR.`;
+  return { kind: 'chain_address', account: id, verdict: bad ? 'danger' : warn ? 'caution' : 'unknown', headline, points,
+    ...(externalRows.length ? { external_cases: externalRows } : {}), incidents: cases.map((d) => incRow(d, 'cash_out_address')) };
 }

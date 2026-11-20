@@ -42,7 +42,7 @@ export async function oneClickSwap(depositAddress) {
   } catch {}
   }
   // only a definite answer is remembered: a rate limit or a timeout must not turn a swap into "not a swap" for an hour
-  if (definite) { cache.set(depositAddress, { ts: Date.now(), value }); breaker.fails = 0; }
+  if (definite) { cache.set(depositAddress, { ts: Date.now(), value }); breaker.fails = 0; if (value) import('./screen.js').then((m) => m.screenSwap(value)).catch(() => {}); } // an address a hack report named? (docs/external-cases.md)
   else if (++breaker.fails >= 5) { breaker.until = Date.now() + 5 * 60e3; breaker.fails = 0; }
   return value;
 }
