@@ -16,12 +16,18 @@ export function parseChainId(id) {
   const m = /^([a-z]{2,8}):(\S{6,120})$/.exec(String(id || ''));
   return m && CHAIN[m[1]] ? { chain: m[1], name: CHAIN[m[1]], address: m[2] } : null;
 }
-/** A pasted chain address: an explicit `eth:0x…` / `btc:…` / `sol:…`, or a bare 0x + 40 hex (Ethereum-style) or a bech32 / legacy Bitcoin address. Returns the id or null. */
+/** A pasted chain address: an explicit `eth:0x…` / `btc:…` / `sol:…`, or a bare 0x + 40 hex (Ethereum-style), a bech32 / legacy Bitcoin address, or an XRP / Tron / Zcash address. Returns the id or null. */
 export function detectChainAddress(text) {
   const s = String(text || '').trim();
   if (parseChainId(s)) return chainId(s.split(':')[0], s.slice(s.indexOf(':') + 1));
   if (/^0x[0-9a-fA-F]{40}$/.test(s)) return chainId('eth', s);
   if (/^(bc1[a-z0-9]{25,60}|[13][a-km-zA-HJ-NP-Z1-9]{25,34})$/.test(s)) return chainId('btc', s);
+  // XRP Ledger (r…), Tron (T…) and Zcash transparent (t1… / t3…) addresses are 25 to 35 characters of base58 with upper and lower case: a NEAR account name is lower case only and a transaction hash is 43 to 44 characters, so an upper-case letter rules a NEAR account out
+  if (/[A-Z]/.test(s)) {
+    if (/^r[1-9A-HJ-NP-Za-km-z]{24,34}$/.test(s)) return chainId('xrp', s);
+    if (/^T[1-9A-HJ-NP-Za-km-z]{33}$/.test(s)) return chainId('tron', s);
+    if (/^t[13][1-9A-HJ-NP-Za-km-z]{33}$/.test(s)) return chainId('zec', s);
+  }
   return null; // a bare Solana address looks like a NEAR transaction hash: it needs the `sol:` prefix
 }
 /** The `sent_to` and `role_in` facts of one case's exits to other chains. */

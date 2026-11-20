@@ -27,6 +27,7 @@ export const TYPES = {
   drain_suspected: { label: 'Large transfer (being checked)', group: 'hack' },
   incident: { label: 'Hack / exploit', group: 'hack' },
   stolen_funds_moved: { label: 'Stolen funds moved', group: 'hack' },
+  listed_address_swap: { label: 'Hack address used NEAR Intents', group: 'hack' },
   exchange_key_change: { label: 'Exchange wallet key change', group: 'hack' },
   security_news: { label: 'In the news', group: 'hack' },
   nft_team_sell: { label: 'NFT team selling', group: 'nft' },
