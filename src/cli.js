@@ -501,6 +501,12 @@ try {
     const r = await backfillDeposits({ apply: args.includes('--apply'), log: (m) => console.log(m) });
     console.log(JSON.stringify({ apply: args.includes('--apply'), class_live: config.ontology.depositClassLive, one: r.one.length, shared: r.shared.length, failed: r.failed, unreadable: r.unreadable, facts_written: r.written }));
     for (const x of [...r.one, ...r.shared].slice(0, 30)) console.log(`  ${x.account.slice(0, 20)} ${x.exchange} depositors ${x.depositors} early wallets ${x.early}`);
+  } else if (cmd === 'incident-expire') {
+    // open cases (Large transfer / Watching) with no report, fund movement or news for INCIDENT_QUIET_HOURS go back to Normal: node src/cli.js incident-expire [--apply]   (dry by default)
+    const { expireQuietCases } = await import('./incident/expire.js');
+    const r = await expireQuietCases({ apply: args.includes('--apply') });
+    console.log(JSON.stringify({ apply: args.includes('--apply'), hours: config.incidents.quietHours, investigations: r.incidents.length, findings: r.detections.length }));
+    for (const x of [...r.incidents.map((i) => ({ ...i, k: 'investigation' })), ...r.detections.map((d) => ({ ...d, k: 'finding' }))]) console.log(`  ${x.k.padEnd(13)} ${String(x.account).slice(0, 40).padEnd(40)} quiet ${x.quiet_h} h`);
   } else if (cmd === 'ontology-export') {
     // the ontology in formats other tools read (docs/ontology-layer-research.md, Stage 0): node src/cli.js ontology-export <nquads|csv|oli|stix|vocabulary|shapes|context> [--out <file>]
     //   nquads and csv carry history (--live: only the facts in force); oli (Open Labels Initiative shape) and stix only what is in force

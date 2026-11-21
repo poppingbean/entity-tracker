@@ -200,7 +200,7 @@ export async function clearIncident(account, { by = 'operator', reason = 'Normal
   await col('incidents').updateOne({ _id: id }, {
     $unset: { confirmed_by: '' },
     $set: { status: 'cleared', cleared, updated_ts: Date.now() },
-    $push: { tags: { $each: [{ tag: 'safe', ts: Date.now(), why: reason, by }], $slice: -10 }, status_history: { $each: [{ ts: Date.now(), status: 'cleared', kind: inc.kind || null, by: 'operator' }], $slice: -30 } }
+    $push: { tags: { $each: [{ tag: 'safe', ts: Date.now(), why: reason, by }], $slice: -10 }, status_history: { $each: [{ ts: Date.now(), status: 'cleared', kind: inc.kind || null, by }], $slice: -30 } }
   });
   await col('firewall_flags').deleteMany({ source: 'incident', incident: id });
   await col('alerts').updateMany({ $or: [{ _id: `incident:${id}` }, { 'data.incident': id }, { 'related.wallets': account, type: { $in: ['drain_suspected', 'incident'] } }], title: { $not: /^(Not a hack|Retracted|Safe)/ } }, [{ $set: { title: { $concat: ['Safe after review: ', '$title'] }, severity: 'info' } }]).catch(() => {});

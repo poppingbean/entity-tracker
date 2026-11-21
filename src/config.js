@@ -116,6 +116,7 @@ export const config = {
   },
   incidents: {
     enabled: process.env.INCIDENTS_ENABLED !== 'false',
+    quietHours: num(process.env.INCIDENT_QUIET_HOURS, 72), // an open case (Large transfer / Watching) with no report, fund movement or news for this long goes back to Normal (0 = never)
     // an account that is only busy (20,000+ transactions) is never called an exchange hot wallet: it needs a sweep to an exchange's cold wallet, a hand entry or a name. false = the old fallback
     // case valuation: USD at the time the money moved (NEAR/USD history, the tracker's own trades, the case's own swaps), today's price as the last resort; false = today's prices only
     priceAtIncident: process.env.PRICE_AT_INCIDENT !== 'false',

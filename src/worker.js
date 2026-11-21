@@ -93,6 +93,11 @@ export async function cycle({ evaluate = true } = {}) {
     runtime.lastDeepReview = Date.now();
     runtime.deepReview = processDeepReview().catch((e) => warn(`deep review: ${e.message}`)).finally(() => { runtime.deepReview = null; });
   }
+  // open cases nobody followed up (no report, fund movement or news for INCIDENT_QUIET_HOURS) go back to Normal, once an hour
+  if (config.incidents.enabled && config.incidents.quietHours > 0 && !runtime.expire && Date.now() - (runtime.lastExpire || 0) > 3600e3) {
+    runtime.lastExpire = Date.now();
+    runtime.expire = import('./incident/expire.js').then((m) => m.expireQuietCases({ apply: true })).catch((e) => warn(`quiet cases: ${e.message}`)).finally(() => { runtime.expire = null; });
+  }
   // money watch: the look back and the AI review of the next watch that is due, on its own lane
   if (config.watch.enabled && !runtime.watchReview && Date.now() - (runtime.lastWatchReview || 0) > config.watch.everyMs) {
     runtime.lastWatchReview = Date.now();
