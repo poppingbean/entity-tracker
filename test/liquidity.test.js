@@ -59,6 +59,13 @@ test('a token made by a factory is filed under the factory, its creator the acco
   assert.equal(tokenDoc('mytoken.near', { by: 'mytoken.near', signer: 'mytoken.near' }, { symbol: 'X' }, { pool: { quote: 'wrap.near' } }).launchpad, 'direct', 'self-deployed');
 });
 
+test("a token a launchpad's own factory deployed is filed under the launchpad's name (its links and filters apply)", () => {
+  const live = { pool: { dex: 'dcl', quote: 'wrap.near' }, status: 'new' };
+  assert.equal(tokenDoc('pcon.nearlytrade.near', { by: 'nearlytrade.near', signer: 'dev.near' }, { symbol: 'PCON' }, live).launchpad, 'nearlytrade');
+  assert.equal(tokenDoc('x.v2-launchpad.justhoot.near', { by: 'v2-launchpad.justhoot.near', signer: 'dev.near' }, { symbol: 'X' }, live).launchpad, 'justhoot');
+  assert.equal(tokenDoc('pcon.nearlytrade.near', { by: 'nearlytrade.near', signer: 'dev.near' }, { symbol: 'PCON' }, live).factory, 'nearlytrade.near', 'the factory stays recorded');
+});
+
 test('poolHit: a Ref v2 "Liquidity added" log is the first pool event of a token history (before any swap)', () => {
   const tx = { failed: false, ts: 5, height: 6, hash: 'H', events: [], calls: [{ method: 'add_liquidity', args: { pool_id: 9005 } }],
     logs: [{ executor: 'v2.ref-finance.near', text: 'Liquidity added ["2500 fuk-3.smithii.near", "40 wrap.near"], minted 1 shares' }] };

@@ -134,3 +134,9 @@ export const adapters = {
     },
   },
 };
+
+/** A launchpad's factory account -> the name tokens are stored under ('nearlytrade.near' -> 'nearlytrade'; both JustHoot factories -> 'justhoot'), null if not a launchpad. */
+export const padOfFactory = (account) => {
+  const hit = Object.entries(adapters).find(([, a]) => a.account === account);
+  return hit ? hit[0].replace(/_v2$/, '') : null;
+};

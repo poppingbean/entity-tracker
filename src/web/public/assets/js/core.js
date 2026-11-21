@@ -44,7 +44,7 @@ let MEME = {};
 const loadMemeIds = () => fetch('/api/meme-ids').then((r) => r.json()).then((j) => { MEME = j.ids || {}; }).catch(() => {});
 const padOf = (id) => (/\.nearlytrade\.near$/.test(id) ? 'nearlytrade' : /\.(v2-)?launchpad\.justhoot\.near$/.test(id) ? 'justhoot' : null);
 const tokUrl = (id, lp) => {
-  lp = lp || padOf(id);
+  lp = padOf(id) || lp; // the account says which launchpad made it, even when the stored value is the factory's account (nearlytrade.near)
   const e = encodeURIComponent(id);
   if (lp === 'nearlytrade') return `https://nearly.trade/${e}`;
   if (lp === 'justhoot') return `https://justhoot.fun/p/${e}`;
