@@ -10,9 +10,10 @@
 //   - it is a fungible token (NEP-141), not an NFT or a multi-token: an `ft-…` ft_metadata spec with integer decimals and a symbol, a
 //     numeric ft_total_supply, no `nft-…` nft_metadata, and not classed nft / multi_token by the contract audit (isFungible).
 // The token's live time is the liquidity block, its creator the account that signed the deploy (the factory's caller), and its
-// `launchpad` the factory that deployed it (smithii.near …) or 'direct'. From there the usual pipeline runs: trades, early wallets, groups,
+// `launchpad` the factory that deployed it (smithii.near …; a launchpad's own factory gives the launchpad's name, nearlytrade.near -> nearlytrade) or 'direct'. From there the usual pipeline runs: trades, early wallets, groups,
 // the scanner's first check. The ontology learns its `created_by` edge at once (writer `tokens`).
 import { col } from '../db.js';
+import { padOfFactory } from '../launchpads.js';
 import { config } from '../config.js';
 import { info, warn } from '../log.js';
 import { view } from '../near/rpc.js';
@@ -156,9 +157,10 @@ export function creatorOf(id, dep = {}, a = {}) {
 /** The tokens document for a token found from its deploy (same shape as a launchpad launch, collect/launches.js). Pure. */
 export function tokenDoc(id, dep, md, live, a = {}) {
   // a factory deploys the token into its own sub-account on behalf of the signer (smithii.near, tkn.near …); a self-deployed token is 'direct'
+  // a launchpad's own factory (nearlytrade.near …) files the token under the launchpad's name, so its links, filters and timing apply
   const factory = dep.by && dep.by !== id && id.endsWith(`.${dep.by}`) ? dep.by : null;
   return {
-    launchpad: factory || 'direct', source: 'deploy', factory, creator: creatorOf(id, dep, a), symbol: md?.symbol || null, name: md?.name || null, meme_id: null,
+    launchpad: padOfFactory(factory) || factory || 'direct', source: 'deploy', factory, creator: creatorOf(id, dep, a), symbol: md?.symbol || null, name: md?.name || null, meme_id: null,
     dev_buy_near: null, dev_buy_quote_raw: null, lp: { owner: a.provider || null, locked: null }, tax: null, created_ts: Date.now(),
     deploy: { ts: dep.ts, height: dep.height, kind: dep.kind, by: dep.by, signer: dep.signer },
     sync_height: null, sync_ts: null, trades_n: 0, live_on_first_trade: false,
