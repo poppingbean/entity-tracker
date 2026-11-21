@@ -109,3 +109,37 @@ export async function verifyDue(col, wallets) {
   if (due.length) await (await import('./writers.js')).syncFacts(['deposit_addresses'], { scope: { deposit_addresses: { ids: due.map((d) => d._id) } } });
   return { verified: due.length, passed };
 }
+
+/**
+ * The past, which the block watcher never saw (`node src/cli.js deposit-backfill [--apply]`): candidates are the implicit accounts that two or more early wallets paid
+ * (grouping links them today) and the outside accounts that paid a proven exchange hot wallet in its latest `perWallet` transactions. Each is checked against its own
+ * history. dry (the default): nothing is written, the counts are returned. apply: the verdicts go to `deposit_candidates` and the writer runs for those accounts.
+ */
+export async function backfillDeposits({ apply = false, perWallet = 300, log = () => {} } = {}) {
+  const { col } = await import('../db.js'), { exchangeWalletMap } = await import('../incident/exchanges.js');
+  const { accountTxHashes, fetchTxs } = await import('../incident/trace.js'), { flowsOfTx } = await import('../incident/flows.js');
+  const wallets = await exchangeWalletMap();
+  const cands = new Map(); // account -> how found
+  for (const w of await col('wallets').find({ is_early: true, profiled: true }, { projection: { flow_out: 1 } }).toArray()) for (const f of w.flow_out || []) if (isImplicit(f.to) && f.to !== w._id) { const c = cands.get(f.to) || { early: new Set(), sweeps: 0 }; c.early.add(w._id); cands.set(f.to, c); }
+  for (const [a, c] of [...cands]) if (c.early.size < 2) cands.delete(a);
+  log(`implicit accounts paid by two or more early wallets: ${cands.size}`);
+  for (const [id, w] of wallets) {
+    if (w.kind !== 'hot' || !w.exchange) continue;
+    const { hashes } = await accountTxHashes(id, { limit: perWallet }).catch(() => ({ hashes: [] }));
+    for (const s of sweepsInto((await fetchTxs(hashes).catch(() => [])).flatMap(flowsOfTx), wallets)) { const c = cands.get(s.account) || { early: new Set(), sweeps: 0 }; c.sweeps++; cands.set(s.account, c); }
+  }
+  log(`candidates in all (with the recent senders into ${[...wallets.values()].filter((w) => w.kind === 'hot' && w.exchange).length} proven hot wallets): ${cands.size}`);
+  const out = { candidates: cands.size, one: [], shared: [], failed: 0, unreadable: 0 };
+  let k = 0; const ids = [...cands.keys()], docs = [];
+  await Promise.all(Array.from({ length: 3 }, async () => { while (k < ids.length) { const a = ids[k++]; const j = await verifyAccount(a, wallets);
+    if (j.error) { out.unreadable++; continue; }
+    if (!j.ok) { out.failed++; continue; }
+    (depositKind(j.depositors).one ? out.one : out.shared).push({ account: a, exchange: j.exchange, depositors: j.depositors, early: cands.get(a).early.size });
+    docs.push({ _id: a, exchange: j.exchange, hot: j.hots[0], sweeps: Math.max(cands.get(a).sweeps, DEPOSIT.minSweeps), verified: true, judged: { ...j, ts: Date.now(), via: 'backfill' }, first_ts: Date.now(), last_ts: Date.now() }); } }));
+  log(`verified: ${out.one.length} one-customer addresses, ${out.shared.length} shared collection accounts, ${out.failed} do not pass, ${out.unreadable} unreadable`);
+  if (!apply || !docs.length) return { ...out, written: 0 };
+  await col('deposit_candidates').bulkWrite(docs.map((d) => ({ updateOne: { filter: { _id: d._id }, update: { $set: { exchange: d.exchange, hot: d.hot, verified: true, judged: d.judged }, $max: { sweeps: d.sweeps }, $setOnInsert: { first_ts: d.first_ts, last_ts: d.last_ts } }, upsert: true } })), { ordered: false });
+  const { runWriters } = await import('./backfill.js');
+  const r = await runWriters(['deposit_addresses'], { scope: { deposit_addresses: { ids: docs.map((d) => d._id) } } });
+  return { ...out, written: r.written };
+}

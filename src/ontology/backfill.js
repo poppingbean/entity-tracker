@@ -5,6 +5,7 @@
 //   node src/cli.js ontology-backfill [--dry]      node src/cli.js ontology-parity
 import { col, bulkReplace } from '../db.js';
 import { info } from '../log.js';
+import { config } from '../config.js';
 import { fromAuditRole } from './classes.js';
 import { assert, retire, invalid, factDoc, factId, clearCache } from './index.js';
 import { virtualFacts } from './known.js';
@@ -163,8 +164,8 @@ export const WRITERS = {
     for await (const d of col('deposit_candidates').find({ verified: true, ...(ids ? { _id: { $in: ids } } : {}) })) {
       const j = d.judged || {}, { one, confidence: conf } = depositKind(j.depositors);
       const ev = `${j.out_n} sends of ${j.out_near} NEAR, all to wallets of one exchange (the registry names it ${d.exchange} from an account name only); ${j.in_n} deposits of ${j.in_near} NEAR from ${j.depositors ?? '?'} account${j.depositors === 1 ? '' : 's'} (median ${j.median_deposit_near ?? '?'} NEAR), passed on whole${one ? '' : '; many depositors: a shared collection account, not one user\'s'}`;
-      out.push({ subject: d._id, predicate: 'is_a', object: one ? 'exchange/deposit_address' : 'exchange', source: 'behaviour', confidence: conf, evidence: ev },
-        { subject: d._id, predicate: 'label', object: one ? 'CEX user wallet' : 'Unidentified exchange wallet', source: 'behaviour', confidence: conf, evidence: ev },
+      if (!one || config.ontology.depositClassLive) out.push({ subject: d._id, predicate: 'is_a', object: one ? 'exchange/deposit_address' : 'exchange', source: 'behaviour', confidence: conf, evidence: ev });
+      out.push({ subject: d._id, predicate: 'label', object: one ? 'CEX user wallet' : 'Unidentified exchange wallet', source: 'behaviour', confidence: conf, evidence: ev },
         { subject: d._id, predicate: 'swept_to', object: d.hot, source: 'behaviour', confidence: 0.8, evidence: ev });
     }
     return out;

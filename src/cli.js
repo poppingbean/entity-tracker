@@ -494,6 +494,13 @@ try {
   } else if (cmd === 'ontology-gate') {
     const g = await ontologyGate();
     console.log(args.includes('--json') ? JSON.stringify(g, null, 1) : gateText(g));
+  } else if (cmd === 'deposit-backfill') {
+    // exchange deposit addresses from the past (docs/linking-findings.md): node src/cli.js deposit-backfill [--apply]   (dry by default: counts only)
+    //   before the deploy that teaches grouping that one customer's address keeps its links, run it with DEPOSIT_CLASS_LIVE=false
+    const { backfillDeposits } = await import('./ontology/deposits.js');
+    const r = await backfillDeposits({ apply: args.includes('--apply'), log: (m) => console.log(m) });
+    console.log(JSON.stringify({ apply: args.includes('--apply'), class_live: config.ontology.depositClassLive, one: r.one.length, shared: r.shared.length, failed: r.failed, unreadable: r.unreadable, facts_written: r.written }));
+    for (const x of [...r.one, ...r.shared].slice(0, 30)) console.log(`  ${x.account.slice(0, 20)} ${x.exchange} depositors ${x.depositors} early wallets ${x.early}`);
   } else if (cmd === 'ontology-export') {
     // the ontology in formats other tools read (docs/ontology-layer-research.md, Stage 0): node src/cli.js ontology-export <nquads|csv|oli|stix|vocabulary|shapes|context> [--out <file>]
     //   nquads and csv carry history (--live: only the facts in force); oli (Open Labels Initiative shape) and stix only what is in force
