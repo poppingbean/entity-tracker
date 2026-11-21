@@ -163,6 +163,15 @@ test('G2 parity: nothing missing or stale, except a small lag for the throttled 
   assert.match(parityProblems({ writers: { audits: w(10, 0, 0, 10) } })[0], /old backfill/);          // the first run after deploy
 });
 
+test('G2 is reported by a worker whose backfill is off, and G3 waits for it', async () => {
+  const { stepsOf } = await import('../src/ontology/shadow.js');
+  const { STEPS } = await import('../src/ontology/gate.js');
+  assert.ok(stepsOf('worker', 0).includes('G2'));
+  assert.ok(!stepsOf('worker', 24).includes('G2'));
+  assert.ok(!stepsOf('web', 0).includes('G2'));   // the web process never runs the backfill
+  assert.ok(STEPS.G3.needs.includes('G2'));
+});
+
 test('direct writers are named for the writer, and a legacy fact maps onto the same id', async () => {
   const { writerBy } = await import('../src/ontology/backfill.js');
   assert.equal(writerBy('audits'), 'writer/audits');
