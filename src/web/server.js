@@ -35,6 +35,7 @@ import { parseInvestigation, startInvestigation, investigationJob, confirmIncide
 import { report } from '../incident/signals.js';
 import { walletView } from '../near/walletview.js';
 import { entityView } from '../ontology/index.js';
+import { graph3d } from '../ontology/graph3d.js';
 import { parseChainId } from '../ontology/chains.js';
 import { normalizeId } from '../ontology/caip.js';
 import { NS } from '../ontology/vocab.js';
@@ -58,7 +59,7 @@ function asset(pathname) {
 // Google Search Console ownership file for app.safe-near.org, served as is at /<name>.html (before the password check, so Google can read it).
 const SITE_VERIFY = { '/google65675d2fcb9ab898.html': fs.readFileSync(new URL('./google65675d2fcb9ab898.html', import.meta.url), 'utf8') };
 // pages of the single-page UI; each is served the same HTML and the browser routes with the History API (no # in URLs)
-const UI_VIEWS = new Set(['incidents', 'firewall', 'accuracy', 'moneywatch', 'alerts', 'nfts', 'taggroups', 'analysis', 'creators', 'explore', 'audit', 'monitor', 'sim', 'scans', 'overview', 'signals', 'groups', 'entities', 'wallets', 'tokens', 'logs', 'config']);
+const UI_VIEWS = new Set(['incidents', 'firewall', 'accuracy', 'moneywatch', 'alerts', 'nfts', 'taggroups', 'analysis', 'creators', 'explore', 'audit', 'monitor', 'sim', 'scans', 'overview', 'signals', 'groups', 'entities', 'wallets', 'tokens', 'logs', 'config', 'graph']);
 const HIDDEN_PUBLIC = new Set(['/api/logs', '/api/config']);
 const auditHits = new Map(); // ip -> [timestamps]
 const analysisHits = new Map(), aiHits = new Map();
@@ -457,6 +458,16 @@ const routes = {
       nodes: ids.map((id) => ({ id, member: members.has(id), kind: imap.get(id)?.kind || null, tx_count: imap.get(id)?.tx_count ?? null, tokens_n: imap.get(id)?.stats?.tokens_n ?? null })),
       edges: keep.filter((e) => used.has(e.from) && used.has(e.to)).map((e) => ({ from: e.from, to: e.to, type: e.type, near: e.near, n: e.n ?? null })),
     };
+  },
+
+  /** The ontology's network around an account, a wallet group (grp:… or a group id) or a case (inc:…), for the 3D graph page. Read-only. */
+  '/api/graph3d': async (u) => {
+    let id = String(u.searchParams.get('id') || '').trim();
+    if (/^c_[\w-]+$/.test(id)) id = 'grp:' + id; // a group page's id
+    const ok = /^(grp|inc):[\w.:@-]{1,200}$/.test(id) || validNearAddress(id.toLowerCase()) || parseChainId(id.toLowerCase());
+    if (!ok) return { error: 'id must be a NEAR account, grp:<group> or inc:<case>' };
+    if (!/^(grp|inc):/.test(id)) id = id.toLowerCase();
+    return graph3d(id, { hops: u.searchParams.get('hops'), maxNodes: u.searchParams.get('max') });
   },
 
   '/api/entities': async (u) => {
