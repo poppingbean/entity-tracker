@@ -25,9 +25,10 @@ const TITLES = {
   sim: ['Simulated wallet', 'Paper trading with real pool quotes: equity, open and closed positions'],
   scans: ['Evaluations', 'Every gate check and AI review, with the reasons'], audit: ['Contract audit', 'Any NEAR contract: what it is, the powers its code gives someone over users, who holds them, and every new contract audited automatically'],
   analysis: ['On-chain analysis', 'An investigation of any token: launch, creator, flows, who bought early and the groups behind them, who sold, who holds, risk notes'],
+  graph: ['3D network', "The ontology's links around an account, a wallet group or a case, in 3D"],
   logs: ['Log', 'Worker activity'], config: ['Settings', 'Read-only view of the configuration in use'],
 };
-const DETAIL = { firewall: incidentPage, nfts: nftPage, taggroups: tagGroupPage, creators: creatorPage, tokens: tokenPage, wallets: walletPage, groups: groupPage, entities: entityPage, scans: scanPage, sim: simPage, analysis: analysisPage };
+const DETAIL = { firewall: incidentPage, nfts: nftPage, taggroups: tagGroupPage, creators: creatorPage, tokens: tokenPage, wallets: walletPage, groups: groupPage, entities: entityPage, scans: scanPage, sim: simPage, analysis: analysisPage, graph: graphPage };
 function setUrl(path) { if (location.pathname !== path) history.pushState(null, '', path); }
 /** Link / tab click: change the path without reloading the page. */
 function nav(e, path) {
@@ -45,7 +46,7 @@ function rowNav(e, el) {
 function toggleTheme() { const t = document.documentElement.dataset.theme === 'light' ? 'dark' : 'light'; document.documentElement.dataset.theme = t; try { localStorage.setItem('theme', t); } catch {} }
 let seq = 0;
 async function render() {
-  closeSearch();
+  closeSearch(); g3Stop(); // a 3D view left behind stops drawing
   const seg = location.pathname.split('/').filter(Boolean).map(decodeURIComponent);
   if (seg[0] === 'incidents') { history.replaceState(null, '', '/firewall' + (seg[1] ? '/' + encodeURIComponent(seg.slice(1).join('/')) : location.search)); return render(); } // Hacks is part of Safety Check
   let view = seg[0] === 'overview' ? 'explore' : seg[0] === 'monitor' ? 'tokens' : seg[0]; // the old Monitor page is part of /tokens now
@@ -63,7 +64,7 @@ async function render() {
   $('main').classList.add('loading');
   try {
     const html = detail ? await DETAIL[view](id) : await views[view]();
-    if (my === seq) { $('main').innerHTML = html; if (view === 'audit' && id) runAudit(id); if (view === 'firewall' && !id) { scFromUrl(); liveStart(); } if (view === 'analysis' && id) anaPoll(id); if (view === 'nfts' && id) nftPoll(id); }
+    if (my === seq) { $('main').innerHTML = html; if (view === 'audit' && id) runAudit(id); if (view === 'firewall' && !id) { scFromUrl(); liveStart(); } if (view === 'analysis' && id) anaPoll(id); if (view === 'nfts' && id) nftPoll(id); if (view === 'graph' && id) g3Start(id); }
   } catch (e) { if (my === seq) $('main').innerHTML = `<div class="card err">${esc(e.message)}</div>`; }
   if (my === seq) $('main').classList.remove('loading');
 }
