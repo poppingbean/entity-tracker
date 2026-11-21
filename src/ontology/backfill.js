@@ -5,12 +5,14 @@
 //   node src/cli.js ontology-backfill [--dry]      node src/cli.js ontology-parity
 import { col, bulkReplace } from '../db.js';
 import { info } from '../log.js';
+import { config } from '../config.js';
 import { fromAuditRole } from './classes.js';
 import { assert, retire, invalid, factDoc, factId, clearCache } from './index.js';
 import { virtualFacts } from './known.js';
 import { resolve } from './resolve.js';
 import { intentsSolver } from '../incident/origin.js';
 import { chainFacts } from './chains.js';
+import { depositKind } from './deposits.js';
 import { refreshSnapshot } from './sync.js';
 
 const NO_CODE = '11111111111111111111111111111111';
@@ -137,6 +139,38 @@ export const WRITERS = {
     return out;
   },
 
+  // scope { ids }: only these accounts (the block watcher just saw a known factory create them). A sub-account can only be created by its parent, so who
+  // created it is a chain fact; what it is follows from the factory (creations.js FACTORIES). The audit of its code, when it comes, says more and wins.
+  async account_creations({ ids = null } = {}) {
+    const out = [];
+    for await (const c of col('account_creations').find(ids ? { _id: { $in: ids } } : {})) {
+      const at = `${c.tx ? ` (tx ${c.tx})` : ''}`;
+      out.push({ subject: c._id, predicate: 'is_a', object: c.class, source: 'audit', confidence: 0.85, evidence: `${c.why}${at}` },
+        { subject: c._id, predicate: 'created_by', object: c.creator, source: 'trace', confidence: 0.95, evidence: `created by ${c.creator}${at}` });
+    }
+    return out;
+  },
+
+  // scope { ids }: only these accounts (the block watcher just verified them). An implicit account that receives from outside and passes everything on to one
+  // exchange's wallets, repeatedly, sweeps into an exchange (deposits.js). Behaviour, not a label the exchange gave, and it does NOT say which exchange:
+  // the registry names an exchange from the name of the cold wallet a hot wallet sweeps to, and a name proves nothing. So no `operated_by` is written here;
+  // the `swept_to` edge keeps the fact, and the exchange follows from the hot wallet's own identity when that is proven (a hand label, a published list).
+  //   up to six depositors   a CEX user's deposit address (exchange/deposit_address, 0.7 with one or two, 0.6 with three to six, "CEX user wallet"): the wallets that
+  //                          pay it are that user's, so it does not cut links
+  //   seven or more          a shared collection account of an exchange not yet identified (exchange, 0.5, "Unidentified exchange wallet"): its depositors are
+  //                          different people, so it cuts links like any exchange wallet (deposits.js DEPOSIT.oneCustomerMax, measured)
+  async deposit_addresses({ ids = null } = {}) {
+    const out = [];
+    for await (const d of col('deposit_candidates').find({ verified: true, ...(ids ? { _id: { $in: ids } } : {}) })) {
+      const j = d.judged || {}, { one, confidence: conf } = depositKind(j.depositors);
+      const ev = `${j.out_n} sends of ${j.out_near} NEAR, all to wallets of one exchange (the registry names it ${d.exchange} from an account name only); ${j.in_n} deposits of ${j.in_near} NEAR from ${j.depositors ?? '?'} account${j.depositors === 1 ? '' : 's'} (median ${j.median_deposit_near ?? '?'} NEAR), passed on whole${one ? '' : '; many depositors: a shared collection account, not one user\'s'}`;
+      if (!one || config.ontology.depositClassLive) out.push({ subject: d._id, predicate: 'is_a', object: one ? 'exchange/deposit_address' : 'exchange', source: 'behaviour', confidence: conf, evidence: ev });
+      out.push({ subject: d._id, predicate: 'label', object: one ? 'CEX user wallet' : 'Unidentified exchange wallet', source: 'behaviour', confidence: conf, evidence: ev },
+        { subject: d._id, predicate: 'swept_to', object: d.hot, source: 'behaviour', confidence: 0.8, evidence: ev });
+    }
+    return out;
+  },
+
   async clusters() {
     const out = [];
     for (const c of await col('clusters').find({}, { projection: { members: 1, verdict: 1 } }).toArray()) {
@@ -156,6 +190,8 @@ const SCOPES = {
   incidents: ({ ids }) => ({ $and: [{ $or: [{ object: { $in: ids }, predicate: 'role_in' }, { subject: { $in: ids }, predicate: 'sent_to' }] }] }),
   firewall_flags: ({ ids }) => ({ $and: [{ subject: { $in: ids }, predicate: 'flagged' }] }),
   tokens: ({ ids }) => ({ $and: [{ $or: [{ subject: { $in: ids }, predicate: 'created_by' }, { object: { $in: ids }, predicate: 'deployed' }] }] }),
+  account_creations: ({ ids }) => ({ $and: [{ subject: { $in: ids }, predicate: { $in: ['is_a', 'created_by'] } }] }),
+  deposit_addresses: ({ ids }) => ({ $and: [{ subject: { $in: ids }, predicate: { $in: ['is_a', 'label', 'operated_by', 'swept_to'] } }] }),
 };
 
 // One run of a writer at a time across every process (the worker's daily backfill, a sync in the worker, a hand flag in the web process).

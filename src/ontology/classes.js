@@ -24,9 +24,10 @@ export const isPassClass = (c) => PASS_CLASSES.some((p) => isA(c, p));
 
 /**
  * Sharing this account says nothing about who owns two wallets (an exchange, a service, a contract, the system). Only people link
- * owners; an account nothing is known about is treated like a person, as grouping does today.
+ * owners; an account nothing is known about is treated like a person, as grouping does today. The exception is an exchange deposit address:
+ * the exchange gives each customer their own, so two wallets that pay the same one are that customer's.
  */
-export const cutsLinks = (c) => !['person', 'unknown'].includes(topOf(c));
+export const cutsLinks = (c) => !['person', 'unknown'].includes(topOf(c)) && c !== 'exchange/deposit_address'; // a deposit address is one customer's: two wallets that pay it belong to that customer
 
 /** Audit roles (src/audit/classify.js) onto the tree. */
 export const AUDIT_ROLE = {

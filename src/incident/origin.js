@@ -78,7 +78,9 @@ export async function identify(id) {
 export function fromOntology(o) {
   const org = o.operator ? o.operator.replace(/^org:/, '').split('-').map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ') : null;
   // an exchange that rests only on being busy (a behaviour fact) is not proof: neutral (IDENTIFY_BUSY_NEUTRAL)
-  if (o.top === 'exchange' && o.source === 'behaviour' && config.incidents.identifyBusyNeutral) return { kind: 'wallet', name: BUSY_NAME, how: o.why, busy: true };
+  // a CEX user's deposit address (ontology/deposits.js) is one customer's wallet: money that reaches it reached the exchange through that customer, so it is neither an endpoint nor "busy"
+  if (o.class === 'exchange/deposit_address') return { kind: 'wallet', name: o.label || 'CEX user wallet', how: o.why };
+  if (o.top === 'exchange' && o.source === 'behaviour' && config.incidents.identifyBusyNeutral) return { kind: 'wallet', name: o.label || BUSY_NAME, how: o.why, busy: true };
   if (o.top === 'exchange') {
     const where = o.class === 'exchange/cold_wallet' ? 'cold' : 'hot';
     return { kind: 'exchange', name: `${org || o.label || 'Unnamed exchange'} ${where} wallet`, how: o.why };

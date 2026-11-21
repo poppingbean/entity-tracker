@@ -66,6 +66,17 @@ export const CLASS_WORDS = {
   'contract/dao': 'a DAO', 'contract/multisig': 'a multisig', 'contract/staking': 'a staking contract', 'contract/other': 'a contract', 'system': 'a NEAR system account', 'unknown': 'not classified yet (treated like a person)',
 };
 export const classWords = (c) => CLASS_WORDS[c] || c;
+/**
+ * The name to show when nothing names the account: an exchange wallet whose exchange is not identified is "Unidentified exchange wallet", a deposit address "CEX user wallet"
+ * (with the exchange when it is known). A label fact wins; this is only the fallback.
+ */
+export function displayName(cls, label, operator) {
+  if (label) return label;
+  const org = operator ? String(operator).replace(/^org:/, '') : null;
+  if (cls === 'exchange/deposit_address') return org ? `CEX user wallet (${org})` : 'CEX user wallet';
+  if (cls === 'exchange' || String(cls).startsWith('exchange/')) return org ? `${org} wallet` : 'Unidentified exchange wallet';
+  return null;
+}
 /** An ordinary wallet (true), an account contract or a contract (false), or unknown (null): the class says it only where it is certain. Matches the Open Labels Initiative tag is_eoa. */
 export const isEoa = (c) => (['person/wallet', 'person/app_user'].includes(c) ? true : c === 'person/smart_wallet' || String(c).startsWith('contract') ? false : null);
 
@@ -78,7 +89,7 @@ export async function entityView(account) {
   }));
   return {
     account: id, caip10: caip10(id), did: didPkh(id), id_scope: idScope(id), is_eoa: isEoa(e.class),
-    class: e.class, is: classWords(e.class), label: e.label, operator: e.operator, operator_org: e.operator ? orgInfo(e.operator) : null, why: e.why, source: e.source, confidence: e.confidence,
+    class: e.class, is: classWords(e.class), label: e.label, display_name: displayName(e.class, e.label, e.operator), operator: e.operator, operator_org: e.operator ? orgInfo(e.operator) : null, why: e.why, source: e.source, confidence: e.confidence,
     pass_through: e.pass_through, links_owners: !e.cuts_links, trusted: e.trusted, flagged: e.flagged, cases: e.roles, groups: e.groups,
     overruled: e.conflicts.map((c) => ({ is: classWords(c.object), class: c.object, source: c.source, confidence: c.confidence, evidence: c.evidence })),
     edges,

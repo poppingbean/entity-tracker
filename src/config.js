@@ -104,6 +104,9 @@ export const config = {
   // hacks and scams: live detection of protocol drains (beside the deploy watcher) and the incident tracer
   // the ontology layer (docs/ontology-design.md): shadow mode compares every module's account decisions with it, changing none
   ontology: {
+    // false while production still runs code in which every exchange class cuts wallet links: one customer's deposit address is then written without its
+    // class (label and swept_to only), so it cannot cut the true links it carries; a run after the deploy adds the class (docs/linking-findings.md)
+    depositClassLive: process.env.DEPOSIT_CLASS_LIVE !== 'false',
     shadow: process.env.ONTOLOGY_SHADOW !== 'false',
     heartbeat: process.env.ONTOLOGY_HEARTBEAT !== 'false',
     // which modules decide with the ontology (comma list of pass_through, tracer, grouping, firewall; "none" = all back on their old rules, the rollback)
