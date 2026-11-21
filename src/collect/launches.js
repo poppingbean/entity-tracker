@@ -11,7 +11,7 @@ import { isKnownQuote } from '../near/quotes.js';
 const LOOKBACK_BLOCKS = 300; // re-read a little so a transaction the index listed late is not missed (inserts are idempotent)
 
 export async function saveLaunches(launchpad, txs) {
-  let added = 0;
+  let added = 0; const opened = [];
   for (const tx of txs) {
     if (tx.failed) continue;
     for (const l of adapters[launchpad].parse(tx)) {
@@ -27,9 +27,11 @@ export async function saveLaunches(launchpad, txs) {
         ...(l.trackOnly ? { track_only: true, scan_done: true, scan: { ts: Date.now(), skipped: true, decision: `tracking only (${launchpad}): no gates / AI / simulated buy` } } : {}),
       };
       const r = await col('tokens').updateOne({ _id: l.token }, { $setOnInsert: doc }, { upsert: true });
-      if (r.upsertedCount) { added++; info(`NEW ${launchpad} ${l.symbol || ''} ${l.token}`); }
+      if (r.upsertedCount) { added++; opened.push(l.token); info(`NEW ${launchpad} ${l.symbol || ''} ${l.token}`); }
     }
   }
+  // G1: the ontology learns each new token's creator at once (the parity check found launches saved here without it)
+  if (opened.length) await (await import('../ontology/writers.js')).syncFacts(['tokens'], { scope: { tokens: { ids: opened } } }).catch(() => {});
   return added;
 }
 
