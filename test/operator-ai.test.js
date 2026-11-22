@@ -23,9 +23,15 @@ test('operator mode: a request is written and queued, then its answer is returne
     assert.equal(saved.user, 'evidence');
     fs.mkdirSync(path.join(dir, 'answers'));
     fs.writeFileSync(path.join(dir, 'answers', `${key}.json`), '{"verdict":"normal"}');
-    const r = await chatJSON(req);
-    assert.deepEqual(r.json, { verdict: 'normal' });
-    assert.match(r.model, /operator/);
+    const keepModel = config.ai.operatorModel;
+    try {
+      config.ai.operatorModel = 'operator';
+      const r = await chatJSON(req);
+      assert.deepEqual(r.json, { verdict: 'normal' });
+      assert.equal(r.model, 'operator, for m', 'no model named: the answer says an operator wrote it');
+      config.ai.operatorModel = 'vendor/some-model';
+      assert.equal((await chatJSON(req)).model, 'vendor/some-model', 'a named model is recorded as is');
+    } finally { config.ai.operatorModel = keepModel; }
     fs.writeFileSync(path.join(dir, 'answers', `${key}.json`), 'not json');
     await assert.rejects(chatJSON(req), /not a JSON object/);
   } finally { config.ai.operatorDir = keep; fs.rmSync(dir, { recursive: true, force: true }); }
