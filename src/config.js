@@ -40,6 +40,10 @@ export const config = {
     timeoutMs: num(process.env.NEAR_AI_TIMEOUT_SECONDS, 120) * 1000,
     // token analysis write-ups: Claude Sonnet 5.5 served by NEAR AI (group reviews keep `model`); streamed, so a long answer is not cut at 300 s
     analysisModel: process.env.NEAR_AI_ANALYSIS_MODEL || 'anthropic/claude-sonnet-5-5',
+    // operator mode: every AI request is written to <dir>/requests and answered by a person (or an assistant working for them) in
+    // <dir>/answers; nothing goes to NEAR AI and no daily budget is spent. For one-off CLI runs while NEAR AI is out (cli.js operator-ai)
+    operatorDir: process.env.NEAR_AI_OPERATOR_DIR || '',
+    operatorModel: process.env.NEAR_AI_OPERATOR_MODEL || 'operator',
     analysisTimeoutMs: num(process.env.NEAR_AI_ANALYSIS_TIMEOUT_SECONDS, 600) * 1000,
     maxTokens: num(process.env.NEAR_AI_MAX_TOKENS, 4000),
     analysisMaxTokens: num(process.env.ANALYSIS_MAX_TOKENS, 12000), // the token analyst writes a full report and a post

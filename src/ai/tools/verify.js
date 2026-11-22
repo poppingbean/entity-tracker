@@ -17,7 +17,7 @@ function knownNumbers(p) {
   const out = [];
   JSON.stringify(p).replace(/-?\d+(\.\d+)?/g, (m) => { const x = Math.abs(Number(m)); if (x >= 100) out.push(x); return m; });
   // totals the model may reasonably add up: per-kind exit sums and per-victim sums
-  const exits = p.exits || []; out.push(exits.reduce((s, e) => s + (e.usd || 0), 0));
+  const exits = Array.isArray(p.exits) ? p.exits : []; out.push(exits.reduce((s, e) => s + (e.usd || 0), 0)); // a watch's evidence has a count of exits, not a list
   return out;
 }
 /** Dollar figures in the write-up that match nothing in the evidence (within 6 % or a rounding to thousands). */
@@ -56,7 +56,7 @@ function evidenceNumbers(evidence) {
   const s = JSON.stringify(evidence ?? ''), out = [];
   s.replace(/-?\d+(?:\.\d+)?/g, (m) => { out.push(Math.abs(Number(m))); return m; });
   s.replace(/(\d+(?:\.\d+)?)\s?(k|thousand|m|million|b|billion)\b/gi, (_, n, u) => { out.push(Number(n) * MAG[u.toLowerCase()]); return _; });
-  const exits = (evidence && evidence.exits) || []; if (exits.length) out.push(exits.reduce((a, e) => a + (e.usd || 0), 0));
+  const exits = Array.isArray(evidence?.exits) ? evidence.exits : []; if (exits.length) out.push(exits.reduce((a, e) => a + (e.usd || 0), 0));
   return out;
 }
 const UNIT = /(\d(?:[\d,]*\d)?(?:\.\d+)?)\s?(k|K|thousand|m|M|million|b|B|billion)?\s?(NEAR\b|N\b|%|x\b)/g;

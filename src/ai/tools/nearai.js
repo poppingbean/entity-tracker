@@ -1,8 +1,32 @@
 // NEAR AI Cloud client (OpenAI-compatible chat completions). The AI is the analysis brain; everything it is shown is data the
 // tracker collected on-chain, and everything it returns is validated before use.
+import fs from 'node:fs';
+import path from 'node:path';
+import { createHash } from 'node:crypto';
 import { config } from '../../config.js';
 
-export const aiEnabled = () => config.ai.keys.length > 0;
+export const aiEnabled = () => config.ai.keys.length > 0 || !!config.ai.operatorDir;
+
+/** Thrown in operator mode when a request has no answer yet: it was written to <dir>/requests for the operator. */
+export class QueuedForOperator extends Error { constructor(key) { super(`queued for the operator (${key})`); this.queued = true; this.key = key; } }
+/** The file name of a request: the same prompt always gets the same name, so a second run finds its answer. Pure. */
+export const operatorKey = (system, user) => createHash('sha1').update(`${system}
+---
+${user}`).digest('hex').slice(0, 20);
+/** Operator mode: the answer from <dir>/answers/<key>.json, or the request written to <dir>/requests/<key>.json and QueuedForOperator. */
+function operatorAnswer({ system, user, model, maxTokens }) {
+  const dir = config.ai.operatorDir, key = operatorKey(system, user);
+  const ans = path.join(dir, 'answers', `${key}.json`);
+  if (fs.existsSync(ans)) {
+    const json = extractJson(fs.readFileSync(ans, 'utf8'));
+    if (!json || typeof json !== 'object') throw new Error(`operator answer ${key} is not a JSON object`);
+    const who = config.ai.operatorModel === 'operator' ? 'operator' : `${config.ai.operatorModel} (operator)`;
+    return { json, model: `${who}, for ${model}`, usage: null };
+  }
+  fs.mkdirSync(path.join(dir, 'requests'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'requests', `${key}.json`), JSON.stringify({ key, ts: Date.now(), model, max_tokens: maxTokens, system, user }, null, 1));
+  throw new QueuedForOperator(key);
+}
 
 /**
  * The key pool. NEAR_AI_API_KEY may hold several keys (';' or ','). A key that is out of credits, over its quota or refused (401 / 402 / 403,
@@ -69,6 +93,7 @@ async function readStream(res) {
  * `stream` reads the answer as it is written: for long answers, since Node's fetch gives up when response headers take over 300 s.
  */
 export async function chatJSON({ system, user, model = config.ai.model, maxTokens = config.ai.maxTokens, temperature = 0.2, timeoutMs = config.ai.timeoutMs, attempts = 3, stream = false }) {
+  if (config.ai.operatorDir) return operatorAnswer({ system, user, model, maxTokens });
   if (!aiEnabled()) throw new Error('NEAR_AI_API_KEY is not set');
   let lastErr, unreadable = false, budget = maxTokens, switches = 0;
   const ceiling = Math.min(16000, maxTokens * 4);
