@@ -562,6 +562,31 @@ try {
       info(`ontology-export ${fmt}: ${n} facts`);
     }
     if (oi >= 0) await new Promise((r) => sink.end(r));
+  } else if (cmd === 'org-add' || cmd === 'org-remove' || cmd === 'org-show') {
+    // organisation networks (src/ontology/orgnet.js): the wallets traced to one organisation; a wallet in two networks keeps both
+    //   org-add <org> <account …> --why "…" [--source manual|trace|public_report] [--link <url>] [--name "BitMine"] [--note "…"] [--confidence 0.8] [--file list.txt] [--dry]
+    //   org-remove <org> <account …>          org-show <org> [--suggest] [--chain]
+    const o = await import('./ontology/orgnet.js'), { flushWriters } = await import('./ontology/writers.js');
+    const VAL = new Set(['--why', '--source', '--link', '--name', '--note', '--confidence', '--file']);
+    const opt = (k) => { const i = args.indexOf(`--${k}`); return i > 0 ? args[i + 1] : null; };
+    const accounts = args.slice(1).filter((a, i, all) => !a.startsWith('--') && !VAL.has(all[i - 1])); // all[i - 1]: the option this value belongs to
+    if (opt('file')) accounts.push(...(await import('node:fs')).readFileSync(opt('file'), 'utf8').split(/[\s,]+/).filter(Boolean));
+    if (cmd === 'org-add') console.log(JSON.stringify(await o.addMembers(args[0], accounts, { why: opt('why'), source: opt('source') || 'manual', link: opt('link'), name: opt('name'), note: opt('note'), confidence: opt('confidence'), by: 'operator', dry: args.includes('--dry') })));
+    else if (cmd === 'org-remove') console.log(JSON.stringify(await o.removeMembers(args[0], accounts)));
+    else {
+      const n = await o.showNetwork(args[0]);
+      if (!n) console.log(`no network for ${o.orgId(args[0])}`);
+      else {
+        console.log(`${n.name} (${n.org}) · ${n.members_n} wallets · ${n.overlaps.length} also tied to another organisation${n.note ? ` · ${n.note}` : ''}`);
+        for (const m of n.members) console.log(`  ${m.account.padEnd(44)} ${m.source} ${m.confidence} · ${m.why}${m.also.length ? ` · ALSO ${m.also.map((x) => `${x.name} (${x.source})`).join(', ')}` : ''}`);
+        if (args.includes('--suggest')) {
+          const s = await o.suggestMembers(args[0], { chain: args.includes('--chain') });
+          console.log(`next to the network, not in it (check before adding): ${s.length}`);
+          for (const c of s) console.log(`  ${c.account.padEnd(44)} next to ${c.members.length} member(s) · ${c.via.join('; ')}`);
+        }
+      }
+    }
+    await flushWriters();
   } else if (cmd === 'what-is') {
     const account = normalizeId(args[0]); // a chain address keeps its case, a NEAR account is lower case
     console.log(JSON.stringify({ ...(await whatIs(account)), relations: (await relationsOf(account, { direction: 'both' })).slice(0, 40).map((f) => `${f.subject} ${f.predicate} ${JSON.stringify(f.object)} · ${f.source} ${f.confidence ?? ''} · ${f.evidence || ''}`) }, null, 1));

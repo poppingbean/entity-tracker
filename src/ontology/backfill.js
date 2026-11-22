@@ -171,6 +171,16 @@ export const WRITERS = {
     return out;
   },
 
+  // scope { ids }: only these accounts. Organisation networks (orgnet.js): each wallet an analyst traced to an organisation is `operated_by` it, with its own
+  // evidence and source (by hand, a public report, an investigation). A wallet in two networks gets two facts: the answer lists both (resolve.js `operators`).
+  async org_networks({ ids = null } = {}) {
+    const { memberFact } = await import('./orgnet.js');
+    const names = new Map((await col('org_networks').find({}, { projection: { name: 1 } }).toArray()).map((n) => [n._id, n.name]));
+    const out = [];
+    for await (const m of col('org_members').find(ids ? { account: { $in: ids } } : {})) out.push(memberFact(m, names.get(m.org)));
+    return out;
+  },
+
   async clusters() {
     const out = [];
     for (const c of await col('clusters').find({}, { projection: { members: 1, verdict: 1 } }).toArray()) {
@@ -192,6 +202,7 @@ const SCOPES = {
   tokens: ({ ids }) => ({ $and: [{ $or: [{ subject: { $in: ids }, predicate: 'created_by' }, { object: { $in: ids }, predicate: 'deployed' }] }] }),
   account_creations: ({ ids }) => ({ $and: [{ subject: { $in: ids }, predicate: { $in: ['is_a', 'created_by'] } }] }),
   deposit_addresses: ({ ids }) => ({ $and: [{ subject: { $in: ids }, predicate: { $in: ['is_a', 'label', 'operated_by', 'swept_to'] } }] }),
+  org_networks: ({ ids }) => ({ $and: [{ subject: { $in: ids }, predicate: 'operated_by' }] }),
 };
 
 // One run of a writer at a time across every process (the worker's daily backfill, a sync in the worker, a hand flag in the web process).

@@ -24,7 +24,10 @@ export function resolve(account, facts, now = Date.now()) {
   const conflicts = isa.filter((f) => !compatible(f.object, cls)).map(brief);
 
   const label = best(by('label'));
-  const operator = best(by('operated_by'));
+  // a wallet can be tied to several organisations (one org's network reaches into another's): all of them are kept, strongest first;
+  // `operator` stays the strongest one for the readers that need a single name
+  const ops = by('operated_by').sort(stronger).filter((f, i, a) => a.findIndex((g) => g.object === f.object) === i);
+  const operator = ops[0] || null;
   const flags = by('flagged').sort((a, b) => (SEVERITY[b.object] ?? -1) - (SEVERITY[a.object] ?? -1) || stronger(a, b));
   const roles = by('role_in').map((f) => ({ case: f.object, role: f.role || null, status: f.status || null, source: f.source }));
   const pass = isPassClass(cls) || by('pass_through').some((f) => f.object === true);
@@ -34,6 +37,7 @@ export function resolve(account, facts, now = Date.now()) {
     top: topOf(cls),
     label: label?.object ?? null,
     operator: operator?.object ?? null,
+    operators: ops.map((f) => ({ org: f.object, source: f.source, confidence: f.confidence ?? null, evidence: f.evidence || null })),
     pass_through: pass,
     cuts_links: cutsLinks(cls) || pass,
     trusted: by('trusted').some((f) => f.object === true),

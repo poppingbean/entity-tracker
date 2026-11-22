@@ -114,13 +114,15 @@ const views = {};
 const ontologyOf = (id) => get('/api/ontology', { id }).catch(() => null);
 const ONT_SOURCE = { manual: 'set by hand', public_report: 'a public report', registry: 'the exchange registry', audit: 'the contract audit', trace: 'an investigation', behaviour: 'its transactions', name_pattern: 'its account name' };
 const orgName = (o) => String(o).replace(/^org:/, '').split('-').map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+// every organisation the account is tied to (one org's network can reach into another's), each with where it comes from
+const orgLine = (o) => { const L = (o.operators || []).length ? o.operators : o.operator ? [{ id: o.operator }] : []; const one = (x) => `<span title="${esc([ONT_SOURCE[x.source] || x.source, x.evidence].filter(Boolean).join(': '))}">${esc(x.name || orgName(x.id))}</span>`; return L.length ? ` · operated by ${one(L[0])}${L.length > 1 ? `, also tied to ${L.slice(1).map(one).join(', ')}` : ''}` : ''; };
 function ontologyCard(o) {
   if (!o || o.class === 'unknown' && !(o.edges || []).length) return '';
   const pred = { operated_by: 'operated by', swept_to: 'sweeps to', funded: 'funded', controls: 'controls', solver_for: 'solver for', member_of: 'member of', role_in: 'role in', flagged: 'flagged', pass_through: 'passes money through', trusted: 'trusted dapp' };
   const edges = (o.edges || []).filter((e) => !['flagged', 'pass_through', 'trusted', 'operated_by'].includes(e.predicate)).slice(0, 8);
   const who = (x) => (typeof x === 'string' && /^inc:/.test(x) ? ilink('/firewall/' + encodeURIComponent(x), esc(short(x, 22))) : typeof x === 'string' && !/^(org|grp):/.test(x) ? walLink(x, 26) : /^org:/.test(x) ? esc(orgName(x)) : /^grp:c_/.test(x) ? ilink(P.grp(x.slice(4)), esc(x.slice(4))) : esc(String(x).replace(/^grp:/, '')));
   return `<div class="card"><h2>What Safe Near calls it <span class="muted">ontology</span>${o.account ? ` <span class="small" style="float:right">${ilink('/graph/' + encodeURIComponent(o.account), '3D network →', "the ontology's links around it, in 3D")}</span>` : ''}</h2>
-    <p><b>${esc(o.is)}</b>${o.label ? ` · ${esc(o.label)}` : ''}${o.operator ? ` · operated by ${esc(orgName(o.operator))}` : ''}</p>
+    <p><b>${esc(o.is)}</b>${o.label ? ` · ${esc(o.label)}` : ''}${orgLine(o)}</p>
     ${o.class === 'unknown' ? '' : `<p class="muted small">Why: ${esc(o.why)} <span>(source: ${esc(ONT_SOURCE[o.source] || o.source || '–')})</span>${o.pass_through ? ' · passes money through: money traced through it is not followed further' : ''}${o.links_owners ? '' : ' · sharing it says nothing about who owns two wallets'}</p>`}
     ${(o.overruled || []).length ? `<p class="small">Overruled: ${o.overruled.map((c) => `${esc(c.is)} <span class="muted">(${esc(ONT_SOURCE[c.source] || c.source)}: ${esc(c.evidence || '')})</span>`).join('; ')}</p>` : ''}
     ${edges.length ? `<table><tr><th>Link</th><th>Account</th><th>From</th></tr>${edges.map((e) => { const out = e.from === o.account; return `<tr><td>${out ? '' : '← '}${esc(pred[e.predicate] || e.predicate)}${e.role ? ` (${esc(e.role)})` : ''}</td><td>${who(out ? e.to : e.from)}</td><td class="muted small">${esc(ONT_SOURCE[e.source] || e.source)}${e.evidence ? ' · ' + esc(short(e.evidence, 70)) : ''}</td></tr>`; }).join('')}</table>` : ''}</div>`;

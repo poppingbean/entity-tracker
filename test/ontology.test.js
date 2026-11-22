@@ -229,3 +229,17 @@ test('a case with exits to other chains yields sent_to and cash_out_address fact
   assert.deepEqual([f[1].subject, f[1].predicate, f[1].role, f[1].source], ['eth:0x' + 'c'.repeat(40), 'role_in', 'cash_out_address', 'public_report']);
   for (const x of f) assert.equal(invalid({ ...x, by: 'backfill/incidents' }), null);
 });
+
+test('a wallet tied to several organisations keeps them all, strongest first; one org from two sources counts once', async () => {
+  const { orgsText } = await import('../src/ontology/orgs.js');
+  const w = 'netwallet.near';
+  const f = (org, source, confidence, evidence) => ({ subject: w, predicate: 'operated_by', object: org, source, confidence, evidence, observed_ts: 1 });
+  const r = resolve(w, [f('org:binance', 'behaviour', 0.5, 'sweeps to Binance'), f('org:bitmine', 'trace', 0.8, 'in the BitMine net'), f('org:bitmine', 'behaviour', 0.4, 'paid by BitMine'), f('org:bybit', 'manual', 0.9, 'set by hand')]);
+  assert.deepEqual(r.operators.map((o) => o.org), ['org:bybit', 'org:bitmine', 'org:binance'], 'manual > trace > behaviour');
+  assert.equal(r.operator, 'org:bybit', 'the single name readers use is still the strongest');
+  assert.equal(r.operators[1].evidence, 'in the BitMine net', 'the stronger fact of the same org is the one kept');
+  assert.equal(orgsText(r), 'operated by Bybit; also tied to bitmine, Binance');
+  assert.equal(orgsText({ operator: 'org:okx' }), 'operated by OKX', 'an older answer with one operator still reads');
+  assert.equal(orgsText(resolve('nobody.near', [])), null);
+  assert.deepEqual(resolve('nobody.near', []).operators, []);
+});
