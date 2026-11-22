@@ -161,30 +161,48 @@ try {
     info(`expanded ${k} linked wallets`);
     await evaluateGroups();
   } else if (cmd === 'operator-ai') {
-    // NEAR AI's work answered by an operator (NEAR_AI_OPERATOR_DIR): the first run writes each AI request to <dir>/requests; once the
-    // answers are in <dir>/answers, the same run again checks and saves them through the normal code (grounding, verdict rules, history)
-    //   operator-ai watches [limit]      open watches still waiting for an AI verdict, the ones that moved money last first
-    //   operator-ai audits <sinceISO>    contract audits saved without their AI write-up since then
+    // NEAR AI's work answered by an operator (NEAR_AI_OPERATOR_DIR; scripts/operator-ai-daily.sh runs it daily on this machine): the first run writes each
+    // AI request to <dir>/requests, named after its item; with --answered, the run takes exactly the items whose answers are in <dir>/answers and saves
+    // them through the normal code (grounding, verdict rules, history)
+    //   operator-ai watches [limit]              open watches still waiting for an AI verdict, the ones that moved money last first
+    //   operator-ai audits <sinceISO> [limit]    contract audits saved without their AI write-up since then
+    //   operator-ai groups [limit]               wallet groups whose AI review is missing or out of date (the worker's own choice, reviewPending)
+    //   operator-ai incidents [limit]            open or confirmed cases with no AI report (each is re-investigated, as the worker would)
+    //   … --answered                             only the items answered in <dir>/answers (no limit, no new requests for other items)
     if (!config.ai.operatorDir) throw new Error('set NEAR_AI_OPERATOR_DIR to the folder for the requests and answers');
-    const [what, arg] = args, tally = {};
-    const pool = async (items, n, fn) => { let i = 0; await Promise.all(Array.from({ length: n }, async () => { while (i < items.length) { const x = items[i++]; const r = await fn(x).catch((e) => `error: ${e.message.slice(0, 80)}`); tally[r] = (tally[r] || 0) + 1; } })); };
+    const fs = await import('node:fs'), { operatorSubject } = await import('./ai/tools/nearai.js');
+    const [what] = args, nums = args.slice(1).filter((a) => /^\d+$/.test(a)), tally = {};
+    const limit = (dflt) => (nums.length ? Number(nums[nums.length - 1]) : dflt);
+    const dir = config.ai.operatorDir, KIND = { watches: 'watch', audits: 'audit', groups: 'group', incidents: 'incident' }[what];
+    // the items whose answer is in: from the requests that name an item and have an answer next to them
+    const answered = () => [...new Set(fs.readdirSync(`${dir}/requests`).filter((f) => f.endsWith('.json') && fs.existsSync(`${dir}/answers/${f}`))
+      .map((f) => { try { return JSON.parse(fs.readFileSync(`${dir}/requests/${f}`, 'utf8')).subject; } catch { return null; } }).filter((x) => x?.kind === KIND).map((x) => x.id))];
+    fs.mkdirSync(`${dir}/requests`, { recursive: true });
+    const only = args.includes('--answered') ? answered() : null;
+    const pool = async (items, n, kind, fn) => { let i = 0; await Promise.all(Array.from({ length: n }, async () => { while (i < items.length) { const x = items[i++]; const r = await operatorSubject.run({ kind, id: x._id }, () => fn(x)).catch((e) => `error: ${e.message.slice(0, 80)}`); tally[r] = (tally[r] || 0) + 1; } })); };
     if (what === 'watches') {
       const { reviewWatch } = await import('./watch/review.js');
-      const ws = await col('watches').find({ status: { $in: ['watching', 'suspicious'] }, ai_missing: true }).sort({ last_move_ts: -1 }).limit(Number(arg) || 1000).toArray();
+      const ws = await col('watches').find(only ? { _id: { $in: only } } : { status: { $in: ['watching', 'suspicious'] }, ai_missing: true }).sort({ last_move_ts: -1 }).limit(only ? 0 : limit(1000)).toArray();
       console.log(`${ws.length} watches`);
-      await pool(ws, 4, (w) => reviewWatch(w));
+      await pool(ws, 4, 'watch', (w) => reviewWatch(w));
     } else if (what === 'audits') {
       const { autoAudit } = await import('./audit/auto.js');
-      const since = Date.parse(arg || '');
-      if (!since) throw new Error('operator-ai audits <sinceISO>');
-      const rows = await col('audits').find({ 'auto.ts': { $gt: since }, 'auto.summary': null, 'auto.no_code': { $ne: true } }, { projection: { _id: 1 } }).toArray();
+      const since = Date.parse(args[1] || '');
+      if (!only && !since) throw new Error('operator-ai audits <sinceISO> [limit]');
+      const rows = await col('audits').find(only ? { _id: { $in: only } } : { 'auto.ts': { $gt: since }, 'auto.summary': null, 'auto.no_code': { $ne: true } }, { projection: { _id: 1 } }).sort({ 'auto.ts': -1 }).limit(only ? 0 : limit(100000)).toArray();
       console.log(`${rows.length} audits`);
-      await pool(rows, 2, async (r) => { const a = await autoAudit(r._id, { ai: true }); return a?.auto?.summary ? 'written' : 'waiting for answers'; });
-    } else throw new Error('operator-ai watches [limit] | operator-ai audits <sinceISO>');
-    const fs = await import('node:fs');
-    fs.mkdirSync(`${config.ai.operatorDir}/requests`, { recursive: true });
-    const pending = fs.readdirSync(`${config.ai.operatorDir}/requests`, { withFileTypes: true }).filter((f) => f.isFile() && !fs.existsSync(`${config.ai.operatorDir}/answers/${f.name}`)).length;
-    console.log(JSON.stringify(tally), `· ${pending} requests without an answer in ${config.ai.operatorDir}`);
+      await pool(rows, 2, 'audit', async (r) => { const a = await autoAudit(r._id, { ai: true }); return a?.auto?.summary ? 'written' : 'waiting for answers'; });
+    } else if (what === 'groups') {
+      const { reviewPending } = await import('./evaluate/run.js');
+      tally.reviewed = only ? (only.length ? await reviewPending(only.length, { ids: only }) : 0) : await reviewPending(limit(10)); // reviewPending names each request after its group
+    } else if (what === 'incidents') {
+      const { investigate } = await import('./incident/service.js');
+      const rows = await col('incidents').find(only ? { _id: { $in: only } } : { status: { $in: ['confirmed', 'suspected'] }, ai: null }, { projection: { input: 1, attacker: 1 } }).sort({ first_seen_ts: -1 }).limit(only ? 0 : limit(5)).toArray();
+      console.log(`${rows.length} incidents`);
+      await pool(rows, 1, 'incident', async (r) => { const d = await investigate(r.input?.account || r.input?.tx ? r.input : { account: r.attacker.account }, { review: false, full: true }); return d?.ai ? 'written' : 'waiting for answers'; });
+    } else throw new Error('operator-ai watches [limit] | audits <sinceISO> [limit] | groups [limit] | incidents [limit]  (add --answered to save the answered ones)');
+    const pending = fs.readdirSync(`${dir}/requests`, { withFileTypes: true }).filter((f) => f.isFile() && !fs.existsSync(`${dir}/answers/${f.name}`)).length;
+    console.log(JSON.stringify(tally), `· ${pending} requests without an answer in ${dir}`);
   } else if (cmd === 'audit') {
     const doc = await auditNearContract(args[0], { force: args.includes('--force') });
     if (doc.notFound) { console.log(`${doc.address}: no contract on this account`); }

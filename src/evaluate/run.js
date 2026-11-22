@@ -113,17 +113,18 @@ export async function evaluateGroups() {
 }
 
 /** NEAR AI review of the groups whose numbers changed (or that were never reviewed). */
-export async function reviewPending(limit = 4) {
+export async function reviewPending(limit = 4, { ids = null } = {}) {
   if (!aiEnabled()) return 0;
   const minTokens = config.evaluate.minTokens;
-  const cands = await col('clusters').find({ 'metrics.tokens_n': { $gte: minTokens } }).sort({ size: -1, 'metrics.tokens_n': -1 }).toArray();
+  const cands = await col('clusters').find({ 'metrics.tokens_n': { $gte: minTokens }, ...(ids ? { _id: { $in: ids } } : {}) }).sort({ size: -1, 'metrics.tokens_n': -1 }).toArray();
   const due = cands.filter((c) => !c.ai || c.ai_print !== c.print && Date.now() - (c.ai.ts || 0) > config.evaluate.reviewEveryMs || Date.now() - (c.ai.ts || 0) > 7 * 86400e3).slice(0, limit);
   let n = 0;
   for (const c of due) {
     try {
       const walletDocs = await col('wallets').find({ _id: { $in: c.members.slice(0, 40) } }).toArray();
       walletDocs.sort((a, b) => (b.stats?.total_buy_near || 0) - (a.stats?.total_buy_near || 0));
-      const ai = await reviewCluster(c, walletDocs, c.tokens || []);
+      // operator mode names the request after the group (nearai.js operatorSubject); no effect otherwise
+      const ai = await (await import('../ai/tools/nearai.js')).operatorSubject.run({ kind: 'group', id: c._id }, () => reviewCluster(c, walletDocs, c.tokens || []));
       const fv = finalVerdict(c.rule, ai);
       await col('clusters').updateOne({ _id: c._id }, { $set: { ai, ai_print: c.print, verdict: fv.verdict, verdict_source: fv.source } });
       await col('cluster_history').replaceOne({ _id: `${c._id}|${ai.ts}` }, { _id: `${c._id}|${ai.ts}`, cluster_id: c._id, ts: ai.ts, verdict: fv.verdict, score: c.rule.score, tags: c.rule.tags, ai_verdict: ai.verdict, ai_confidence: ai.confidence, ai_label: ai.label, tokens_n: c.metrics.tokens_n }, { upsert: true });
