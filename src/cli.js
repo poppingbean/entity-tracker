@@ -160,6 +160,31 @@ try {
     let k = 0; for (let i = 0; i < (Number(args[0]) || 5); i++) k += await expandNetworks();
     info(`expanded ${k} linked wallets`);
     await evaluateGroups();
+  } else if (cmd === 'operator-ai') {
+    // NEAR AI's work answered by an operator (NEAR_AI_OPERATOR_DIR): the first run writes each AI request to <dir>/requests; once the
+    // answers are in <dir>/answers, the same run again checks and saves them through the normal code (grounding, verdict rules, history)
+    //   operator-ai watches [limit]      open watches still waiting for an AI verdict, the ones that moved money last first
+    //   operator-ai audits <sinceISO>    contract audits saved without their AI write-up since then
+    if (!config.ai.operatorDir) throw new Error('set NEAR_AI_OPERATOR_DIR to the folder for the requests and answers');
+    const [what, arg] = args, tally = {};
+    const pool = async (items, n, fn) => { let i = 0; await Promise.all(Array.from({ length: n }, async () => { while (i < items.length) { const x = items[i++]; const r = await fn(x).catch((e) => `error: ${e.message.slice(0, 80)}`); tally[r] = (tally[r] || 0) + 1; } })); };
+    if (what === 'watches') {
+      const { reviewWatch } = await import('./watch/review.js');
+      const ws = await col('watches').find({ status: { $in: ['watching', 'suspicious'] }, ai_missing: true }).sort({ last_move_ts: -1 }).limit(Number(arg) || 1000).toArray();
+      console.log(`${ws.length} watches`);
+      await pool(ws, 4, (w) => reviewWatch(w));
+    } else if (what === 'audits') {
+      const { autoAudit } = await import('./audit/auto.js');
+      const since = Date.parse(arg || '');
+      if (!since) throw new Error('operator-ai audits <sinceISO>');
+      const rows = await col('audits').find({ 'auto.ts': { $gt: since }, 'auto.summary': null, 'auto.no_code': { $ne: true } }, { projection: { _id: 1 } }).toArray();
+      console.log(`${rows.length} audits`);
+      await pool(rows, 2, async (r) => { const a = await autoAudit(r._id, { ai: true }); return a?.auto?.summary ? 'written' : 'waiting for answers'; });
+    } else throw new Error('operator-ai watches [limit] | operator-ai audits <sinceISO>');
+    const fs = await import('node:fs');
+    fs.mkdirSync(`${config.ai.operatorDir}/requests`, { recursive: true });
+    const pending = fs.readdirSync(`${config.ai.operatorDir}/requests`, { withFileTypes: true }).filter((f) => f.isFile() && !fs.existsSync(`${config.ai.operatorDir}/answers/${f.name}`)).length;
+    console.log(JSON.stringify(tally), `· ${pending} requests without an answer in ${config.ai.operatorDir}`);
   } else if (cmd === 'audit') {
     const doc = await auditNearContract(args[0], { force: args.includes('--force') });
     if (doc.notFound) { console.log(`${doc.address}: no contract on this account`); }

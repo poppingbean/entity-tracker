@@ -11,6 +11,7 @@ const SCOPES = { audit: () => config.autoAudit.aiDailyBudget, incident: () => co
 
 /** Take one call from today's budget of `scope` (audit or incident); false when it is spent (or the AI is off). */
 export async function aiBudget(scope = 'audit') {
+  if (config.ai.operatorDir) return true; // operator mode answers by hand: no NEAR AI call, nothing to count
   // the contract audits get extra calls a day when the Academy's revenue reserve pays for them (0 when its business is off)
   const extra = scope === 'audit' ? await import('../../academy/business.js').then((m) => m.extraAiCalls()).catch(() => 0) : 0;
   const base = SCOPES[scope]();

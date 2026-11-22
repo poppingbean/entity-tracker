@@ -40,7 +40,7 @@ export async function grounded({ path, evidence, run, pick = (r) => r.json, budg
   if (!res?.json) return res;
   let rep = groundingReport(pick(res), evidence, { allow: ALLOW }), retried = false;
   // the retry is a second model call: on a budgeted path it takes one more call from the same daily budget, and is skipped when that is spent
-  if (!rep.ok && config.ai.groundingRetry && (!budget || await aiBudget(budget).catch(() => false))) {
+  if (!rep.ok && config.ai.groundingRetry && !config.ai.operatorDir && (!budget || await aiBudget(budget).catch(() => false))) {
     retried = true;
     const again = await run(retryNote(rep)).catch(() => null);
     if (again?.json) { const r2 = groundingReport(pick(again), evidence, { allow: ALLOW }); if (r2.ok || r2.accounts.length + r2.amounts.length <= rep.accounts.length + rep.amounts.length) { res = again; rep = r2; } }
