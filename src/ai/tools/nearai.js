@@ -3,6 +3,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { config } from '../../config.js';
 
 export const aiEnabled = () => config.ai.keys.length > 0 || !!config.ai.operatorDir;
@@ -13,18 +14,27 @@ export class QueuedForOperator extends Error { constructor(key) { super(`queued 
 export const operatorKey = (system, user) => createHash('sha1').update(`${system}
 ---
 ${user}`).digest('hex').slice(0, 20);
+/**
+ * The item a command is working on (cli.js operator-ai sets it: { kind, id }). Live evidence changes between two runs (a USD value moves with the
+ * price), so a request about a known item is named after the item and the kind of question (a hash of the system prompt), not the whole prompt.
+ */
+export const operatorSubject = new AsyncLocalStorage();
+const ANSWER_MAX_AGE_MS = 2 * 86400e3; // an item asked again days later (a group's weekly review) gets a new request, not last week's answer
+/** The name of a request about one item. Pure. */
+export const subjectKey = (kind, id, system) => `${String(kind).replace(/[^a-z0-9_-]/gi, '')}-${String(id).replace(/[^a-z0-9._-]/gi, '_').slice(0, 90)}-${createHash('sha1').update(String(system)).digest('hex').slice(0, 6)}`;
 /** Operator mode: the answer from <dir>/answers/<key>.json, or the request written to <dir>/requests/<key>.json and QueuedForOperator. */
 function operatorAnswer({ system, user, model, maxTokens }) {
-  const dir = config.ai.operatorDir, key = operatorKey(system, user);
+  const sub = operatorSubject.getStore();
+  const dir = config.ai.operatorDir, key = sub?.id ? subjectKey(sub.kind, sub.id, system) : operatorKey(system, user);
   const ans = path.join(dir, 'answers', `${key}.json`);
-  if (fs.existsSync(ans)) {
+  if (fs.existsSync(ans) && (!sub?.id || Date.now() - fs.statSync(ans).mtimeMs < ANSWER_MAX_AGE_MS)) {
     const json = extractJson(fs.readFileSync(ans, 'utf8'));
     if (!json || typeof json !== 'object') throw new Error(`operator answer ${key} is not a JSON object`);
-    const who = config.ai.operatorModel === 'operator' ? 'operator' : `${config.ai.operatorModel} (operator)`;
-    return { json, model: `${who}, for ${model}`, usage: null };
+    // NEAR_AI_OPERATOR_MODEL: the model that actually wrote the answer (e.g. anthropic/claude-opus-5-5), recorded as is, like a NEAR AI answer's model
+    return { json, model: config.ai.operatorModel === 'operator' ? `operator, for ${model}` : config.ai.operatorModel, usage: null };
   }
   fs.mkdirSync(path.join(dir, 'requests'), { recursive: true });
-  fs.writeFileSync(path.join(dir, 'requests', `${key}.json`), JSON.stringify({ key, ts: Date.now(), model, max_tokens: maxTokens, system, user }, null, 1));
+  fs.writeFileSync(path.join(dir, 'requests', `${key}.json`), JSON.stringify({ key, ts: Date.now(), ...(sub?.id ? { subject: { kind: sub.kind, id: sub.id } } : {}), model, max_tokens: maxTokens, system, user }, null, 1));
   throw new QueuedForOperator(key);
 }
 
