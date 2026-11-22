@@ -20,7 +20,8 @@ function operatorAnswer({ system, user, model, maxTokens }) {
   if (fs.existsSync(ans)) {
     const json = extractJson(fs.readFileSync(ans, 'utf8'));
     if (!json || typeof json !== 'object') throw new Error(`operator answer ${key} is not a JSON object`);
-    return { json, model: `${config.ai.operatorModel} (operator, for ${model})`, usage: null };
+    const who = config.ai.operatorModel === 'operator' ? 'operator' : `${config.ai.operatorModel} (operator)`;
+    return { json, model: `${who}, for ${model}`, usage: null };
   }
   fs.mkdirSync(path.join(dir, 'requests'), { recursive: true });
   fs.writeFileSync(path.join(dir, 'requests', `${key}.json`), JSON.stringify({ key, ts: Date.now(), model, max_tokens: maxTokens, system, user }, null, 1));
