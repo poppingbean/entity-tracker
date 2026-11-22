@@ -309,7 +309,7 @@ function destKind(id) {
   if (reads('tracer')) {
     const c = classOf(id);
     // a named exchange (registry sweeps, hand labels, its name) is where money is cashed out; an account only known as busy is followed
-    if (c.top === 'exchange' && c.operator) return `exchange (${c.label || c.operator.replace(/^org:/, '')})`;
+    if (c.top === 'exchange' && c.operator) return `exchange (${c.label || c.operator.replace(/^org:/, '')}${(c.orgs || []).length > 1 ? `; also tied to ${c.orgs.slice(1).map((o) => o.replace(/^org:/, '')).join(', ')}` : ''})`;
     if (c.class === 'service/bridge') return 'bridge';
     if (c.class === 'service/intents_solver') return 'NEAR Intents solver';
   }

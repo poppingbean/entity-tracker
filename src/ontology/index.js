@@ -89,7 +89,9 @@ export async function entityView(account) {
   }));
   return {
     account: id, caip10: caip10(id), did: didPkh(id), id_scope: idScope(id), is_eoa: isEoa(e.class),
-    class: e.class, is: classWords(e.class), label: e.label, display_name: displayName(e.class, e.label, e.operator), operator: e.operator, operator_org: e.operator ? orgInfo(e.operator) : null, why: e.why, source: e.source, confidence: e.confidence,
+    class: e.class, is: classWords(e.class), label: e.label, display_name: displayName(e.class, e.label, e.operator), operator: e.operator, operator_org: e.operator ? orgInfo(e.operator) : null,
+    // every organisation the account is tied to, strongest first (one org's network can reach into another's: none is dropped)
+    operators: (e.operators || []).map((o) => ({ ...orgInfo(o.org), source: o.source, confidence: o.confidence, evidence: o.evidence })), why: e.why, source: e.source, confidence: e.confidence,
     pass_through: e.pass_through, links_owners: !e.cuts_links, trusted: e.trusted, flagged: e.flagged, cases: e.roles, groups: e.groups,
     overruled: e.conflicts.map((c) => ({ is: classWords(c.object), class: c.object, source: c.source, confidence: c.confidence, evidence: c.evidence })),
     edges,

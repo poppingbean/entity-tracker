@@ -358,3 +358,9 @@ The layer should learn accounts as the chain acts, not only when a module happen
 - **Effect on the tracer:** a behaviour-sourced `exchange` is read as a neutral wallet by the tracer (WP-08), so a shared collection account does not make a case say "cashed out at Bybit" by itself. That is the conservative side.
 
 Not done: an `exchange/deposit_address` for exchanges whose sweeps go to wallets the registry does not hold (Coinbase), the Binance deposit route into its cold wallet, and re-judging a rejected candidate when it gains many more sweeps.
+
+## 11. Organisation networks (2026-11-22)
+
+An analyst tracing one organisation's wallets (BitMine's, a fund's, an exchange's) records them as a network: `node src/cli.js org-add <org> <account …> --why "…" [--source manual|trace|public_report] [--link <url>] [--name "…"]`. Each wallet is one record in `org_members` (organisation, wallet, why, source, confidence, who, when), never "the" organisation of the wallet. The writer `org_networks` turns each record into an `operated_by` fact with its own evidence, so a wallet traced into two networks carries both, next to whatever the exchange registry or a hand label says.
+
+The answer keeps them all: `operators` lists every organisation, strongest first (source rank, then confidence), each with its source and evidence; `operator` is still the strongest one, for readers that need a single name. Pages say "operated by A, also tied to B, C"; `/api/v1/entity` returns `operators`; `/api/v1/org?id=<org>` returns a network with the members also tied to another organisation (the overlaps). `org-remove` closes a member's fact, not the others. `org-show <org> --suggest [--chain]` lists wallets next to the network that are not in it (owner edges in the ontology; with `--chain`, NEAR accounts that moved money with a member repeatedly), for an analyst to check: nothing is added on its own.

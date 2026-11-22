@@ -5,6 +5,7 @@
 import { config } from '../config.js';
 import { metaGet, metaSet } from '../db.js';
 import { warn } from '../log.js';
+import { orgsText } from '../ontology/orgs.js';
 import { resolveTarget, findWatched, setWatch, getWatchlist, alertsFor, setGatePass, KINDS, MAX_ITEMS } from './watch.js';
 import { sendTelegram, sendTelegramDocument, alertMessage, tg } from './deliver.js';
 import { findIncident, incidentMessage, evidenceFile, latestMessage } from '../incident/botinfo.js';
@@ -54,7 +55,7 @@ export function safeMessage(q, r) {
 
 /** What Safe Near calls an account, for a chat. */
 export function whatIsMessage(r) {
-  const extra = [r.operator && `operated by ${String(r.operator).replace(/^org:/, '')}`, r.pass_through && 'passes money through (an endpoint, not an owner)',
+  const extra = [orgsText(r), r.pass_through && 'passes money through (an endpoint, not an owner)',
     r.flagged && `flagged ${r.flagged.severity}${r.flagged.reason ? `: ${r.flagged.reason}` : ''}`, ...(r.cases || []).slice(0, 3).map((c) => `${String(c.role || 'involved').replace(/_/g, ' ')} in ${c.case}`)].filter(Boolean);
   const url = site(`/wallets/${encodeURIComponent(r.account)}`);
   return [`<code>${esc(r.account)}</code> is <b>${esc(r.is || 'unknown')}</b>${r.label ? ` (${esc(r.label)})` : ''}`, r.why ? `Why: ${esc(String(r.why).slice(0, 500))}` : null,

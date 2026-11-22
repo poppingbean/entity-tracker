@@ -18,9 +18,12 @@ export async function refreshSnapshot({ force = false } = {}) {
   if (!force && Date.now() - loadedTs < 10 * 60e3) return snap.size;
   loading = (async () => {
     try {
-      const rows = await col('ontology_entities').find({}, { projection: { class: 1, top: 1, pass_through: 1, cuts_links: 1, why: 1, label: 1, operator: 1, source: 1, confidence: 1, trusted: 1 } }).toArray();
-      snap = new Map(rows.map((r) => [r._id, { class: r.class, top: r.top, pass_through: !!r.pass_through, cuts_links: !!r.cuts_links, why: r.why, label: r.label || null, operator: r.operator || null, source: r.source || null, confidence: r.confidence ?? 0, trusted: !!r.trusted }]));
+      const rows = await col('ontology_entities').find({}, { projection: { class: 1, top: 1, pass_through: 1, cuts_links: 1, why: 1, label: 1, operator: 1, operators: 1, source: 1, confidence: 1, trusted: 1 } }).toArray();
+      snap = new Map(rows.map((r) => [r._id, { class: r.class, top: r.top, pass_through: !!r.pass_through, cuts_links: !!r.cuts_links, why: r.why, label: r.label || null, operator: r.operator || null, orgs: (r.operators || []).map((o) => o.org), source: r.source || null, confidence: r.confidence ?? 0, trusted: !!r.trusted }]));
       memo.clear(); loadedTs = Date.now();
+      // the names of the organisation networks analysts recorded (orgnet.js), for every answer that names an organisation
+      const nets = await col('org_networks').find({}, { projection: { name: 1 } }).toArray().catch(() => []);
+      (await import('./orgs.js')).setOrgNames(nets.map((n) => [n._id, n.name]));
     } catch { /* keep the last snapshot */ }
     return snap.size;
   })().finally(() => { loading = null; });
@@ -28,7 +31,7 @@ export async function refreshSnapshot({ force = false } = {}) {
 }
 export const snapshotSize = () => snap.size;
 
-/** The resolved answer for an account, synchronously: { class, top, pass_through, cuts_links, why, label, operator }. */
+/** The resolved answer for an account, synchronously: { class, top, pass_through, cuts_links, why, label, operator, orgs } (orgs: every organisation it is tied to, strongest first). */
 export function classOf(id) {
   const a = String(id || '');
   const s = snap.get(a);
@@ -36,7 +39,7 @@ export function classOf(id) {
   let m = memo.get(a);
   if (!m) {
     const r = resolve(a, virtualFacts(a));
-    m = { class: r.class, top: r.top, pass_through: r.pass_through, cuts_links: r.cuts_links, why: r.why, label: r.label, operator: r.operator, source: r.source, confidence: r.confidence, trusted: r.trusted };
+    m = { class: r.class, top: r.top, pass_through: r.pass_through, cuts_links: r.cuts_links, why: r.why, label: r.label, operator: r.operator, orgs: r.operators.map((o) => o.org), source: r.source, confidence: r.confidence, trusted: r.trusted };
     memo.set(a, m); if (memo.size > 20000) memo.delete(memo.keys().next().value);
   }
   return m;

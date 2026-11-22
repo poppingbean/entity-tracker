@@ -175,7 +175,7 @@ const fwHits = new Map();
 const clientIp = (req) => String(req.headers['x-forwarded-for'] || '').split(',')[0].trim() || req.socket.remoteAddress || 'ip';
 const CORS = { 'access-control-allow-origin': '*', 'access-control-allow-methods': 'GET, POST, OPTIONS', 'access-control-allow-headers': 'content-type, x-api-key', 'access-control-max-age': '86400' };
 const FW_DOC = { name: 'Safe Near transaction firewall', version: FIREWALL_VERSION, docs: 'https://github.com/poppingbean/entity-tracker/blob/main/docs/tx-firewall.md',
-  endpoints: { 'POST /api/v1/tx/check': 'check transactions before they are signed', 'GET /api/v1/account?id=<account>': 'reputation of one account', 'GET /api/v1/contract?id=<account>': 'the automated audit of a contract', 'GET /api/v1/inspect?q=<wallet | contract | tx hash | link>': 'is it safe? one answer for whatever is pasted', 'GET /api/v1/incidents': 'traced hacks and scams', 'GET /api/v1/flags?since=<ms>&min=high': 'the blocklist: every flagged account (sync with since)', 'GET /api/v1/flags/check?ids=a,b': 'are these accounts flagged?', 'GET /api/v1/incident?id=<id>': 'one incident: attacker accounts, target, losses, victims, money trail', 'GET /api/v1/entity?id=<account>': 'what Safe Near calls an account (exchange, solver, router, person …), why, what it overruled, and its edges in the knowledge graph' } };
+  endpoints: { 'POST /api/v1/tx/check': 'check transactions before they are signed', 'GET /api/v1/account?id=<account>': 'reputation of one account', 'GET /api/v1/contract?id=<account>': 'the automated audit of a contract', 'GET /api/v1/inspect?q=<wallet | contract | tx hash | link>': 'is it safe? one answer for whatever is pasted', 'GET /api/v1/incidents': 'traced hacks and scams', 'GET /api/v1/flags?since=<ms>&min=high': 'the blocklist: every flagged account (sync with since)', 'GET /api/v1/flags/check?ids=a,b': 'are these accounts flagged?', 'GET /api/v1/incident?id=<id>': 'one incident: attacker accounts, target, losses, victims, money trail', 'GET /api/v1/entity?id=<account>': 'what Safe Near calls an account (exchange, solver, router, person …), why, what it overruled, and its edges in the knowledge graph', 'GET /api/v1/org?id=<organisation>': 'the wallets traced to an organisation, with the evidence, and those also tied to another organisation' } };
 async function firewallApi(req, res, u) {
   const send = (code, body) => res.writeHead(code, { 'content-type': 'application/json', 'cache-control': 'no-store', ...CORS }).end(JSON.stringify(body, noModel));
   if (req.method === 'OPTIONS') { res.writeHead(204, CORS).end(); return; }
@@ -228,6 +228,14 @@ async function firewallApi(req, res, u) {
     const view = await entityView(id), base = config.alerts.siteUrl || '';
     // linked data: the same answer with a JSON-LD context (the account's did:pkh is its @id, its class its @type); readers that ignore these keys see no change
     send(200, { '@context': `${base}/api/v1/ontology/context.jsonld`, '@id': view.did || undefined, '@type': `${NS}class/${view.class}`, ...view }); return;
+  }
+  // an organisation's network: the wallets traced to it, with the evidence, and the ones also tied to another organisation
+  if (u.pathname === '/api/v1/org' && req.method === 'GET') {
+    const { showNetwork, orgId } = await import('../ontology/orgnet.js');
+    const id = orgId(u.searchParams.get('id'));
+    if (!id) { send(400, { error: 'id must name an organisation, e.g. bitmine or org:bitmine' }); return; }
+    const n = await showNetwork(id);
+    send(n ? 200 : 404, n || { error: `no network recorded for ${id}` }); return;
   }
   // the ontology as published vocabularies (generated from the code): the class tree (SKOS/OWL), the SHACL shapes of a fact, the JSON-LD context of the entity answer
   if (req.method === 'GET' && /^\/api\/v1\/ontology\/(vocabulary\.ttl|shapes\.ttl|context\.jsonld)$/.test(u.pathname)) {

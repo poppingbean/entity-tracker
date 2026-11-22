@@ -3,6 +3,7 @@
 // never holds a key and never signs; it refuses any input that carries a private key or a seed phrase.
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
+import { orgsText } from '../ontology/orgs.js';
 import { transactionsOf, policyViolations, decide, scopedKeyPlan, findSecret, DANGEROUS_ACTIONS } from './policy.js';
 
 export const AGENT_GUARD_VERSION = '1.2.0';
@@ -114,7 +115,7 @@ export function createAgentGuard(api) {
     annotations: READ_ONLY,
   }, guarded(async ({ account }) => {
     const r = await api.whatIs(account.trim().toLowerCase());
-    const extra = [r.operator && `operated by ${r.operator.replace(/^org:/, '')}`, r.pass_through && 'passes money through (an endpoint, not an owner)', r.flagged && `flagged ${r.flagged.severity}: ${r.flagged.reason || ''}`,
+    const extra = [orgsText(r), r.pass_through && 'passes money through (an endpoint, not an owner)', r.flagged && `flagged ${r.flagged.severity}: ${r.flagged.reason || ''}`,
       ...(r.cases || []).map((c) => `${c.role || 'involved'} in ${c.case} (${c.status || 'case'})`), ...(r.overruled || []).map((o) => `overruled: ${o.is} (${o.source}: ${o.evidence || ''})`)].filter(Boolean);
     return reply(`${r.account} is ${r.is}${r.label ? ` (${r.label})` : ''}. Why: ${r.why}${extra.length ? `\n${lines(extra)}` : ''}`, r);
   }));

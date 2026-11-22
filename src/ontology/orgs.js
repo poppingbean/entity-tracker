@@ -14,7 +14,19 @@ export const ORGS = {
   'org:htx': { name: 'HTX (Huobi)', wikidata: 'Q19892740' },
   'org:near-intents': { name: 'NEAR Intents', wikidata: null },
 };
+// names given to the organisation networks analysts record (org_networks), loaded with the ontology snapshot
+const NAMES = new Map();
+export const setOrgNames = (pairs) => { NAMES.clear(); for (const [id, name] of pairs) if (name) NAMES.set(id, name); };
 export const orgInfo = (id) => {
   const o = ORGS[id];
-  return { id, name: o?.name || String(id).replace(/^org:/, ''), same_as: o?.wikidata ? `https://www.wikidata.org/entity/${o.wikidata}` : null };
+  return { id, name: o?.name || NAMES.get(id) || String(id).replace(/^org:/, ''), same_as: o?.wikidata ? `https://www.wikidata.org/entity/${o.wikidata}` : null };
 };
+
+/** Every organisation an answer ties the account to, in words: "operated by bitmine; also tied to binance, bybit". null when none. */
+export function orgsText(r) {
+  const list = (r?.operators || []).map((o) => o.org || o.id).filter(Boolean);
+  const all = list.length ? list : r?.operator ? [r.operator] : [];
+  if (!all.length) return null;
+  const n = (o) => orgInfo(o).name;
+  return `operated by ${n(all[0])}${all.length > 1 ? `; also tied to ${all.slice(1).map(n).join(', ')}` : ''}`;
+}
