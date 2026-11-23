@@ -33,10 +33,118 @@ const g3Url = (id) => '/graph/' + encodeURIComponent(id);
 const g3Link = (id, text = '3D network →') => ilink(g3Url(id), esc(text), 'the ontology\'s links around it, in 3D');
 const g3Name = (x) => (x.kind === 'org' ? orgName(x.id) : x.label ? `${x.label}` : x.id);
 
-views.graph = async () => `<div class="card"><h2>3D network <span class="muted">the ontology's links around an account, a wallet group or a case</span></h2>
-  <div class="bar"><input id="g3q" type="search" style="min-width:340px" placeholder="account.near, grp:c_… or inc:…" onkeydown="if(event.key==='Enter'&&this.value.trim())nav(null,g3Url(this.value.trim()))">
-  <button class="primary" onclick="const v=$('g3q').value.trim();if(v)nav(null,g3Url(v))">Show</button></div>
-  <p class="muted small">Or open it from a wallet, a group, a case or the "What Safe Near calls it" card of any account page.</p></div>`;
+// /graph: the whole layer at once (GET /api/graph3d/all), the same colours; filters re-lay the map out, a click shows a node and links to its own network
+const G3O = { hideLeaves: true, hideHubs: false, minIsland: 3, off: new Set(), all: null, adj: null, near: null };
+views.graph = async () => `<div class="card"><h2>3D map of the ontology <span class="muted">every account, group, case and organisation it links, at once</span></h2>
+  <div class="bar"><input id="g3q" type="search" style="min-width:340px" placeholder="find an account, a label, grp:c_… or inc:…" onkeydown="if(event.key==='Enter')g3oFind(this.value)">
+  <button class="primary" onclick="g3oFind($('g3q').value)">Find in the map</button>
+  <button onclick="const v=$('g3q').value.trim();if(v)nav(null,g3Url(v))" title="the network around it, up to 3 hops, with the evidence of each link">Its own network →</button></div>
+  <div class="bar" style="margin:8px 0">
+    <label class="small"><input type="checkbox" ${G3O.hideLeaves ? 'checked' : ''} onchange="G3O.hideLeaves=this.checked;g3oApply()"> hide wallets with a single link</label>
+    <label class="small"><input type="checkbox" ${G3O.hideHubs ? 'checked' : ''} onchange="G3O.hideHubs=this.checked;g3oApply()"> hide exchanges and services</label>
+    <span class="muted small">smallest island</span><div class="seg" id="g3oisl">${[1, 3, 10, 50].map((k) => `<button data-k="${k}" class="${k === G3O.minIsland ? 'on' : ''}" onclick="g3oIsland(${k})">${k}</button>`).join('')}</div>
+    <span class="spacer"></span><button onclick="g3Fit()">Fit view</button>
+  </div>
+  <div class="bar small" id="g3opreds" style="margin:0 0 8px"></div>
+  <style>#g3info { overflow-x:hidden; overflow-wrap:anywhere; } #g3info td, #g3info td div { white-space:normal; }</style>
+  <div style="position:relative">
+    <div id="g3" style="height:720px;border-radius:10px;overflow:hidden;background:#0b1220"></div>
+    <div id="g3info" class="card" hidden style="position:absolute;top:10px;right:10px;width:320px;max-height:680px;overflow:auto;margin:0;opacity:.97"></div>
+  </div>
+  <div class="meta" style="margin-top:6px"><span id="g3meta" class="muted">loading the map …</span></div>
+  <div class="legend" id="g3legend"></div>
+  <p class="muted small">Drag to turn, scroll to zoom, right-drag to pan. Hover a node for what it is; click it for its links. An island is a set of nodes linked to each other and to nothing else.
+  Exchanges, services and contracts are drawn with their links, but the investigations never walk through them: two wallets paid by the same exchange are not linked.</p></div>`;
+
+async function g3OverviewStart() {
+  g3Stop();
+  G3.id = null; G3.focus = null; G3O.near = null;
+  const my = seq;
+  if (!g3WebGL()) { $('g3meta').textContent = ''; g3Msg('Your browser cannot draw 3D graphics (WebGL is off or not supported).'); return; }
+  g3Msg('Loading the whole map … (a few thousand nodes: the first view after a server restart can take a few seconds)');
+  let d, FG;
+  try { [d, FG] = await Promise.all([G3O.all ? Promise.resolve(null) : get('/api/graph3d/all'), g3Lib()]); }
+  catch (e) { if (my === seq) { $('g3meta').textContent = ''; g3Msg(esc(e.message)); } return; }
+  if (my !== seq || !$('g3')) return; // the reader went elsewhere
+  if (d) {
+    const nodes = d.nodes.map(([id, t, f, degree, island, label]) => ({ id, top: d.tops[t], kind: g3oKind(id), class: d.tops[t], bad: f & 1 ? "flagged, or on the attacker's side of a confirmed case" : null, cut: !!(f & 2), degree, island, label }));
+    const links = d.links.map(([a, b, p, role]) => ({ source: nodes[a], target: nodes[b], p: d.predicates[p], role }));
+    const adj = new Map(nodes.map((x) => [x.id, []]));
+    for (const l of links) { adj.get(l.source.id).push(l); adj.get(l.target.id).push(l); }
+    G3O.all = { nodes, links, islands: d.islands, capped: d.capped, built: d.built_ts }; G3O.adj = adj;
+  }
+  const el = $('g3'); el.innerHTML = '';
+  G3.inst = FG({ controlType: 'orbit' })(el)
+    .width(el.clientWidth).height(el.clientHeight).backgroundColor('#0b1220').showNavInfo(false)
+    .nodeId('id').nodeVal((x) => 1 + Math.min(x.degree, 200) / 8).nodeRelSize(2.5).nodeResolution(5).nodeOpacity(0.95)
+    .nodeColor((x) => g3oColor(x)).nodeLabel((x) => g3oTip(x))
+    .linkColor((l) => (G3_LINK[l.p] || ['#94a3b8'])[0]).linkOpacity(0.3).linkWidth((l) => g3oLinkWidth(l))
+    .cooldownTicks(160).warmupTicks(20)
+    .onNodeClick((x) => g3oFocus(x)).onBackgroundClick(() => g3oUnfocus());
+  G3.inst.d3Force('charge').strength(-14).distanceMax(400);
+  G3.inst.onEngineStop(() => { if (!G3.focus && !G3.fitted) { G3.fitted = true; G3.inst.zoomToFit(600, 30); } });
+  G3.onResize = () => { if (G3.inst && $('g3')) G3.inst.width($('g3').clientWidth); };
+  window.addEventListener('resize', G3.onResize);
+  g3oPreds();
+  g3oApply();
+}
+const g3oKind = (id) => (id.startsWith('grp:') ? 'group' : id.startsWith('inc:') ? 'case' : id.startsWith('org:') ? 'org' : 'account');
+const g3oColor = (x) => (G3.focus && x.id !== G3.focus && !G3O.near?.has(x.id) ? '#334155' : G3_NODE[g3ColorKey(x)][0]);
+const g3oLinkWidth = (l) => (G3.focus && (l.source.id === G3.focus || l.target.id === G3.focus) ? 0.8 : 0);
+function g3oTip(x) {
+  return `<div style="max-width:320px;font:12px/1.4 system-ui;background:rgba(15,23,42,.95);color:#e2e8f0;padding:6px 8px;border-radius:6px">
+    <b>${esc(short(g3Name(x), 48))}</b>${x.label ? `<br><span style="opacity:.7">${esc(short(x.id, 48))}</span>` : ''}
+    <br>${esc(G3_NODE[x.top]?.[1] || x.top)}${x.cut ? ' · not walked through' : ''} · ${x.degree} link${x.degree === 1 ? '' : 's'} · island of ${n(G3O.all.islands[x.island], 0)}
+    ${x.bad ? `<br><span style="color:#fca5a5">${esc(x.bad)}</span>` : ''}</div>`;
+}
+/** Which nodes and links pass the filters; the map is laid out again with only those. */
+function g3oApply() {
+  const A = G3O.all; if (!A || !G3.inst) return;
+  const ok = (x) => !(G3O.hideLeaves && x.kind === 'account' && x.degree <= 1) && !(G3O.hideHubs && g3IsHub(x)) && A.islands[x.island] >= G3O.minIsland;
+  const keep = new Set(A.nodes.filter(ok).map((x) => x.id));
+  const links = A.links.filter((l) => !G3O.off.has(l.p) && keep.has(l.source.id) && keep.has(l.target.id));
+  // every node that passes stays, even when its neighbours are hidden (a DAO with 500 one-link wallets stays, as one big node)
+  const nodes = A.nodes.filter((x) => keep.has(x.id));
+  G3.data = { nodes, links }; G3.fitted = false;
+  if (G3.focus && !keep.has(G3.focus)) g3oUnfocus();
+  G3.inst.graphData({ nodes, links });
+  $('g3meta').innerHTML = `${n(nodes.length, 0)} of ${n(A.nodes.length, 0)} nodes · ${n(links.length, 0)} of ${n(A.links.length, 0)} links · ${n(A.islands.length, 0)} islands, the largest ${n(A.islands[0] || 0, 0)} nodes${A.capped ? ` · <b class="a">${esc(A.capped)}</b>` : ''} · built ${esc(ago(Date.now() - A.built))} ago`;
+  g3LegendDraw();
+}
+function g3oIsland(k) { G3O.minIsland = k; document.querySelectorAll('#g3oisl button').forEach((b) => b.classList.toggle('on', +b.dataset.k === k)); g3oApply(); }
+function g3oPreds() {
+  const el = $('g3opreds'); if (!el || !G3O.all) return;
+  const c = {}; for (const l of G3O.all.links) c[l.p] = (c[l.p] || 0) + 1;
+  el.innerHTML = `<span class="muted">links</span>${Object.entries(G3_LINK).filter(([k]) => c[k]).map(([k, [col, t]]) => `<label><input type="checkbox" ${G3O.off.has(k) ? '' : 'checked'} onchange="g3oPred('${k}', this.checked)"><span class="lg-dot" style="background:${col};height:3px;width:14px"></span>${esc(t)} ${n(c[k], 0)}</label>`).join('')}`;
+}
+function g3oPred(k, on) { if (on) G3O.off.delete(k); else G3O.off.add(k); g3oApply(); }
+function g3oFocus(x) {
+  if (!G3.inst) return;
+  G3.focus = x.id;
+  const ls = G3O.adj.get(x.id) || [];
+  G3O.near = new Set(ls.map((l) => (l.source.id === x.id ? l.target.id : l.source.id)));
+  const dist = 160, r = Math.hypot(x.x, x.y, x.z) || 1, k = 1 + dist / r;
+  G3.inst.cameraPosition({ x: x.x * k, y: x.y * k, z: x.z * k }, x, 900);
+  G3.inst.nodeColor((m) => g3oColor(m)).linkWidth((l) => g3oLinkWidth(l));
+  const page = g3PageOf(x.id);
+  $('g3info').hidden = false;
+  $('g3info').innerHTML = `<div style="display:flex;gap:8px;align-items:start"><div style="flex:1;min-width:0"><b>${esc(short(g3Name(x), 40))}</b>${x.label ? `<div class="muted small acct">${esc(x.id)}</div>` : ''}</div><button onclick="g3oUnfocus()" title="close">✕</button></div>
+    <p class="small" style="margin:6px 0"><span class="lg-dot" style="background:${G3_NODE[g3ColorKey(x)][0]}"></span>${esc(G3_NODE[x.top]?.[1] || x.top)}${x.cut ? ' · <span class="muted">not walked through</span>' : ''} · island of ${n(G3O.all.islands[x.island], 0)}${x.bad ? `<br><span class="r">${esc(x.bad)}</span>` : ''}</p>
+    <div class="bar" style="margin:6px 0">${page ? ilink(page[0], esc(page[1]) + ' →') : ''}${ilink(g3Url(x.id), 'Its own network →')}${ACCT_RE.test(x.id) ? ext(nbAddr(x.id), 'NearBlocks ↗') : ''}</div>
+    <table class="small" style="table-layout:fixed;width:100%;word-break:break-all"><tr><th style="width:38%">Link</th><th>With</th></tr>${ls.slice(0, 40).map((l) => { const out = l.source.id === x.id, o = out ? l.target : l.source;
+      return `<tr><td>${out ? '' : '← '}${esc((G3_LINK[l.p] || [0, l.p])[1])}${l.role ? ` (${esc(l.role.replace(/_/g, ' '))})` : ''}</td><td><a href="#" onclick="event.preventDefault();g3oFind(this.dataset.id)" data-id="${esc(o.id)}" title="${esc(o.label || o.id)}">${esc(short(o.kind === 'org' ? orgName(o.id) : o.id, 28))}</a></td></tr>`; }).join('')}${ls.length > 40 ? `<tr><td colspan="2" class="muted">… ${ls.length - 40} more</td></tr>` : ''}</table>`;
+}
+function g3oUnfocus() { G3.focus = null; G3O.near = null; if ($('g3info')) $('g3info').hidden = true; G3.inst?.nodeColor((m) => g3oColor(m)).linkWidth((l) => g3oLinkWidth(l)); }
+/** Fly to a node by id, or the first whose id or label contains the text. */
+function g3oFind(q) {
+  q = String(q || '').trim().toLowerCase(); if (!q || !G3.inst) return;
+  if (/^c_[\w-]+$/.test(q)) q = 'grp:' + q;
+  const shown = G3.inst.graphData().nodes;
+  const x = shown.find((m) => m.id === q) || shown.find((m) => m.id.includes(q) || (m.label || '').toLowerCase().includes(q));
+  if (x) { g3oFocus(x); return; }
+  const hidden = G3O.all?.nodes.find((m) => m.id === q || m.id.includes(q) || (m.label || '').toLowerCase().includes(q));
+  $('g3meta').innerHTML = hidden ? `<span class="a">${esc(short(hidden.id, 40))} is hidden by the filters</span> · ${ilink(g3Url(hidden.id), 'its own network →')}` : `<span class="a">nothing in the map matches "${esc(q)}"</span>`;
+}
 
 async function graphPage(id) {
   const back = g3PageOf(id);

@@ -25,7 +25,7 @@ const TITLES = {
   sim: ['Simulated wallet', 'Paper trading with real pool quotes: equity, open and closed positions'],
   scans: ['Evaluations', 'Every gate check and AI review, with the reasons'], audit: ['Contract audit', 'Any NEAR contract: what it is, the powers its code gives someone over users, who holds them, and every new contract audited automatically'],
   analysis: ['On-chain analysis', 'An investigation of any token: launch, creator, flows, who bought early and the groups behind them, who sold, who holds, risk notes'],
-  graph: ['3D network', "The ontology's links around an account, a wallet group or a case, in 3D"],
+  graph: ['3D network', "The whole ontology layer in 3D, or the links around one account, wallet group or case"],
   logs: ['Log', 'Worker activity'], config: ['Settings', 'Read-only view of the configuration in use'],
 };
 const DETAIL = { firewall: incidentPage, nfts: nftPage, taggroups: tagGroupPage, creators: creatorPage, tokens: tokenPage, wallets: walletPage, groups: groupPage, entities: entityPage, scans: scanPage, sim: simPage, analysis: analysisPage, graph: graphPage };
@@ -64,7 +64,7 @@ async function render() {
   $('main').classList.add('loading');
   try {
     const html = detail ? await DETAIL[view](id) : await views[view]();
-    if (my === seq) { $('main').innerHTML = html; if (view === 'audit' && id) runAudit(id); if (view === 'firewall' && !id) { scFromUrl(); liveStart(); } if (view === 'analysis' && id) anaPoll(id); if (view === 'nfts' && id) nftPoll(id); if (view === 'graph' && id) g3Start(id); }
+    if (my === seq) { $('main').innerHTML = html; if (view === 'audit' && id) runAudit(id); if (view === 'firewall' && !id) { scFromUrl(); liveStart(); } if (view === 'analysis' && id) anaPoll(id); if (view === 'nfts' && id) nftPoll(id); if (view === 'graph' && id) g3Start(id); if (view === 'graph' && !id) g3OverviewStart(); }
   } catch (e) { if (my === seq) $('main').innerHTML = `<div class="card err">${esc(e.message)}</div>`; }
   if (my === seq) $('main').classList.remove('loading');
 }
