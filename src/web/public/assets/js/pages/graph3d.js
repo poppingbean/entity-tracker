@@ -33,9 +33,36 @@ const g3Url = (id) => '/graph/' + encodeURIComponent(id);
 const g3Link = (id, text = '3D network →') => ilink(g3Url(id), esc(text), 'the ontology\'s links around it, in 3D');
 const g3Name = (x) => (x.kind === 'org' ? orgName(x.id) : x.label ? `${x.label}` : x.id);
 
+// Fullscreen: the whole card (search, filters, legend stay usable), the canvas takes the rest of the screen. The browser's Fullscreen API where there is
+// one; otherwise (iPhone Safari) the card is pinned over the page. Esc, or the button again, leaves it.
+const G3_FULL_CSS = `#g3card.g3-full { position:fixed; inset:0; z-index:1000; margin:0; border-radius:0; overflow:auto; background:var(--bg); padding:12px 16px; }
+  #g3card:fullscreen { overflow:auto; background:var(--bg); padding:12px 16px; } #g3card:fullscreen #g3, #g3card.g3-full #g3 { border-radius:6px; }`;
+const g3IsFull = () => !!$('g3card') && (document.fullscreenElement === $('g3card') || $('g3card').classList.contains('g3-full'));
+function g3Full() {
+  const card = $('g3card'); if (!card) return;
+  if (g3IsFull()) { if (document.fullscreenElement) document.exitFullscreen().catch(() => {}); else { card.classList.remove('g3-full'); g3FullFit(); } return; }
+  const pin = () => { if (!document.fullscreenElement && !card.classList.contains('g3-full')) { card.classList.add('g3-full'); g3FullFit(); } };
+  // some embedded browsers neither grant nor refuse the request: pinned over the page after half a second
+  if (card.requestFullscreen) { card.requestFullscreen().catch(pin); setTimeout(pin, 500); } else pin();
+}
+/** Size the canvas for the mode: to the bottom of the screen (less the legend) in fullscreen, its usual height otherwise. */
+function g3FullFit() {
+  const el = $('g3'), card = $('g3card'); if (!el || !card) return;
+  if (!el.dataset.h) el.dataset.h = el.style.height;
+  const full = g3IsFull();
+  if (full) { const top = el.getBoundingClientRect().top - card.getBoundingClientRect().top + card.scrollTop; el.style.height = Math.max(320, window.innerHeight - top - 64) + 'px'; }
+  else el.style.height = el.dataset.h;
+  if ($('g3info')) $('g3info').style.maxHeight = (parseInt(el.style.height, 10) - 40) + 'px';
+  if ($('g3fullbtn')) $('g3fullbtn').textContent = full ? '✕ Exit fullscreen' : '⛶ Fullscreen';
+  if (G3.inst) G3.inst.width(el.clientWidth).height(el.clientHeight);
+}
+document.addEventListener('fullscreenchange', () => setTimeout(g3FullFit, 50));
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && $('g3card')?.classList.contains('g3-full')) { $('g3card').classList.remove('g3-full'); g3FullFit(); } });
+window.addEventListener('resize', () => { if (g3IsFull()) g3FullFit(); });
+
 // /graph: the whole layer at once (GET /api/graph3d/all), the same colours; filters re-lay the map out, a click shows a node and links to its own network
 const G3O = { hideLeaves: true, hideHubs: false, minIsland: 3, off: new Set(), all: null, adj: null, near: null };
-views.graph = async () => `<div class="card"><h2>3D map of the ontology <span class="muted">every account, group, case and organisation it links, at once</span></h2>
+views.graph = async () => `<div class="card" id="g3card"><h2>3D map of the ontology <span class="muted">every account, group, case and organisation it links, at once</span></h2>
   <div class="bar"><input id="g3q" type="search" style="min-width:340px" placeholder="find an account, a label, grp:c_… or inc:…" onkeydown="if(event.key==='Enter')g3oFind(this.value)">
   <button class="primary" onclick="g3oFind($('g3q').value)">Find in the map</button>
   <button onclick="const v=$('g3q').value.trim();if(v)nav(null,g3Url(v))" title="the network around it, up to 3 hops, with the evidence of each link">Its own network →</button></div>
@@ -43,10 +70,10 @@ views.graph = async () => `<div class="card"><h2>3D map of the ontology <span cl
     <label class="small"><input type="checkbox" ${G3O.hideLeaves ? 'checked' : ''} onchange="G3O.hideLeaves=this.checked;g3oApply()"> hide wallets with a single link</label>
     <label class="small"><input type="checkbox" ${G3O.hideHubs ? 'checked' : ''} onchange="G3O.hideHubs=this.checked;g3oApply()"> hide exchanges and services</label>
     <span class="muted small">smallest island</span><div class="seg" id="g3oisl">${[1, 3, 10, 50].map((k) => `<button data-k="${k}" class="${k === G3O.minIsland ? 'on' : ''}" onclick="g3oIsland(${k})">${k}</button>`).join('')}</div>
-    <span class="spacer"></span><button onclick="g3Fit()">Fit view</button>
+    <span class="spacer"></span><button onclick="g3Fit()">Fit view</button><button id="g3fullbtn" onclick="g3Full()" title="fill the screen (Esc to leave)">⛶ Fullscreen</button>
   </div>
   <div class="bar small" id="g3opreds" style="margin:0 0 8px"></div>
-  <style>#g3info { overflow-x:hidden; overflow-wrap:anywhere; } #g3info td, #g3info td div { white-space:normal; }</style>
+  <style>#g3info { overflow-x:hidden; overflow-wrap:anywhere; } #g3info td, #g3info td div { white-space:normal; }${G3_FULL_CSS}</style>
   <div style="position:relative">
     <div id="g3" style="height:720px;border-radius:10px;overflow:hidden;background:#0b1220"></div>
     <div id="g3info" class="card" hidden style="position:absolute;top:10px;right:10px;width:320px;max-height:680px;overflow:auto;margin:0;opacity:.97"></div>
@@ -148,15 +175,15 @@ function g3oFind(q) {
 
 async function graphPage(id) {
   const back = g3PageOf(id);
-  return `<div class="card">${crumbs([['3D network', '/graph'], [short(id, 40)]])}
+  return `<div class="card" id="g3card">${crumbs([['3D network', '/graph'], [short(id, 40)]])}
     <div class="dh-main"><div style="min-width:0"><h1 class="acct">${esc(id)}</h1>
       <div class="meta">${back ? ilink(back[0], esc(back[1]) + ' →') : ''}<span id="g3meta" class="muted">loading the network …</span></div></div></div>
     <div class="bar" style="margin:8px 0">
       <span class="muted small">Hops</span><div class="seg" id="g3hops">${[1, 2, 3].map((h) => `<button data-h="${h}" class="${h === G3.hops ? 'on' : ''}" onclick="g3SetHops(${h})">${h}</button>`).join('')}</div>
       <label class="small"><input type="checkbox" id="g3hide" ${G3.hideHubs ? 'checked' : ''} onchange="g3SetHide(this.checked)"> hide exchanges and services</label>
-      <span class="spacer"></span><button onclick="g3Fit()">Fit view</button>
+      <span class="spacer"></span><button onclick="g3Fit()">Fit view</button><button id="g3fullbtn" onclick="g3Full()" title="fill the screen (Esc to leave)">⛶ Fullscreen</button>
     </div>
-    <style>#g3info { overflow-x:hidden; overflow-wrap:anywhere; } #g3info td, #g3info td div { white-space:normal; }</style>
+    <style>#g3info { overflow-x:hidden; overflow-wrap:anywhere; } #g3info td, #g3info td div { white-space:normal; }${G3_FULL_CSS}</style>
     <div style="position:relative">
       <div id="g3" style="height:640px;border-radius:10px;overflow:hidden;background:#0b1220"></div>
       <div id="g3info" class="card" hidden style="position:absolute;top:10px;right:10px;width:320px;max-height:600px;overflow:auto;margin:0;opacity:.97"></div>
