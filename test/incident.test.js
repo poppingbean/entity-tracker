@@ -208,3 +208,20 @@ test('registry entries: proven by hand or by a sweep, never by busyness', () => 
   assert.equal(provenWallet({ source: 'manual' }), true); assert.equal(provenWallet({ cold: 'binancecold3.near' }), true);
   assert.equal(provenWallet({ source: 'discovered', cold: null, kind: 'hot' }), false); assert.equal(provenWallet({ kind: 'cold' }), true);
 });
+
+test('a sweep to cold storage moves reserves: a name containing an exchange is not enough', async () => {
+  const { sweepOf, SWEEP_MIN_NEAR } = await import('../src/incident/exchanges.js');
+  const HOT = 'a'.repeat(64);
+  const label = (id) => (/coinbase|bybit|binance/.test(id) ? { type: 'exchange', label: id.includes('coinbase') ? 'Coinbase' : id.includes('bybit') ? 'Bybit' : 'Binance' } : null);
+  const yocto = (n) => (BigInt(n) * 10n ** 24n).toString();
+  const tx = (to, actions, signer = HOT) => ({ transaction: { signer_id: signer, receiver_id: to, actions } });
+  // a customer withdrawal to an account named like an exchange, and a staking call into a pool named like one: no sweep
+  assert.equal(sweepOf([tx('coinbasefucku44.near', [{ Transfer: { deposit: yocto(3) } }])], HOT, label), null);
+  assert.equal(sweepOf([tx('binancenode1.poolv1.near', [{ FunctionCall: { method_name: 'deposit_and_stake', deposit: yocto(50000) } }])], HOT, label), null);
+  assert.equal(sweepOf([tx('splashbybit.near', [{ Transfer: { deposit: yocto(SWEEP_MIN_NEAR - 1) } }])], HOT, label), null);
+  // someone else's transaction into the cold wallet is not this wallet's sweep
+  assert.equal(sweepOf([tx('binancecold3.near', [{ Transfer: { deposit: yocto(90000) } }], 'other.near')], HOT, label), null);
+  // reserves moved: a sweep
+  const s = sweepOf([tx('coinbasefucku44.near', [{ Transfer: { deposit: yocto(2) } }]), tx('binancecold3.near', [{ Transfer: { deposit: yocto(90000) } }])], HOT, label);
+  assert.deepEqual([s.to, s.exchange, s.near], ['binancecold3.near', 'Binance', 90000]);
+});

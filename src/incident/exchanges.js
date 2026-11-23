@@ -27,18 +27,34 @@ async function txsOf(id, { limit = SAMPLE, signer = false } = {}) {
 }
 const pct = (xs, p) => { if (!xs.length) return 0; const s = [...xs].sort((a, b) => a - b); return s[Math.min(s.length - 1, Math.floor(p * s.length))]; };
 
+// A sweep to cold storage moves reserves: a plain transfer of at least this much. An account whose name contains an exchange's name proves
+// nothing by itself: customers name their own accounts that way (coinbasefucku44.near, splashbybit.near), and staking pools too
+// (binancenode1.poolv1.near, reached by staking calls). Until 2026-11-23 any transaction to such a name counted, and named those as cold wallets.
+export const SWEEP_MIN_NEAR = 1000;
+/** The first sweep in a wallet's signed transactions: a transfer of SWEEP_MIN_NEAR or more to an exchange-named account. Pure. */
+export function sweepOf(txs, id, label = builtinLabel) {
+  for (const t of txs) {
+    const tx = t.transaction;
+    if (tx.signer_id !== id || tx.receiver_id === id) continue;
+    const l = label(tx.receiver_id);
+    if (l?.type !== 'exchange') continue;
+    const moved = (tx.actions || []).reduce((s, a) => s + (a?.Transfer ? near(a.Transfer.deposit) : 0), 0);
+    if (moved >= SWEEP_MIN_NEAR) return { to: tx.receiver_id, exchange: l.label, near: moved };
+  }
+  return null;
+}
+
 /** One wallet's profile: is it busy, which exchange does it sweep to, and its outgoing-transfer baseline. */
 export async function profileWallet(id) {
   const [{ txs, total }, state] = await Promise.all([txsOf(id, { signer: true }), viewAccount(id).catch(() => null)]);
   const outs = [];
-  let sweep = null;
   for (const t of txs) {
     if (t.transaction.signer_id !== id) continue;
     const l = builtinLabel(t.transaction.receiver_id);
     // the baseline is customer withdrawals: moves to the exchange's own named wallets (sweeps to cold storage) are left out
     if (l?.type !== 'exchange') for (const a of t.transaction.actions || []) if (a?.Transfer) outs.push(near(a.Transfer.deposit));
-    if (!sweep && l?.type === 'exchange' && t.transaction.receiver_id !== id) sweep = { to: t.transaction.receiver_id, exchange: l.label };
   }
+  const sweep = sweepOf(txs, id);
   const first = await txIndexer('/v0/account', { account_id: id, limit: 1, desc: false }).catch(() => null);
   return { total: total ?? first?.txs_count ?? null, sweep, balance_near: state ? near(state.amount) : null,
     // p98, not the maximum: one past drain in the sample must not make the next one look normal
@@ -57,17 +73,21 @@ async function hotWalletsOf(cold) {
 export async function refreshExchangeRegistry({ log = info } = {}) {
   const [hubs, known] = await Promise.all([col('entities').find({ kind: 'hub' }, { projection: { _id: 1 } }).toArray(), col('exchange_wallets').find({}).toArray()]);
   const queue = [...new Set([...known.map((k) => k._id), ...hubs.map((h) => h._id)])];
-  const seen = new Set(), colds = new Map(), rows = [];
+  const seen = new Set(), colds = new Map(), rows = [], dropped = [];
+  let failed = 0;
   while (queue.length && rows.length < 400) {
     const id = queue.shift();
     if (seen.has(id)) continue;
     seen.add(id);
     const prev = known.find((k) => k._id === id);
+    if (prev?.kind === 'cold' && prev.source !== 'manual') continue; // a named cold wallet stays only while a hot wallet below still sweeps into it
     const p = await profileWallet(id).catch(() => null);
-    if (!p) continue;
+    if (!p) { failed++; continue; }
     const manual = prev?.source === 'manual';
-    if (!manual && (p.total ?? 0) < BUSY && !p.sweep) continue; // neither busy nor sweeping to an exchange: not a hot wallet
-    if (!manual && !p.sweep && config.incidents.identifyBusyNeutral) continue; // busy alone proves nothing: it needs a sweep to an exchange's cold wallet or a hand entry
+    // neither busy nor sweeping to an exchange; or busy alone, which proves nothing (it needs a sweep to an exchange's cold wallet or a hand
+    // entry). An entry from an older, looser rule that fails this when re-checked is removed below.
+    const fails = !manual && (((p.total ?? 0) < BUSY && !p.sweep) || (!p.sweep && config.incidents.identifyBusyNeutral));
+    if (fails) { if (prev) dropped.push(id); continue; }
     const exchange = manual ? prev.exchange : p.sweep?.exchange || prev?.exchange || null;
     rows.push({ _id: id, exchange, kind: 'hot', how: manual ? prev.how : p.sweep ? `sends its reserves to ${p.sweep.to}` : `${(p.total || 0).toLocaleString('en-US')} transactions`, cold: p.sweep?.to || prev?.cold || null,
       tx_count: p.total, balance_near: p.balance_near, baseline: p.baseline, source: manual ? 'manual' : prev?.source || 'discovered', updated_ts: Date.now() });
@@ -77,10 +97,17 @@ export async function refreshExchangeRegistry({ log = info } = {}) {
   }
   for (const [cold, exchange] of colds) rows.push({ _id: cold, exchange, kind: 'cold', how: 'exchange-named account', updated_ts: Date.now(), source: 'named' });
   if (rows.length) await col('exchange_wallets').bulkWrite(rows.map((r) => ({ replaceOne: { filter: { _id: r._id }, replacement: r, upsert: true } })), { ordered: false });
+  // only after a complete run in which every wallet was read: a read that failed (the indexer down) never removes anything
+  let removed = 0;
+  if (!failed && !queue.length) {
+    const staleCold = known.filter((k) => k.kind === 'cold' && k.source !== 'manual' && !colds.has(k._id)).map((k) => k._id);
+    const gone = [...dropped, ...staleCold];
+    if (gone.length) removed = (await col('exchange_wallets').deleteMany({ _id: { $in: gone }, source: { $ne: 'manual' } })).deletedCount;
+  }
   cache.ts = 0;
   await (await import('../ontology/writers.js')).syncFacts(['exchange_wallets', 'solvers']); // G1: new exchange wallets cut paths at once; solvers re-checked with the registry
-  log(`exchange registry: ${rows.filter((r) => r.kind === 'hot').length} hot wallets (${rows.filter((r) => r.kind === 'hot' && r.exchange).length} named), ${colds.size} cold wallets`);
-  return { wallets: rows.length, exchanges: [...new Set(rows.map((r) => r.exchange).filter(Boolean))] };
+  log(`exchange registry: ${rows.filter((r) => r.kind === 'hot').length} hot wallets (${rows.filter((r) => r.kind === 'hot' && r.exchange).length} named), ${colds.size} cold wallets${removed ? `, ${removed} no longer proven removed` : ''}${failed ? `, ${failed} could not be read (nothing removed)` : ''}`);
+  return { wallets: rows.length, removed, failed, exchanges: [...new Set(rows.map((r) => r.exchange).filter(Boolean))] };
 }
 
 /** Add one by hand (an exchange's announced address). */
