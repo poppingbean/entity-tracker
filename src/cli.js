@@ -160,6 +160,11 @@ try {
     let k = 0; for (let i = 0; i < (Number(args[0]) || 5); i++) k += await expandNetworks();
     info(`expanded ${k} linked wallets`);
     await evaluateGroups();
+  } else if (cmd === 'ai-online') {
+    // node src/cli.js ai-online [--state <dir>]: is the online AI doing the work (src/ai/online.js)? the operator pass asks this every run
+    const { onlineStatus, noteMode } = await import('./ai/online.js');
+    const i = args.indexOf('--state'), s = await onlineStatus();
+    console.log(JSON.stringify(i >= 0 && args[i + 1] ? noteMode(args[i + 1], s) : s));
   } else if (cmd === 'operator-ai') {
     // NEAR AI's work answered by an operator (NEAR_AI_OPERATOR_DIR; scripts/operator-ai-daily.sh runs it daily on this machine): the first run writes each
     // AI request to <dir>/requests, named after its item; with --answered, the run takes exactly the items whose answers are in <dir>/answers and saves
