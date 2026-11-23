@@ -64,3 +64,24 @@ test('capped at maxNodes, and says so', () => {
 test('node kinds', () => {
   assert.equal(nodeKind('grp:c_1'), 'group'); assert.equal(nodeKind('inc:x'), 'case'); assert.equal(nodeKind('org:acme'), 'org'); assert.equal(nodeKind('a.near'), 'account');
 });
+
+test('the whole layer: every node and link once, compact, islands largest first, the cap keeps the best-linked', async () => {
+  const { buildOverview } = await import('../src/ontology/graph3d.js');
+  const g = build();
+  const cls = (id) => (id === 'binance-hot.near' ? { top: 'exchange', cuts_links: true, label: 'Binance' } : { top: 'person' });
+  const o = buildOverview(g, { cls });
+  const idOf = (i) => o.nodes[i][0];
+  assert.equal(o.nodes.length, new Set(o.nodes.map((x) => x[0])).size, 'each node once');
+  assert.equal(o.links.length, 11, 'each fact once (the in lists mirror the out lists)');
+  const hot = o.nodes.find((x) => x[0] === 'binance-hot.near');
+  assert.equal(o.tops[hot[1]], 'exchange'); assert.equal(hot[2] & 2, 2, 'cut'); assert.equal(hot[5], 'Binance');
+  const a = o.nodes.find((x) => x[0] === 'a.near');
+  assert.equal(a[2] & 1, 1, 'attacker in a confirmed case is bad');
+  assert.equal(o.tops[o.nodes.find((x) => x[0] === 'inc:x')[1]], 'case');
+  assert.ok(o.links.every(([s, t, p]) => idOf(s) && idOf(t) && o.predicates[p]));
+  assert.deepEqual(o.islands, [...o.islands].sort((x, y) => y - x));
+  assert.equal(o.islands.reduce((s, k) => s + k, 0), o.nodes.length);
+  const c = buildOverview(g, { cls, maxNodes: 3 });
+  assert.equal(c.nodes.length, 3); assert.match(c.capped, /3 best-linked/);
+  assert.ok(c.nodes.some((x) => x[0] === 'a.near'), 'the best-linked node is kept');
+});

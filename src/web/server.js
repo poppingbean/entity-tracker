@@ -4,6 +4,7 @@
 import http from 'node:http';
 import fs from 'node:fs';
 import crypto from 'node:crypto';
+import zlib from 'node:zlib';
 import { col, metaGet, getDb } from '../db.js';
 import { config } from '../config.js';
 import { recentLogs, info, error } from '../log.js';
@@ -35,7 +36,7 @@ import { parseInvestigation, startInvestigation, investigationJob, confirmIncide
 import { report } from '../incident/signals.js';
 import { walletView } from '../near/walletview.js';
 import { entityView } from '../ontology/index.js';
-import { graph3d } from '../ontology/graph3d.js';
+import { graph3d, overview3d } from '../ontology/graph3d.js';
 import { parseChainId } from '../ontology/chains.js';
 import { normalizeId } from '../ontology/caip.js';
 import { NS } from '../ontology/vocab.js';
@@ -467,6 +468,9 @@ const routes = {
       edges: keep.filter((e) => used.has(e.from) && used.has(e.to)).map((e) => ({ from: e.from, to: e.to, type: e.type, near: e.near, n: e.n ?? null })),
     };
   },
+
+  /** The whole ontology layer for the 3D overview (/graph): every node and link, compact (graph3d.js buildOverview). Read-only. */
+  '/api/graph3d/all': async () => overview3d(),
 
   /** The ontology's network around an account, a wallet group (grp:… or a group id) or a case (inc:…), for the 3D graph page. Read-only. */
   '/api/graph3d': async (u) => {
@@ -1091,7 +1095,10 @@ export function startWeb() {
       const route = routes[u.pathname];
       if (!route) { res.writeHead(404).end('not found'); return; }
       const data = await route(u, req);
-      res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' }).end(JSON.stringify(config.web.hideCriteria ? redact(u.pathname, data) : data, noModel));
+      const body = JSON.stringify(config.web.hideCriteria ? redact(u.pathname, data) : data, noModel);
+      // large answers (the 3D overview, long lists) go gzipped when the browser accepts it
+      if (body.length > 32 * 1024 && /gzip/.test(String(req.headers['accept-encoding'] || ''))) { res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store', 'content-encoding': 'gzip', vary: 'accept-encoding' }).end(zlib.gzipSync(body, { level: 6 })); return; }
+      res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' }).end(body);
     } catch (e) { res.writeHead(500, { 'content-type': 'application/json' }).end(JSON.stringify({ error: e.message })); }
   });
   // A host routes its public domain to ONE port (Railway: the service's target port, 8080 by default, or $PORT). Listen on all of them

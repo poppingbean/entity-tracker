@@ -82,3 +82,62 @@ export async function graph3d(id, { hops = 2, maxNodes = MAX_NODES } = {}) {
   });
   return { id, hops, start_known: g.out.has(id) || g.in.has(id), graph_loaded_ts: g.loadedTs, nodes, links, capped: b.capped, max_nodes: maxNodes };
 }
+
+// ---- the whole layer (GET /api/graph3d/all, the /graph page): every node and link of the in-memory graph, compact ----
+export const OVERVIEW_MAX_NODES = 40000;
+const TOPS = ['person', 'exchange', 'service', 'contract', 'system', 'unknown', 'group', 'case', 'org'];
+
+/**
+ * Every node with a link and every link, as arrays so 10,000 nodes stay a few hundred KB. Pure on `g` (and `cls`, the class lookup).
+ *   nodes: [id, top index (TOPS), flags (1 bad, 2 cut: shown, never walked through), degree, island, label | null]
+ *   links: [source index, target index, predicate index (EDGE_PREDICATES), role | null]
+ *   islands: sizes of the connected parts, by island number (0 is the largest)
+ * Past `maxNodes`, the nodes with the fewest links are left out (capped says so).
+ */
+export function buildOverview(g, { cls, maxNodes = OVERVIEW_MAX_NODES, predicates = EDGE_PREDICATES } = {}) {
+  const deg = new Map();
+  for (const [id, list] of g.out) for (const e of list) if (predicates.includes(e.p)) { deg.set(id, (deg.get(id) || 0) + 1); deg.set(e.to, (deg.get(e.to) || 0) + 1); }
+  let ids = [...deg.keys()], capped = null;
+  if (ids.length > maxNodes) { ids.sort((a, b) => deg.get(b) - deg.get(a) || (a < b ? -1 : 1)); ids = ids.slice(0, maxNodes); capped = `the ${maxNodes} best-linked of ${deg.size} nodes`; }
+  const index = new Map(ids.map((id, i) => [id, i]));
+  // islands: union-find over the kept links
+  const up = ids.map((_, i) => i);
+  const root = (i) => { while (up[i] !== i) { up[i] = up[up[i]]; i = up[i]; } return i; };
+  const links = [], seen = new Set();
+  for (const [id, list] of g.out) {
+    const a = index.get(id); if (a == null) continue;
+    for (const e of list) {
+      const b = index.get(e.to);
+      if (b == null || !predicates.includes(e.p)) continue;
+      const k = `${a}|${b}|${e.p}|${e.role || ''}`;
+      if (seen.has(k)) continue;
+      seen.add(k);
+      links.push([a, b, predicates.indexOf(e.p), e.role || null]);
+      const ra = root(a), rb = root(b); if (ra !== rb) up[ra] = rb;
+    }
+  }
+  const size = new Map();
+  for (let i = 0; i < ids.length; i++) { const r = root(i); size.set(r, (size.get(r) || 0) + 1); }
+  const order = [...size].sort((x, y) => y[1] - x[1]), island = new Map(order.map(([r], n) => [r, n]));
+  const nodes = ids.map((id, i) => {
+    const kind = nodeKind(id), c = kind === 'account' ? (cls ? cls(id) : null) : null;
+    const top = kind === 'account' ? (TOPS.includes(c?.top) ? c.top : 'unknown') : kind;
+    const flags = (g.bad.has(id) ? 1 : 0) | (kind === 'account' && c?.cuts_links ? 2 : 0);
+    return [id, TOPS.indexOf(top), flags, deg.get(id), island.get(root(i)), c?.label ? String(c.label).slice(0, 60) : null];
+  });
+  return { tops: TOPS, predicates, nodes, links, islands: order.map(([, n]) => n), capped, total_nodes: deg.size };
+}
+
+let overviewMemo = null;
+/** The answer of GET /api/graph3d/all: built once per graph version (a full load or a writer's change), at most once a minute. */
+export async function overview3d() {
+  const g = await graph();
+  // not loaded (the database is not connected yet, just after a start): say so, and keep nothing
+  if (!g.loadedTs) throw new Error('the ontology graph is still loading: try again in a few seconds');
+  const key = `${g.loadedTs}|${g.logV}`;
+  if (overviewMemo && (overviewMemo.key === key || Date.now() - overviewMemo.ts < 60e3)) return overviewMemo.data;
+  const { classOf } = await import('./sync.js');
+  const data = { ...buildOverview(g, { cls: classOf }), graph_loaded_ts: g.loadedTs, built_ts: Date.now() };
+  overviewMemo = { key, ts: Date.now(), data };
+  return data;
+}
