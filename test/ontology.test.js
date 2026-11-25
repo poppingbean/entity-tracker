@@ -243,3 +243,12 @@ test('a wallet tied to several organisations keeps them all, strongest first; on
   assert.equal(orgsText(resolve('nobody.near', [])), null);
   assert.deepEqual(resolve('nobody.near', []).operators, []);
 });
+
+test('the Omni bridge and its token factory are bridges, whatever the busy-account behaviour says', () => {
+  const busy = (a) => ({ subject: a, predicate: 'is_a', object: 'exchange', source: 'behaviour', confidence: 0.3, evidence: 'busy: 2,970,010 transactions, pays many wallets' });
+  const audit = (a) => ({ subject: a, predicate: 'is_a', object: 'person/smart_wallet', source: 'audit', confidence: null, evidence: 'the audit reads its code as a smart wallet' });
+  const bridge = resolve('omni.bridge.near', [...virtualFacts('omni.bridge.near'), busy('omni.bridge.near')]);
+  assert.equal(bridge.class, 'service/bridge'); assert.equal(bridge.label, 'Omni Bridge'); assert.equal(bridge.cuts_links, true);
+  const factory = resolve('omft.near', [...virtualFacts('omft.near'), audit('omft.near')]);
+  assert.equal(factory.class, 'service/bridge'); assert.equal(factory.cuts_links, true, 'money tracers stop at it, as at any bridge');
+});
