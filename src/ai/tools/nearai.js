@@ -30,8 +30,11 @@ function operatorAnswer({ system, user, model, maxTokens }) {
   if (fs.existsSync(ans) && (!sub?.id || Date.now() - fs.statSync(ans).mtimeMs < ANSWER_MAX_AGE_MS)) {
     const json = extractJson(fs.readFileSync(ans, 'utf8'));
     if (!json || typeof json !== 'object') throw new Error(`operator answer ${key} is not a JSON object`);
+    // the same guard as a NEAR AI answer: stand-in list items dropped, a field with nothing real in it refused (the save step names it, the file is fixed)
+    const { json: clean, holes } = placeholdersOut(json);
+    if (holes.length) throw new Error(`operator answer ${key} has placeholders instead of content (${holes.slice(0, 3).join(', ')})`);
     // NEAR_AI_OPERATOR_MODEL: the model that actually wrote the answer (e.g. anthropic/claude-opus-5-5), recorded as is, like a NEAR AI answer's model
-    return { json, model: config.ai.operatorModel === 'operator' ? `operator, for ${model}` : config.ai.operatorModel, usage: null };
+    return { json: clean, model: config.ai.operatorModel === 'operator' ? `operator, for ${model}` : config.ai.operatorModel, usage: null };
   }
   fs.mkdirSync(path.join(dir, 'requests'), { recursive: true });
   fs.writeFileSync(path.join(dir, 'requests', `${key}.json`), JSON.stringify({ key, ts: Date.now(), ...(sub?.id ? { subject: { kind: sub.kind, id: sub.id } } : {}), model, max_tokens: maxTokens, system, user }, null, 1));
@@ -98,15 +101,52 @@ async function readStream(res) {
   return { model, usage, choices: [{ message: { content, reasoning_content: reasoning }, finish_reason: finish }] };
 }
 
+// ---- answer guards (2026-11-25: one model filled a verdict's reasons with "..." and called a case a hack with high confidence; its thinking used up
+// max_tokens before the answer was written, so answers were cut off even after the room was doubled)
+
+// a stand-in instead of content: "...", "…", "TBD", "<reason>", "[explanation]" …
+const PLACEHOLDER = /^\s*(\.{2,}|…+|-{2,}|_{2,}|\?{2,}|n\/?a|tbd|todo|placeholder|lorem ipsum.*|<[^<>]{0,40}>|\[[^[\]]{0,40}\]|\{[^{}]{0,40}\})\s*$/i;
+const filler = (v) => typeof v === 'string' && (!v.trim() || PLACEHOLDER.test(v));
+/**
+ * Placeholders out of an answer. A list loses its stand-in items (the prompts show lists as ["step 1", "step 2", "..."], and a model may copy the
+ * "..."); a field with nothing real left in it is a hole: a string that is only a stand-in, or a list that held only stand-ins (["..."]).
+ * (An empty string in a field may mean "nothing to say", so it is not a hole.) Returns { json, holes }: the cleaned answer and the hole paths. Pure.
+ */
+export function placeholdersOut(json, path = '', holes = []) {
+  if (Array.isArray(json)) {
+    const kept = json.filter((v) => !filler(v)).map((v, i) => placeholdersOut(v, `${path}[${i}]`, holes).json);
+    if (json.length && !kept.length) holes.push(path || '(answer)');
+    return { json: kept, holes };
+  }
+  if (json && typeof json === 'object') return { json: Object.fromEntries(Object.entries(json).map(([k, v]) => [k, placeholdersOut(v, path ? `${path}.${k}` : k, holes).json])), holes };
+  if (typeof json === 'string' && json.trim() && PLACEHOLDER.test(json)) holes.push(path || '(answer)');
+  return { json, holes };
+}
+
+// models seen thinking before they answer (their reasoning counts against max_tokens): they start with more room, and a cut-off answer goes
+// straight to the ceiling. Learned per process from the answers themselves; a larger max_tokens costs nothing unless the model uses it.
+const THINKERS = new Set();
+export const THINK_ROOM = 3;
+/** Did this answer spend tokens thinking? Reasoning returned, reasoning tokens counted, or far more tokens billed than the answer holds. Pure. */
+export function thoughtFirst(usage, content = '', reasoning = '') {
+  if (reasoning && String(reasoning).trim()) return true;
+  if ((usage?.completion_tokens_details?.reasoning_tokens || 0) > 0) return true;
+  const billed = usage?.completion_tokens || 0, shown = Math.ceil(String(content || '').length / 4); // about 4 characters a token
+  return billed > 400 && billed > 3 * shown + 200;
+}
+/** The room for the first try: more for a model seen thinking. Pure (given the set). */
+export const firstBudget = (model, maxTokens, ceiling, thinkers = THINKERS) => (thinkers.has(model) ? Math.min(ceiling, maxTokens * THINK_ROOM) : maxTokens);
+
 /**
  * One chat completion expected to return a JSON object. Retries on rate limits and server errors.
  * `stream` reads the answer as it is written: for long answers, since Node's fetch gives up when response headers take over 300 s.
+ * An answer with placeholders instead of content counts as unreadable (retried, never returned).
  */
 export async function chatJSON({ system, user, model = config.ai.model, maxTokens = config.ai.maxTokens, temperature = 0.2, timeoutMs = config.ai.timeoutMs, attempts = 3, stream = false }) {
   if (config.ai.operatorDir) return operatorAnswer({ system, user, model, maxTokens });
   if (!aiEnabled()) throw new Error('NEAR_AI_API_KEY is not set');
-  let lastErr, unreadable = false, budget = maxTokens, switches = 0;
   const ceiling = Math.min(16000, maxTokens * 4);
+  let lastErr, unreadable = false, budget = firstBudget(model, maxTokens, ceiling), switches = 0;
   for (let attempt = 0; attempt < attempts; attempt++) {
     const key = pickKey(config.ai.keys);
     if (!key) { lastErr = new Error(`${lastErr ? lastErr.message + ' · ' : 'NEAR AI: '}every key (${config.ai.keys.length}) is out of credits or refused right now`); break; }
@@ -137,16 +177,25 @@ export async function chatJSON({ system, user, model = config.ai.model, maxToken
       // tokens per UTC day: the Academy's business books them as its AI cost (never fails the call)
       import('../../academy/business.js').then((m) => m.countTokens(j.usage)).catch(() => {});
       const msg = j.choices?.[0]?.message || {};
+      const thinks = thoughtFirst(j.usage, msg.content, msg.reasoning_content);
+      if (thinks) THINKERS.add(model);
       const parsed = extractJson(msg.content) || extractJson(msg.reasoning_content);
       if (!parsed || typeof parsed !== 'object') {
         const finish = j.choices?.[0]?.finish_reason;
         lastErr = new Error(`NEAR AI returned no JSON (finish_reason ${finish}${finish === 'length' ? `, max_tokens ${budget}` : ''})`); unreadable = true;
-        // cut off before the JSON was complete: the same request would be cut off the same way, so the next one gets twice the room
-        if (finish === 'length') budget = Math.min(ceiling, budget * 2);
+        // cut off before the JSON was complete: the same request would be cut off the same way, so the next one gets twice the room, and a model
+        // that spent the room thinking gets the most there is (doubling once was not enough: the thinking grows with the room)
+        if (finish === 'length') budget = thinks ? ceiling : Math.min(ceiling, budget * 2);
+        continue;
+      }
+      const { json: clean, holes } = placeholdersOut(parsed);
+      if (holes.length) {
+        // "reasons": ["..."] is not an answer: it must never reach a verdict, a page or an alert
+        lastErr = new Error(`NEAR AI answered with placeholders instead of content (${holes.slice(0, 3).join(', ')}${holes.length > 3 ? ` and ${holes.length - 3} more` : ''})`); unreadable = true;
         continue;
       }
       aiStatus.ok = true; aiStatus.error = null; aiStatus.checkedTs = Date.now();
-      return { json: parsed, model: j.model || model, usage: j.usage || null };
+      return { json: clean, model: j.model || model, usage: j.usage || null };
     } catch (e) {
       lastErr = e.name === 'AbortError' ? new Error(`NEAR AI timed out after ${timeoutMs / 1000}s`) : e; unreadable = false;
       if (/NEAR AI 4\d\d/.test(lastErr.message) && !/429/.test(lastErr.message)) break; // auth / request errors will not improve on retry

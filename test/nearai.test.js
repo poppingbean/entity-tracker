@@ -95,3 +95,54 @@ test('when every key is out of credits the call fails with the server\'s reason,
     assert.ok(!/key-a-empty|key-b-empty/.test(e.message), 'the keys are redacted');
   } finally { cfg.ai.keys.splice(0, cfg.ai.keys.length, ...saved); }
 });
+
+// ---- answer guards (2026-11-25)
+const { placeholdersOut, thoughtFirst, firstBudget, THINK_ROOM } = await import('../src/ai/tools/nearai.js');
+/** A fake NEAR AI with usage: `answers` are [content, finish_reason, completion_tokens]; records each request's max_tokens. */
+function fakeAiUsage(answers) {
+  const seen = [];
+  globalThis.fetch = async (url, init) => {
+    seen.push(JSON.parse(init.body).max_tokens);
+    const [content, finish, out = 0] = answers[Math.min(seen.length - 1, answers.length - 1)];
+    return new Response(JSON.stringify({ model: 'm', choices: [{ message: { content }, finish_reason: finish }], usage: { prompt_tokens: 100, completion_tokens: out } }), { status: 200 });
+  };
+  return seen;
+}
+
+test('placeholders: a list loses its stand-ins, a field with nothing real left is a hole', () => {
+  assert.deepEqual(placeholdersOut({ how: ['step one', 'step two', '...'], note: '' }), { json: { how: ['step one', 'step two'], note: '' }, holes: [] });
+  assert.deepEqual(placeholdersOut({ verdict: 'hack', reasons: ['...'] }).holes, ['reasons']);
+  assert.deepEqual(placeholdersOut({ summary: '…', a: { b: ['<reason>', '  '] } }).holes, ['summary', 'a.b']);
+  assert.deepEqual(placeholdersOut({ reasons: [], n: 3, ok: true, text: 'The payer is a solver... and it bridged out.' }).holes, [], 'an empty list, numbers and real text with dots are fine');
+  for (const s of ['...', '…', 'TBD', 'N/A', 'todo', '[explanation]', '{x}', '--', '??']) assert.equal(placeholdersOut({ s }).holes.length, 1, s);
+});
+
+test('an answer with placeholders is retried, never returned; stand-in list items are dropped', async () => {
+  aiStatus.ok = true;
+  let seen = fakeAiUsage([['{"verdict": "hack", "confidence": "high", "reasons": ["..."]}', 'stop'], ['{"verdict": "not_hack", "reasons": ["routine withdrawal"]}', 'stop']]);
+  const { json } = await chatJSON({ system: 's', user: 'u', maxTokens: 700, model: 'guard-model' });
+  assert.deepEqual(json, { verdict: 'not_hack', reasons: ['routine withdrawal'] });
+  assert.equal(seen.length, 2);
+  seen = fakeAiUsage([['{"reasons": ["..."]}', 'stop']]);
+  const before = aiStatus.badAnswers;
+  await assert.rejects(chatJSON({ system: 's', user: 'u', maxTokens: 700, attempts: 2, model: 'guard-model' }), /placeholders instead of content \(reasons\)/);
+  assert.equal(aiStatus.badAnswers, before + 1, 'a bad answer, not an outage');
+  assert.equal(aiStatus.ok, true);
+  fakeAiUsage([['{"how_it_worked": ["step 1", "step 2", "..."]}', 'stop']]);
+  assert.deepEqual((await chatJSON({ system: 's', user: 'u', model: 'guard-model' })).json, { how_it_worked: ['step 1', 'step 2'] });
+});
+
+test('a model that thinks first: a cut-off answer goes to the ceiling, and its next call starts with more room', async () => {
+  assert.equal(thoughtFirst({ completion_tokens: 2500 }, '{"verdict": "ok"'), true, 'billed far more than it wrote');
+  assert.equal(thoughtFirst({ completion_tokens: 300 }, '{"verdict": "ok", "reasons": ["a"]}'), false);
+  assert.equal(thoughtFirst({ completion_tokens: 50, completion_tokens_details: { reasoning_tokens: 40 } }, '{}'), true);
+  assert.equal(thoughtFirst({}, '{}', 'let me think'), true);
+  const seen = fakeAiUsage([['{"verdict": "ok", "rea', 'length', 2500], ['{"verdict": "ok"}', 'stop', 3000]]);
+  const { json } = await chatJSON({ system: 's', user: 'u', maxTokens: 2500, attempts: 2, model: 'thinker-model' });
+  assert.deepEqual(json, { verdict: 'ok' });
+  assert.deepEqual(seen, [2500, 10000], 'straight to the ceiling (4x), not 2x');
+  const again = fakeAiUsage([['{"verdict": "ok"}', 'stop', 3000]]);
+  await chatJSON({ system: 's', user: 'u', maxTokens: 2500, model: 'thinker-model' });
+  assert.deepEqual(again, [2500 * THINK_ROOM], 'remembered: it starts with more room');
+  assert.equal(firstBudget('never-seen', 2500, 10000), 2500);
+});
