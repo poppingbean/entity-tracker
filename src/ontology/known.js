@@ -19,6 +19,9 @@ export const KNOWN = {
   'meteor-relayer.near': ['service/relayer', 'Meteor Wallet relayer', 'org:meteor'], 'relay.aurora': ['service/relayer', 'Aurora relayer', 'org:aurora'],
   'relayer.nearmobile.near': ['service/relayer', 'NEAR Mobile relayer'], 'wallet.intear.near': ['service/relayer', 'Intear wallet', 'org:intear'],
   'aurora': ['service/bridge', 'Aurora engine', 'org:aurora'], 'bridge-mng.near': ['service/bridge', 'NEAR Intents 1Click deposits', 'org:near-intents'],
+  // the Omni bridge: busy enough that the "busy, pays many wallets" behaviour called it an exchange, and its token factory (every bridged token,
+  // zec.omft.near, arb-0x….omft.near …, is its sub-account) was read as a smart wallet that money tracers walk through
+  'omni.bridge.near': ['service/bridge', 'Omni Bridge'], 'omft.near': ['service/bridge', 'Omni Bridge token factory'],
   'nearlytrade.near': ['service/launchpad', 'Nearly.trade', 'org:nearlytrade'], 'lock2.nearlytrade.near': ['service/launchpad', 'Nearly.trade locker', 'org:nearlytrade'],
   'launchpad.justhoot.near': ['service/launchpad', 'Justhoot', 'org:justhoot'], 'v2-launchpad.justhoot.near': ['service/launchpad', 'Justhoot v2', 'org:justhoot'],
   'v2-pool-creator.justhoot.near': ['service/launchpad', 'Justhoot pool creator', 'org:justhoot'], 'meme-cooking.near': ['service/launchpad', 'Meme.cooking'],
